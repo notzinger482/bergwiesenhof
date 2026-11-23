@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -270,12 +270,14 @@ function viewBestellung(nr, q, vorlage) {
       const mF = $('[data-f=menge]', tr);
       if (einheitForm(a) === 'kg') {
         const an = num(p.anzahl), g = num(p.g);
+        // vorher automatisch berechnet/geschätzt? (muss VOR dem Entfernen der Klassen gemerkt werden)
+        const warAuto = mF.classList.contains('auto') || mF.classList.contains('schaetz');
         mF.classList.remove('auto', 'schaetz', 'fehlt'); mF.readOnly = false;
         if (an > 0 && g > 0) { mF.value = fmtNum(an * g / 1000, 3); mF.classList.add('auto'); mF.readOnly = true; }
         else if (an > 0 && !(num(p.menge) > 0)) {
           if (num(a.stueckG) > 0) { mF.value = fmtNum(an * a.stueckG / 1000, 3); mF.classList.add('schaetz'); mF.readOnly = true; }
           else { mF.value = ''; mF.classList.add('fehlt'); }
-        } else if (mF.readOnly === false && (mF.classList.contains('auto') || mF.classList.contains('schaetz'))) mF.value = '';
+        } else if (warAuto) mF.value = has(p.menge) ? fmtNum(p.menge, 3) : ''; // Anzahl/g gelöscht → berechneten Wert entfernen
       }
       tr.classList.toggle('hat', qty(S, o, a.name) > 0);
     });
@@ -592,7 +594,7 @@ function tierBestellListe(name) {
 async function teilenDialog(nr) {
   const o = S.bestellungen.find(x => x.nr === nr);
   const zeilen = teilZeilen(S, o);
-  if (!zeilen.length) return meldung('Die Bestellung enthält nichts zum Verschieben.', true);
+  if (!zeilen.length) return meldung(num(o.pakete) > 0 ? 'Nichts zum Verschieben – Genusspakete bleiben immer bei diesem Tier.' : 'Die Bestellung enthält nichts zum Verschieben.', true);
   const fehl = teilFehlmengen(S, o);
   const hatFehl = Object.keys(fehl).length > 0;
   // Ziel: nächstes Tier nach dem jetzigen, sonst Warteliste
@@ -605,13 +607,14 @@ async function teilenDialog(nr) {
     <label class="f" style="margin-bottom:10px">verschieben zu<select class="feld" id="tzziel">${tiereSortiert().filter(t => t.name !== o.tier).map(t => opt(t.name, `${t.name}${t.abhol ? ' – Abholung ' + fmtDate(t.abhol) : ''}`, t.name === zielStd)).join('')}${opt('Warteliste', 'Warteliste', zielStd === 'Warteliste')}</select></label>
     <div class="knopfleiste" style="margin-bottom:8px">${hatFehl ? '<button class="btn klein" data-p="fehl">nur Fehlmenge</button>' : ''}<button class="btn klein" data-p="20">20 %</button><button class="btn klein" data-p="40">40 %</button><button class="btn klein" data-p="50">50 %</button><button class="btn klein" data-p="0">nichts</button></div>
     <table class="tab"><thead><tr><th>Artikel</th><th class="r">bestellt</th><th class="r">verschieben</th><th></th><th class="r">bleibt</th></tr></thead><tbody>
-    ${zeilen.map(r => `<tr data-row="${esc(r.key)}"><td>${esc(r.text)}</td><td class="r">${fmtNum(r.bestellt, 3)}</td><td style="width:110px"><input class="feld zahl tz" inputmode="decimal" data-key="${esc(r.key)}" value="${fmtNum(start[r.key] || 0, 3)}"></td><td class="klein">${esc(r.einheit)}</td><td class="r tzb"></td></tr>`).join('')}
-    </tbody></table><p class="klein">Stück, Beutel, Portionen und Pakete werden auf ganze Zahlen gerundet, kg auf 0,1 kg. Sonderwünsche bleiben bei der ursprünglichen Bestellung.</p>`;
+    ${zeilen.map(r => `<tr data-row="${esc(r.key)}"><td>${esc(r.text)}</td><td class="r">${fmtNum(r.bestellt, 3)}${r.max < r.bestellt ? `<div class="klein">max. ${fmtNum(r.max, 3)}</div>` : ''}${r.sonderRest ? `<div class="klein">${esc(r.sonderRest)}</div>` : ''}</td><td style="width:110px"><input class="feld zahl tz" inputmode="decimal" data-key="${esc(r.key)}" value="${fmtNum(start[r.key] || 0, 3)}"></td><td class="klein">${esc(r.einheit)}</td><td class="r tzb"></td></tr>`).join('')}
+    </tbody></table><p class="klein">${num(o.pakete) > 0 ? `<b>${fmtNum(o.pakete)} ${num(o.pakete) > 1 ? 'Genusspakete bleiben' : 'Genusspaket bleibt'} bei ${esc(o.tier)}</b> – Pakete sind nicht teilbar und haben Vorrang. ` : ''}Stück, Beutel und Portionen werden auf ganze Zahlen gerundet, kg auf 0,1 kg. Sonderwünsche bleiben bei der ursprünglichen Bestellung.</p>`;
   const d = $('#dialog');
   let werte = null, ziel = zielStd;
   const bleibt = () => $$('#dialog tbody tr').forEach(tr => {
     const r = zeilen.find(x => x.key === tr.dataset.row); const inp = $('input', tr);
-    $('.tzb', tr).textContent = fmtNum(r.bestellt - Math.min(r.bestellt, num(inp.value)), 3);
+    const zuViel = num(inp.value) > r.max + 1e-9; inp.classList.toggle('fehlt', zuViel);
+    $('.tzb', tr).textContent = fmtNum(r.bestellt - Math.min(r.max, num(inp.value)), 3);
   });
   const presets = e => {
     const b = e.target.closest('[data-p]'); if (!b) return;

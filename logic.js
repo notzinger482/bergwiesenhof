@@ -138,7 +138,8 @@ const tueten = (S, o) => has(o.tuetenManuell) ? num(o.tuetenManuell) : tuetenAut
 function schaetzpreis(S, o) {
   const st = S.settings;
   let p = num(o.pakete) * (num(st.paketVon) + num(st.paketBis)) / 2 * num(st.preisPaketKg) + num(o.pakVak) * num(st.preisVakPaket);
-  for (const a of S.artikel) if (a.einheit !== 'Stk') p += qty(S, o, a.name) * num(a.preis);
+  // kg-/Beutel-Artikel: kg × €/kg; Stück-Artikel (Nieren, Herz, Zunge, Ochsenschwanz): Anzahl × €/Stk
+  for (const a of S.artikel) p += qty(S, o, a.name) * num(a.preis);
   p += tueten(S, o) * num(st.preisTuete);
   return r2(p);
 }
@@ -172,9 +173,23 @@ function formFehler(S, o) {
     if (!(m > 0) && !(g > 0) && an > 0 && !(num(a.stueckG) > 0))
       f.push(`${a.name}: ${fmtNum(an)} Stück, aber kein Stückgewicht in der Preisliste – bitte g je Stück oder Menge in kg eintragen`);
   }
+  // Sonderwünsche müssen durch die Bestellung gedeckt sein (die Menge gehört auch rechts in die Bestellung)
+  const geprueft = new Set();
   for (const s of (o.sonder || [])) {
     if (!s || !s.art) continue;
-    if (!art(S, s.art)) f.push(`Sonderwunsch: Artikel „${s.art}“ unbekannt`);
+    const a = art(S, s.art);
+    if (!a) { f.push(`Sonderwunsch: Artikel „${s.art}“ unbekannt`); continue; }
+    if (geprueft.has(s.art)) continue;
+    geprueft.add(s.art);
+    const q = qty(S, o, s.art);
+    const eh = a.beutelG > 0 ? 'kg' : a.einheit;
+    if (!(q > 0)) { f.push(`Sonderwunsch ${s.art}: der Artikel ist in der Bestellung nicht eingetragen – bitte die Menge auch rechts bei „${s.art}“ eintragen`); continue; }
+    const sum = specSum(S, o, s.art); // eingetragene Sonderwünsche + „am Stück“
+    if (sum > q + 0.001) {
+      const amSt = o.pos && o.pos[s.art] && o.pos[s.art].amStueck && a.amStueck;
+      f.push(`Sonderwunsch ${s.art}: ${fmtNum(sum, 3)} ${eh} als Sonderfall, bestellt sind aber nur ${fmtNum(q, 3)} ${eh}` +
+        (amSt ? ' („am Stück“ zählt schon die ganze Menge als Sonderfall)' : ''));
+    }
   }
   if (num(o.pakVak) > num(o.pakete)) f.push('Mehr vakuumierte Pakete als Genusspakete');
   return f;
@@ -188,16 +203,29 @@ const nextNr = S => S.bestellungen.reduce((m, o) => Math.max(m, o.nr), 0) + 1;
 // ---------- Bestellung teilen ----------
 // Zeilen, die man verschieben kann: Pakete + jede Position mit Menge. „einheit“ = Eingabeeinheit beim Verschieben.
 function teilZeilen(S, o) {
+  // Genusspakete sind nicht teilbar und bleiben immer beim Tier (Vorrang) – sie werden nie verschoben.
   const z = [];
-  if (num(o.pakete) > 0) z.push({ key: '__pakete', text: 'Genusspakete', bestellt: num(o.pakete), einheit: 'Stk', ganz: true });
   for (const a of S.artikel) {
     const p = o.pos && o.pos[a.name];
-    if (!p || !(qty(S, o, a.name) > 0)) continue;
+    const q = qty(S, o, a.name);
+    if (!p || !(q > 0)) continue;
     const eh = einheitForm(a);
+    // eingetragene Sonderwünsche bleiben bei dieser Bestellung → diese Menge muss hier bleiben
+    const res = (o.sonder || []).filter(s => s && s.art === a.name).reduce((t, s) => t + num(s.menge), 0);
+    let r;
     if (eh === 'kg' && num(p.anzahl) > 0 && !(num(p.menge) > 0)) {
       const g = num(p.g) > 0 ? num(p.g) : 0;
-      z.push({ key: a.name, text: a.name, bestellt: num(p.anzahl), einheit: g ? `× ${fmtNum(g)} g` : 'Stück', ganz: true, feld: 'anzahl' });
-    } else z.push({ key: a.name, text: a.name, bestellt: num(p.menge), einheit: eh, ganz: eh !== 'kg', feld: 'menge' });
+      const jeStk = q / num(p.anzahl);
+      r = { key: a.name, text: a.name, bestellt: num(p.anzahl), einheit: g ? `× ${fmtNum(g)} g` : 'Stück', ganz: true, feld: 'anzahl' };
+      r.max = res > 0 && jeStk > 0 ? Math.max(0, Math.floor((q - res) / jeStk + 1e-9)) : r.bestellt;
+    } else {
+      r = { key: a.name, text: a.name, bestellt: num(p.menge), einheit: eh, ganz: eh !== 'kg', feld: 'menge' };
+      const resEh = eh === 'Btl' ? res * 1000 / a.beutelG : res;
+      r.max = Math.max(0, r.bestellt - resEh);
+      if (r.ganz) r.max = Math.floor(r.max + 1e-9); else r.max = Math.floor(r.max * 10 + 1e-9) / 10;
+    }
+    if (res > 0) r.sonderRest = `${fmtNum(res, 3)} ${a.einheit === 'Stk' ? 'Stk' : 'kg'} Sonderwunsch bleibt`;
+    z.push(r);
   }
   return z;
 }
@@ -207,11 +235,13 @@ function teilFehlmengen(S, o) {
   const out = {};
   if (!t) return out;
   const nen = num(S.settings.nenner) || 16;
+  const ords = ordersOfTier(S, t.name);
+  const pakGes = ords.reduce((s, x) => s + num(x.pakete), 0);
   for (const a of ausbeuteArtikel(S)) {
     const y = yieldArt(S, t, a.name);
-    let cum = 0;
-    for (const x of ordersOfTier(S, t.name)) {
-      cum += qty(S, x, a.name) + (a.inPaket ? num(x.pakete) * y / nen : 0);
+    let cum = a.inPaket ? pakGes * y / nen : 0; // Genusspakete zuerst (Vorrang)
+    for (const x of ords) {
+      cum += qty(S, x, a.name);
       if (x.nr === o.nr) break;
     }
     const ueber = cum - y;
@@ -222,7 +252,7 @@ function teilFehlmengen(S, o) {
 }
 // in Eingabeeinheit umrechnen und sinnvoll runden
 function teilRunden(zeile, wert) {
-  const v = Math.max(0, Math.min(zeile.bestellt, num(wert)));
+  const v = Math.max(0, Math.min(zeile.max !== undefined ? zeile.max : zeile.bestellt, num(wert)));
   return zeile.ganz ? Math.round(v) : Math.round(v * 10) / 10;
 }
 function teilVorschlag(S, o, prozent) {
@@ -233,7 +263,7 @@ function teilVorschlag(S, o, prozent) {
       if (!f[r.key]) { v[r.key] = 0; continue; }
       const q = qty(S, o, r.key);
       const anteil = q > 0 ? f[r.key] / q : 0;
-      v[r.key] = r.ganz ? Math.min(r.bestellt, Math.ceil(r.bestellt * anteil - 1e-9)) : Math.min(r.bestellt, Math.ceil(r.bestellt * anteil * 10 - 1e-9) / 10);
+      v[r.key] = r.ganz ? Math.min(r.max, Math.ceil(r.bestellt * anteil - 1e-9)) : Math.min(r.max, Math.ceil(r.bestellt * anteil * 10 - 1e-9) / 10);
     }
   } else for (const r of z) v[r.key] = teilRunden(r, r.bestellt * prozent / 100);
   return v;
@@ -291,13 +321,21 @@ function mengencheckTier(S, tierName) {
   if (!t) return out;
   const nen = num(S.settings.nenner) || 16;
   const arts = ausbeuteArtikel(S);
-  const cum = {}; arts.forEach(a => cum[a.name] = 0);
-  for (const o of ordersOfTier(S, t.name)) {
+  const ords = ordersOfTier(S, t.name);
+  // Genusspakete haben Vorrang: ihre Anteile werden zuerst vom Tier reserviert,
+  // danach werden die Einzelartikel in Reihenfolge der Bestell-Nr. verteilt.
+  const pakGes = ords.reduce((s, o) => s + num(o.pakete), 0);
+  const cum = {}; arts.forEach(a => cum[a.name] = a.inPaket ? pakGes * yieldArt(S, t, a.name) / nen : 0);
+  let pakCum = 0;
+  for (const o of ords) {
     const fehlt = [];
+    pakCum += num(o.pakete);
+    if (num(o.pakete) > 0 && pakCum > nen + 1e-9) fehlt.push('Genusspakete (mehr als ' + nen + ')');
     for (const a of arts) {
       const y = yieldArt(S, t, a.name);
-      cum[a.name] += qty(S, o, a.name) + (a.inPaket ? num(o.pakete) * y / nen : 0);
-      if (cum[a.name] > y + 0.001) fehlt.push(a.name);
+      const q = qty(S, o, a.name);
+      cum[a.name] += q;
+      if (q > 0 && cum[a.name] > y + 0.001) fehlt.push(a.name);
     }
     out[o.nr] = fehlt.length ? 'reicht nicht: ' + fehlt.join(', ') : 'ok';
   }
@@ -457,15 +495,24 @@ function packplan(S, tierName) {
     else if (!isOrg) kg = Math.max(0, yt - (specT[a.name] || 0));
     return { art: a.name, isOrg, shr, kg };
   });
-  // kumulierter Bedarf je Bestellung
+  // Verbrauch je Bestellung als Abschnitte auf der Mengenachse: erst alle Genusspaket-Anteile
+  // (Vorrang), danach die Einzelartikel – jeweils in Reihenfolge der Bestell-Nr.
   const BIG = 100000;
-  const cum = A.map(() => [0]);
-  ords.forEach((o, k) => {
-    A.forEach((a, i) => {
-      const yt = Math.max(0, qty(S, o, a.art) - (specO[o.nr + '|' + a.art] || 0));
-      cum[i][k + 1] = cum[i][k] + yt + num(o.pakete) * a.shr;
+  const pakGes = ords.reduce((s, o) => s + num(o.pakete), 0);
+  const abschn = A.map(a => {
+    let pk = 0, ez = pakGes * a.shr;
+    return ords.map(o => {
+      const p = num(o.pakete) * a.shr;
+      const e = Math.max(0, qty(S, o, a.art) - (specO[o.nr + '|' + a.art] || 0));
+      const r = [[pk, pk + p], [ez, ez + e]]; pk += p; ez += e; return r;
     });
   });
+  // erste Bestellung (1-basiert), die Ware aus dem Bereich [von, bis) braucht
+  const ersteBestellung = (i, von, bis) => {
+    for (let k = 0; k < ords.length; k++)
+      if (abschn[i][k].some(([s, e]) => e - s > 1e-9 && s < bis - 0.001 && e > von + 0.001)) return k + 1;
+    return BIG;
+  };
   // Teilkisten
   let P = [];
   A.forEach((a, i) => {
@@ -477,10 +524,7 @@ function packplan(S, tierName) {
       let w = stueck, need = BIG;
       if (a.art === HACK && j === nT) w = a.kg - (nT - 1) * stueck;
       if (a.art === HACK) need = 0;
-      else {
-        const thr = (j - 1) * stueck;
-        for (let k = 1; k <= ords.length; k++) if (cum[i][k] > thr + 0.001) { need = k; break; }
-      }
+      else need = ersteBestellung(i, (j - 1) * stueck, j * stueck);
       P.push({ art: a.art, w, need });
     }
   });
@@ -654,21 +698,27 @@ function kommissionierung(S, nr) {
   const o = S.bestellungen.find(x => x.nr === nr);
   if (!o) return null;
   const t = tier(S, o.tier);
-  const vorher = t ? ordersOfTier(S, t.name).filter(x => x.nr < nr) : [];
+  const alle = t ? ordersOfTier(S, t.name) : [];
+  const vorher = alle.filter(x => x.nr < nr);
+  const pakGes = alle.reduce((s, x) => s + num(x.pakete), 0);
+  // Aufteilung der Kisten: zuerst alle Genusspaket-Anteile (Vorrang), dann die Einzelartikel nach Bestell-Nr.
   const rows = S.artikel.map(a => {
     const D = t ? anteilJePaket(S, t, a.name, false) : 0;
     const E = Math.max(0, qty(S, o, a.name) - specSum(S, o, a.name));
     const F = num(o.pakete) * D;
     const G = E + F;
-    const H = vorher.reduce((s, x) => s + qty(S, x, a.name) - specSum(S, x, a.name) + num(x.pakete) * D, 0);
-    return { art: a.name, einheit: a.einheit, anteil: D, einzeln: E, ausPak: F, bedarf: G, vorher: H };
+    const pakVorher = vorher.reduce((s, x) => s + num(x.pakete) * D, 0);
+    const einzVorher = pakGes * D + vorher.reduce((s, x) => s + Math.max(0, qty(S, x, a.name) - specSum(S, x, a.name)), 0);
+    return { art: a.name, einheit: a.einheit, anteil: D, einzeln: E, ausPak: F, bedarf: G, vorher: pakVorher + (einzVorher - pakGes * D),
+      bereiche: [[pakVorher, pakVorher + F], [einzVorher, einzVorher + E]] };
   });
   const picks = [];
   if (t) {
     for (const c of kistenCalc(S, t.name)) {
       const r = rows.find(x => x.art === c.k.art);
       if (!r) continue;
-      const m = Math.max(0, Math.min(c.start + num(c.k.kg), r.vorher + r.bedarf) - Math.max(c.start, r.vorher));
+      const von = c.start, bis = c.start + num(c.k.kg);
+      const m = r.bereiche.reduce((s, [a0, a1]) => s + Math.max(0, Math.min(bis, a1) - Math.max(von, a0)), 0);
       if (m > 0.0001) {
         let verp = '';
         if (c.k.art === HACK) verp = 'vom Hack-Tisch (fertig verpackt)';

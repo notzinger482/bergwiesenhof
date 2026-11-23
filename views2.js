@@ -13,7 +13,7 @@ function docMenge(mp) {
     blocks: [{ type: 'table', head: ['Teilstück', 'Ausbeute ca.', 'einzeln', 'in Paketen', 'gesamt', 'noch frei', 'Auslastung', 'Status'], align: ['', 'r', 'r', 'r', 'r', 'r', 'r', ''], widths: [3, 2, 2, 2, 2, 2, 2, 2.4],
       rows: mp.rows.map(r => [r.art, fmtNum(r.ausbeute, 1), fmtNum(r.einzel, 1), fmtNum(r.ausPak, 1), fmtNum(r.gesamt, 1), fmtNum(r.frei, 1), r.auslastung === null ? '' : fmtNum(r.auslastung * 100, 0) + ' %', r.status]),
       rowClass: mp.rows.map(r => r.status === 'reicht nicht' ? 'rot' : '') },
-      { type: 'text', text: 'Reihenfolge: kleinere Bestell-Nr. zuerst. Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Knochen und Innereien werden nicht geprüft.' }], footer: fussZeile() };
+      { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel nach Bestell-Nr. (kleinere zuerst). Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Knochen und Innereien werden nicht geprüft.' }], footer: fussZeile() };
 }
 function docMetzger(ma) {
   const t = ma.tier, hk = num(S.settings.hackKiste) || 20;
