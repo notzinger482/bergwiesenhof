@@ -323,10 +323,11 @@ function fleischBilanz(S, t, ords) {
     return { einzeln, separat, ausPak, bestellt: einzeln + ausPak, ausbeute: yieldArt(S, t, name) };
   };
   const hack = calc(HACK), gul = calc(GULASCH), braten = calc(BRATEN);
-  const tol = has(S.settings.gulaschToleranz) ? num(S.settings.gulaschToleranz) : 1;
-  const gulStd = gul.bestellt - gul.separat;
-  gul.vorgabe = gulStd > 0.001 ? roundUp(gulStd + tol) : 0;
-  gul.insHack = Math.max(0, gul.ausbeute - gul.vorgabe - gul.separat);
+  // Gulasch bleibt grundsätzlich Gulasch. Nur wenn KEIN Gulasch einzeln bestellt ist und das Hack nicht reicht,
+  // geht Gulasch (Kamm/Hals) ins Hack – so viel wie fehlt; der Paket-Anteil bleibt Gulasch.
+  const hackMehr = Math.max(0, hack.bestellt - hack.ausbeute);
+  gul.insHack = gul.einzeln <= 0.001 && hackMehr > 0.001 ? Math.min(hackMehr, Math.max(0, gul.ausbeute - gul.ausPak)) : 0;
+  gul.vorgabe = Math.max(0, r1(gul.ausbeute - gul.insHack - gul.separat));
   const bugAnteil = has(S.settings.bugAnteilBraten) ? num(S.settings.bugAnteilBraten) : 0.5;
   braten.bugKg = braten.ausbeute * bugAnteil;
   hack.ausbeuteMitGulasch = hack.ausbeute + gul.insHack;
@@ -338,6 +339,7 @@ function fleischBilanz(S, t, ords) {
   bug = Math.min(bug, topf[BRATEN] || 0);
   let keule = (topf[BRATEN] || 0) - bug;
   let hackTopf = (topf[HACK] || 0) + gul.insHack;
+  if (topf[GULASCH] !== undefined) topf[GULASCH] -= gul.insHack;
   let bugInsHack = 0, bugFuerBraten = 0;
   const fehlt = {}, pakUeber = {};
   let pakCum = 0;

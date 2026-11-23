@@ -20,7 +20,8 @@ function docMetzger(ma) {
   const bl = [{ type: 'h', text: 'Gesamtmengen' },
     { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.kistenText ? `(${ma.hack.kistenText})` : ''], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', '']] }];
   if (ma.hack.ueberAusbeute) bl.push({ type: 'text', bold: true, text: 'Mehr Hackfleisch als üblich: zuerst Schulterstücke (Bug) auflösen, Keulenstücke als Braten behalten.' });
-  bl.push({ type: 'text', text: 'Nicht bestelltes Gulasch (Kamm/Hals) ist im Hackfleisch enthalten. Hesse wie immer als Beinscheiben. Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
+  if (ma.gulasch.insHack > 0.05) bl.push({ type: 'text', text: `Kein Gulasch bestellt: ca. ${fmtNum(ma.gulasch.insHack, 0)} kg Kamm/Hals ins Hackfleisch.` });
+  bl.push({ type: 'text', text: 'Hesse wie immer als Beinscheiben. Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
     { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit Namen beschriften' },
     { type: 'table', head: ['Nr.', 'Name', 'Artikel', 'Menge', 'Hinweis'], widths: [1, 3.2, 3, 1.6, 3.6], align: ['r', '', '', 'r', ''], rows: ma.separat.map(s => [s.nr, s.name, s.art, s.menge, s.hinweis]), leer: '– keine –' });
   return { title: `Auftrag Metzger – ${t.name}`, sub: [abholTxt(t)], blocks: bl, footer: fussZeile() };
