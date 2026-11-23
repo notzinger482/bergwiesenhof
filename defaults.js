@@ -34,7 +34,7 @@ const DEFAULTS = {
    "amStueck": true,
    "beutelG": 0,
    "anteil": 0.064,
-   "teile": "Kamm/Hals, Hesse",
+   "teile": "Kamm/Hals",
    "anteilRind": 0.064
   },
   {

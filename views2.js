@@ -16,14 +16,14 @@ function docMenge(mp) {
       { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel nach Bestell-Nr. (kleinere zuerst). Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Knochen und Innereien werden nicht geprüft.' }], footer: fussZeile() };
 }
 function docMetzger(ma) {
-  const t = ma.tier, hk = num(S.settings.hackKiste) || 20;
-  return { title: `Auftrag Metzger – ${t.name}`, sub: [abholTxt(t)],
-    blocks: [{ type: 'h', text: 'Gesamtmengen' },
-      { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.vorgabe > 0 ? `(${ma.hack.kisten} ${ma.hack.kisten === 1 ? 'Kiste' : 'Kisten'} à ${fmtNum(hk)} kg)` : ''], ['Gulasch', `${fmtNum(ma.gulasch.vorgabe)} kg`, '']] },
-      { type: 'text', text: 'Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
-      { type: 'h', text: 'Separat vorbereiten – bitte mit Namen beschriften' },
-      { type: 'table', head: ['Nr.', 'Name', 'Artikel', 'Menge', 'Hinweis'], widths: [1, 3.2, 3, 1.6, 3.6], align: ['r', '', '', 'r', ''], rows: ma.separat.map(s => [s.nr, s.name, s.art, s.menge, s.hinweis]) }],
-    footer: fussZeile() };
+  const t = ma.tier;
+  const bl = [{ type: 'h', text: 'Gesamtmengen' },
+    { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.kistenText ? `(${ma.hack.kistenText})` : ''], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', '']] }];
+  if (ma.hack.ueberAusbeute) bl.push({ type: 'text', bold: true, text: 'Mehr Hackfleisch als üblich: zuerst Schulterstücke (Bug) auflösen, Keulenstücke als Braten behalten.' });
+  bl.push({ type: 'text', text: 'Nicht bestelltes Gulasch (Kamm/Hals) ist im Hackfleisch enthalten. Hesse wie immer als Beinscheiben. Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
+    { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit Namen beschriften' },
+    { type: 'table', head: ['Nr.', 'Name', 'Artikel', 'Menge', 'Hinweis'], widths: [1, 3.2, 3, 1.6, 3.6], align: ['r', '', '', 'r', ''], rows: ma.separat.map(s => [s.nr, s.name, s.art, s.menge, s.hinweis]), leer: '– keine –' });
+  return { title: `Auftrag Metzger – ${t.name}`, sub: [abholTxt(t)], blocks: bl, footer: fussZeile() };
 }
 function docPackplan(pp, t) {
   return { title: `Packplan & Ladeplan – ${pp.tier}`, sub: [t ? abholTxt(t) : '', `erstellt ${new Date(pp.erstellt).toLocaleString('de-DE')} · ${pp.kisten.length} Kisten · Platz im Auto: ${pp.cap}`],
@@ -98,23 +98,7 @@ function viewSchlachttag(tab, q) {
 }
 
 function tabMetzger(tn, ziel, zeige) {
-  const ma = metzgerauftrag(S, tn);
-  const zeile = (l, h, g) => `<tr><td>${l}</td><td class="r">${h}</td><td class="r">${g}</td></tr>`;
-  const vor = `<div class="karte" style="max-width:720px"><h3 style="margin-top:0">Berechnung (${ma.anzahl} Bestellungen, ${fmtNum(ma.pakete)} Genusspakete)</h3>
-    <table class="tab"><thead><tr><th></th><th class="r">Hackfleisch (kg)</th><th class="r">Gulasch (kg)</th></tr></thead><tbody>
-    ${zeile('einzeln bestellt', fmtNum(ma.hack.einzeln, 2), fmtNum(ma.gulasch.einzeln, 2))}
-    ${zeile('davon separat (Sonderfall / am Stück)', fmtNum(ma.hack.separat, 2), fmtNum(ma.gulasch.separat, 2))}
-    ${zeile('+ aus Genusspaketen', fmtNum(ma.hack.ausPak, 2), fmtNum(ma.gulasch.ausPak, 2))}
-    ${zeile('<b>Vorschlag (aufgerundet)</b>', '<b>' + fmtNum(ma.hack.vorschlag) + '</b>', '<b>' + fmtNum(ma.gulasch.vorschlag) + '</b>')}
-    <tr><td>Vorgabe manuell (überschreibt, leer = Vorschlag)</td><td class="r"><input class="feld zahl" style="width:110px" inputmode="decimal" data-ch="man" data-f="hack" value="${ma.hack.manuell !== null ? fmtNum(ma.hack.manuell, 1) : ''}"></td><td class="r"><input class="feld zahl" style="width:110px" inputmode="decimal" data-ch="man" data-f="gulasch" value="${ma.gulasch.manuell !== null ? fmtNum(ma.gulasch.manuell, 1) : ''}"></td></tr>
-    ${zeile('Hack-Kisten à ' + fmtNum(S.settings.hackKiste) + ' kg', ma.hack.kisten + ` <span class="klein">(volle Kisten = ${fmtNum(ma.hack.vollKisten)} kg)</span>`, '')}
-    </tbody></table><div class="klein" style="margin-top:6px">Volle Kisten gewünscht? Diese Zahl bei „Vorgabe manuell“ eintragen.</div></div>`;
-  zeige(docMetzger(ma), '', vor);
-  ui.acts.man = el => {
-    const m = S.metzgerManuell[tn] = S.metzgerManuell[tn] || {};
-    m[el.dataset.f] = el.value.trim() === '' ? null : num(el.value);
-    speichern(); render();
-  };
+  zeige(docMetzger(metzgerauftrag(S, tn)));
 }
 
 // =====================================================================

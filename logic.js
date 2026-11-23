@@ -429,18 +429,24 @@ function metzgerauftrag(S, tierName) {
     const einzeln = ords.reduce((s, o) => s + qty(S, o, name), 0);
     const separat = ords.reduce((s, o) => s + specSum(S, o, name), 0);
     const ausPak = a && a.inPaket ? pak * yieldArt(S, t, name) / nen : 0;
-    const vorschlag = roundUp(einzeln - separat + ausPak);
-    return { einzeln, separat, standard: einzeln - separat, ausPak, vorschlag };
+    return { einzeln, separat, ausPak, bestellt: einzeln + ausPak, ausbeute: yieldArt(S, t, name) };
   };
-  const man = S.metzgerManuell[t.name] || {};
   const hack = calc(HACK), gul = calc(GULASCH);
-  hack.manuell = has(man.hack) ? num(man.hack) : null;
-  gul.manuell = has(man.gulasch) ? num(man.gulasch) : null;
-  hack.vorgabe = hack.manuell !== null ? hack.manuell : hack.vorschlag;
-  gul.vorgabe = gul.manuell !== null ? gul.manuell : gul.vorschlag;
+  // Hackfleisch: rechnerische Ausbeute des Tiers – oder mehr, wenn mehr bestellt ist.
+  // Separat vorbereitetes Hack (z. B. besonders mager) steht unten bei den Sonderfällen und geht hier ab.
+  // Gulasch: nur was bestellt ist (ohne Sonderfälle/„am Stück“) + Toleranz
+  const tol = has(S.settings.gulaschToleranz) ? num(S.settings.gulaschToleranz) : 1;
+  const gulStd = gul.bestellt - gul.separat;
+  gul.vorgabe = gulStd > 0.001 ? roundUp(gulStd + tol) : 0;
+  // nicht bestelltes Gulasch-Fleisch (Kamm/Hals) geht ins Hackfleisch
+  gul.insHack = Math.max(0, gul.ausbeute - gul.vorgabe - gul.separat);
+  hack.ausbeuteMitGulasch = hack.ausbeute + gul.insHack;
+  hack.ueberAusbeute = hack.bestellt > hack.ausbeuteMitGulasch + 0.001;
+  hack.vorgabe = Math.max(0, roundUp(Math.max(hack.ausbeuteMitGulasch, hack.bestellt) - hack.separat));
   const hk = num(S.settings.hackKiste) || 20;
   hack.kisten = hack.vorgabe > 0 ? roundUp(hack.vorgabe / hk) : 0;
-  hack.vollKisten = hack.kisten * hk;
+  const voll = Math.floor((hack.vorgabe + 1e-9) / hk), rest = r1(hack.vorgabe - voll * hk);
+  hack.kistenText = !hack.vorgabe ? '' : (voll ? `${voll} × ${fmtNum(hk)} kg` : '') + (rest > 0 ? `${voll ? ' + ' : ''}1 × ${fmtNum(rest)} kg` : '');
   const separat = [];
   for (const o of ords) for (const s of sonderOf(S, o)) {
     const a = art(S, s.art);
@@ -857,6 +863,8 @@ function standPruefen(x) {
   (x.auto || []).forEach(f => { if (f.spaeter === undefined) f.spaeter = /^hinten/i.test(f.name || ''); });
   // Version 1.3: eigene Rind-Anteile, Standard-SG Rind 300 kg
   (x.artikel || []).forEach(a => { if (a.anteilRind === undefined) a.anteilRind = num(a.anteil); });
+  // Version 1.5.2: Hesse wird immer Beinscheibe, nicht Gulasch
+  (x.artikel || []).forEach(a => { if (a.name === GULASCH && a.teile === 'Kamm/Hals, Hesse') a.teile = 'Kamm/Hals'; });
   if (x.settings.rindWieBulle === undefined) x.settings.rindWieBulle = true;
   if (!(altSchema >= 3)) { if (num(x.settings.sgRind) === 320) x.settings.sgRind = 300; x.schema = 3; }
   return x;
