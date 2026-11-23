@@ -600,7 +600,7 @@ function packplanUebernehmen(S, pp) {
   let id = S.kisten.reduce((m, k) => Math.max(m, k.id || 0), 0);
   for (const k of pp.kisten) {
     if (k.nr > 29) break;
-    k.items.slice(0, 3).forEach(it => S.kisten.push({ id: ++id, tier: pp.tier, nr: k.nr, art: it.art, kg: it.kg, plan: it.kg, platz: k.platzKurz }));
+    k.items.slice(0, 3).forEach(it => S.kisten.push({ id: ++id, tier: pp.tier, nr: k.nr, art: it.art, kg: it.kg, plan: it.kg, platz: k.platzKurz, gewogen: false }));
   }
 }
 

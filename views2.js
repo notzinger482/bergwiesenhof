@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 2: Schlachttag, Kommissionieren, Hofladen, Einstellungen, Start)
 'use strict';
 
-const REITER = [['menge', 'Mengenprüfung'], ['metzger', 'Metzgerauftrag'], ['packplan', 'Packplan'], ['kisten', 'Kisten'], ['hack', 'Hack-Zettel'], ['innereien', 'Innereien'], ['packliste', 'Packliste Kühlhaus']];
+const REITER = [['menge', 'Mengenprüfung'], ['metzger', 'Metzgerauftrag'], ['kisten', 'Kisten & Ladeplan'], ['hack', 'Hack-Zettel'], ['innereien', 'Innereien'], ['packliste', 'Packliste Kühlhaus']];
 const abholTxt = t => t.abhol ? 'Abholung ' + fmtDate(t.abhol) : 'Abholtermin noch offen';
 const fussZeile = () => S.settings.hofZeile || '';
 const knopfTeilen = (extra = '') => `<div class="knopfleiste" style="margin:10px 0">${extra}<button class="btn haupt" data-act="teilen">Als Bild teilen (WhatsApp)</button><button class="btn" data-act="drucken">Drucken</button></div>`;
@@ -80,7 +80,7 @@ function viewSchlachttag(tab, q) {
   if (!S.tiere.length) { inhalt().innerHTML = '<h1>Schlachttag</h1><div class="karte">Noch keine Tiere angelegt. <a href="#/tier/neu">Tier anlegen</a></div>'; return; }
   let h = `<div class="zeile" style="margin-bottom:12px"><h1 class="platz" style="margin:0">Schlachttag</h1>
     <label class="f" style="min-width:320px">Tier<select class="feld" data-ch="tierwahl">${tiereSortiert().map(t => opt(t.name, `${t.name} – ${abholTxt(t)}`, t.name === tn)).join('')}</select></label></div>
-    <div class="reiter">${REITER.map(([k, t]) => `<a href="#/schlachttag/${k}" class="${k === tab ? 'aktiv' : ''}">${t}</a>`).join('')}</div><div id="tabinhalt"></div>`;
+    <div class="reiter">${REITER.map(([k, t]) => `<a href="#/schlachttag/${k}" class="${k === tab || (k === 'kisten' && tab === 'packplan') ? 'aktiv' : ''}">${t}</a>`).join('')}</div><div id="tabinhalt"></div>`;
   inhalt().innerHTML = h;
   ui.acts.tierwahl = el => { ui.tierWahl = el.value; render(); };
   const ziel = $('#tabinhalt');
@@ -91,8 +91,7 @@ function viewSchlachttag(tab, q) {
   };
   if (tab === 'menge') zeige(docMenge(mengenpruefung(S, tn)));
   else if (tab === 'metzger') tabMetzger(tn, ziel, zeige);
-  else if (tab === 'packplan') tabPackplan(tn, ziel, zeige);
-  else if (tab === 'kisten') tabKisten(tn, ziel);
+  else if (tab === 'kisten' || tab === 'packplan') tabKisten(tn, ziel);
   else if (tab === 'hack') zeige(docHack(hackZettel(S, tn)));
   else if (tab === 'innereien') zeige(docInnereien(innereien(S, tn)));
   else if (tab === 'packliste') tabPackliste(tn, ziel);
@@ -118,68 +117,93 @@ function tabMetzger(tn, ziel, zeige) {
   };
 }
 
-function tabPackplan(tn, ziel, zeige) {
-  const pp = S.packplaene[tn];
-  const t = tier(S, tn);
-  const knoepfe = `<button class="btn braun" data-act="erstellen">${pp ? 'Packplan neu berechnen' : 'Packplan erstellen'}</button>${pp ? '<button class="btn" data-act="uebernehmen">In „Kisten“ übernehmen</button>' : ''}`;
-  if (!pp) {
-    ziel.innerHTML = `<div class="karte"><p>Für <b>${esc(tn)}</b> gibt es noch keinen Packplan.</p><p class="klein">Der Packplan rechnet aus, welche Stücke in welche Metzgerkiste kommen (max. ${fmtNum(S.settings.kisteMax)} kg, nur Rostbraten + Steak und Filet + Braten + Tafelspitz gemischt), wo jede Kiste im Auto steht und in welcher Reihenfolge eingeladen wird. Hackfleisch steht immer auf „${esc(S.settings.hackPlatz || 'vorne rechts')}“, die übrigen Kisten werden von der Tür hinten aus entnommen.</p><div class="knopfleiste">${knoepfe}</div></div>`;
-  } else {
-    const draufsicht = autoDraufsicht(pp);
-    zeige(docPackplan(pp, t), knoepfe, draufsicht);
-  }
-  ui.acts.erstellen = () => {
-    const neu = packplan(S, tn);
-    if (neu.fehler) return meldung(neu.fehler, true);
-    S.packplaene[tn] = neu; speichern(); render();
-    if (neu.warn.length) dialog('Hinweis zum Packplan', neu.warn.map(w => `<p class="warn">${esc(w)}</p>`).join(''));
-  };
-  ui.acts.uebernehmen = async () => {
-    const vorh = S.kisten.filter(k => k.tier === tn).length;
-    const andere = kistenTiere(S).filter(x => x !== tn);
-    let txt = `Packplan für ${esc(tn)}: ${pp.kisten.length} Kisten (Platz im Auto: ${pp.cap}).<br><br>Vorschlag ins Kisten-Blatt eintragen?${vorh ? ' <b>Die bisherigen Kisten dieses Tiers werden überschrieben.</b>' : ''}<br>Die kg sind Schätzwerte – nach dem Wiegen bitte die echten Gewichte eintragen.`;
-    if (andere.length >= 2) txt += `<br><br><span class="warn">Achtung: Es sind schon Kisten für ${andere.map(esc).join(' und ')} eingetragen (max. zwei Tiere gleichzeitig).</span>`;
-    if (!(await frage('In Kisten übernehmen', txt, 'Übernehmen'))) return;
-    packplanUebernehmen(S, pp); speichern(); meldung('Kisten eingetragen.'); gehe('#/schlachttag/kisten');
-  };
+// =====================================================================
+//  Kisten & Ladeplan (Packplan und Kistenliste in einem)
+// =====================================================================
+const istGewogen = k => !!k.gewogen || (has(k.plan) && has(k.kg) && Math.abs(num(k.kg) - num(k.plan)) > 0.001);
+// Draufsicht aus der aktuellen Kistenliste (Stellplatz-Text „hinten links, oben“ / „Mitte rechts, 2. v. u.“)
+function felderAusKisten(tn) {
+  const rows = kistenRows(S, tn);
+  return S.auto.map(f => {
+    const ks = {};
+    rows.filter(k => sameText(String(k.platz || '').split(',')[0], f.name)).forEach(k => {
+      const e = /oben/.test(k.platz) ? 99 : num((/(\d+)\./.exec(k.platz) || [])[1]);
+      const x = ks[k.nr] = ks[k.nr] || { nr: k.nr, ebene: e, teile: [], gewogen: true };
+      x.teile.push(`${k.art} ${fmtNum(k.kg, 1)}`); if (!istGewogen(k)) x.gewogen = false;
+    });
+    const liste = Object.values(ks).sort((a, b) => b.ebene - a.ebene);
+    return { name: f.name, belegt: liste.length, hoehe: num(f.hoehe), kisten: liste.map((k, i) => ({ nr: k.nr, text: k.teile.join(' + '), oben: i === 0, gewogen: k.gewogen })) };
+  });
 }
-function autoDraufsicht(pp) {
+function autoDraufsicht(felderIn, kompakt) {
   const pos = name => {
     const n = name.toLowerCase();
     const reihe = n.includes('vorne') ? 1 : n.includes('mitte') && !n.startsWith('hinten') ? 2 : n.includes('hinten') ? 3 : 0;
     const sp = n.includes('links') ? 1 : n.includes('rechts') ? 3 : 2;
     return { reihe, sp };
   };
-  const felder = pp.felder.map(f => ({ ...f, p: pos(f.name) }));
-  const zelle = f => `<div class="auto-feld ${f.kisten.length ? '' : 'leer'}" style="grid-row:${f.p.reihe + 1};grid-column:${f.p.reihe === 3 ? (f.p.sp === 1 ? '1 / span 3' : '4 / span 3') : (f.p.sp - 1) * 2 + 1 + ' / span 2'}"><div class="fn">${esc(f.name)} (${f.belegt}/${f.hoehe})</div>${f.kisten.map(k => `<div>${k.oben ? '<b>oben:</b> ' : ''}K${k.nr} ${esc(k.text)}</div>`).join('')}</div>`;
+  const hp = S.settings.hackPlatz || 'vorne rechts';
+  const felder = felderIn.map(f => ({ ...f, p: pos(f.name) }));
+  const zelle = f => `<div class="auto-feld ${f.kisten.length ? '' : 'leer'}" style="grid-row:${f.p.reihe + 1};grid-column:${f.p.reihe === 3 ? (f.p.sp === 1 ? '1 / span 3' : '4 / span 3') : (f.p.sp - 1) * 2 + 1 + ' / span 2'}"><div class="fn">${esc(f.name)} <span class="klein">${f.belegt}/${f.hoehe}${sameText(f.name, hp) ? ' · Hack' : ''}</span></div>${f.kisten.map(k => `<div class="ak${k.gewogen ? ' gw' : ''}"><b>K${k.nr}</b> ${esc(k.text)}</div>`).join('')}</div>`;
   if (felder.some(f => !f.p.reihe)) return `<div class="karte"><h3 style="margin-top:0">Stellplätze</h3>${felder.map(f => `<div><b>${esc(f.name)}</b>: ${f.kisten.map(k => 'K' + k.nr).join(', ')}</div>`).join('')}</div>`;
-  return `<div class="karte"><h3 style="margin-top:0">Draufsicht Auto (oben = vorne)</h3><div class="zeile oben"><div class="auto-grid" style="grid-template-columns:repeat(6,1fr);flex:1">
+  return `<div class="karte ${kompakt ? 'kompakt' : ''}"><h3 style="margin-top:0">Draufsicht Auto <span class="klein">(oben = vorne, je Feld oberste Kiste zuerst)</span></h3><div class="zeile oben" style="flex-wrap:nowrap"><div class="auto-grid" style="grid-template-columns:repeat(6,1fr);flex:1;max-width:none">
     <div class="auto-tuer" style="grid-row:1;grid-column:1 / -1">— Fahrerhaus / vorne —</div>${felder.map(zelle).join('')}
     <div class="auto-tuer" style="grid-row:5;grid-column:1 / -1">— Tür hinten —</div></div><div class="klein" style="writing-mode:vertical-rl;align-self:center">rechte Tür ▸</div></div></div>`;
 }
 
 function tabKisten(tn, ziel) {
+  const pp = S.packplaene[tn];
+  const t = tier(S, tn);
   const calc = kistenCalc(S, tn);
-  const tiereMitKisten = kistenTiere(S);
-  const artOpt = sel => S.artikel.filter(a => !istOrgan(a.name)).map(a => opt(a.name, a.name, a.name === sel)).join('') + opt('Sonderfälle (beschriftet)', 'Sonderfälle (beschriftet)', sel === 'Sonderfälle (beschriftet)');
-  ziel.innerHTML = `${tiereMitKisten.length > 2 ? `<div class="hinweis">Es sind Kisten für ${tiereMitKisten.length} Tiere eingetragen (${tiereMitKisten.map(esc).join(', ')}). Fertige Tiere bitte abschließen.</div>` : ''}
-    <div class="klein" style="margin-bottom:8px">Nach dem Wiegen beim Metzger die echten kg eintragen. „Rest“ = was nach allen Bestellungen in der Kiste übrig bleibt.</div>
-    <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Kiste</th><th>Inhalt</th><th class="r">kg gewogen</th><th class="r">Plan</th><th>Stellplatz</th><th class="r">Bedarf</th><th class="r">verplant</th><th class="r">Rest</th><th></th></tr></thead><tbody>
-    ${calc.map(c => `<tr data-id="${c.k.id}"><td style="width:84px"><input class="feld zahl" inputmode="numeric" data-ch="kf" data-f="nr" value="${c.k.nr}"></td>
-      <td><select class="feld" data-ch="kf" data-f="art">${artOpt(c.k.art)}</select></td>
-      <td style="width:110px"><input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="kg" value="${has(c.k.kg) ? fmtNum(c.k.kg, 2) : ''}"></td>
-      <td class="r klein">${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}</td>
-      <td><input class="feld" data-ch="kf" data-f="platz" value="${esc(c.k.platz || '')}"></td>
-      <td class="r">${fmtNum(c.bedarf, 1)}</td><td class="r">${fmtNum(c.verplant, 1)}</td><td class="r fett">${fmtNum(c.rest, 1)}</td>
-      <td><button class="btn klein rot" data-act="kweg" data-id="${c.k.id}">✕</button></td></tr>`).join('') || '<tr><td colspan="9" class="klein">Keine Kisten eingetragen. Am einfachsten über „Packplan“ → „In Kisten übernehmen“.</td></tr>'}
-    </tbody></table></div>
-    <div class="knopfleiste" style="margin-top:12px"><button class="btn" data-act="kneu">+ Kistenzeile</button><button class="btn haupt" data-act="teilen">Als Bild teilen</button><button class="btn" data-act="drucken">Drucken</button>
-    ${calc.length ? '<button class="btn braun" data-act="abschluss">Tier abgeschlossen – Reste an Hofladen, Kisten leeren</button>' : ''}</div>`;
+  const gewogen = calc.filter(c => istGewogen(c.k)).length;
+  const andere = kistenTiere(S).filter(x => x !== tn);
+  if (!calc.length) {
+    ziel.innerHTML = `<div class="karte" style="max-width:820px"><h3 style="margin-top:0">Noch kein Plan für ${esc(tn)}</h3>
+      <p>„Plan erstellen“ rechnet aus, welche Stücke in welche Metzgerkiste kommen (max. ${fmtNum(S.settings.kisteMax)} kg; gemischt nur Rostbraten + Steak bzw. Filet + Braten + Tafelspitz), wo jede Kiste im Auto steht und in welcher Reihenfolge beim Metzger eingeladen wird. Hackfleisch steht immer auf „${esc(S.settings.hackPlatz || 'vorne rechts')}“.</p>
+      <p class="klein">Die Kisten werden gleich mit geschätzten kg angelegt. Beim Metzger trägst du dann die gewogenen kg ein.</p>
+      ${andere.length >= 2 ? `<p class="warn">Es sind schon Kisten für ${andere.map(esc).join(' und ')} eingetragen (max. zwei Tiere gleichzeitig) – fertige Tiere bitte vorher abschließen.</p>` : ''}
+      <div class="knopfleiste"><button class="btn braun" data-act="planen" style="min-height:56px;font-size:18px">Plan erstellen</button></div></div>`;
+  } else {
+    ziel.innerHTML = `<div class="knopfleiste" style="margin-bottom:10px">
+        <button class="btn braun" data-act="planen">Plan neu berechnen</button>
+        <button class="btn haupt" data-act="teilenPlan">Ladeplan teilen (Metzger)</button>
+        <button class="btn" data-act="teilenKisten">Kistenliste teilen</button>
+        <button class="btn" data-act="drucken">Drucken</button>
+        <span class="platz"></span>
+        <span class="marke ${gewogen === calc.length ? 'gruen' : gewogen ? 'gelb' : ''}" style="align-self:center;font-size:14px;padding:6px 12px">${gewogen} von ${calc.length} gewogen</span></div>
+      ${pp && pp.warn.length ? pp.warn.map(w => `<div class="hinweis" style="padding:6px 12px;margin-bottom:8px">${esc(w)}</div>`).join('') : ''}
+      <div class="kistenlayout">
+        <div>${autoDraufsicht(felderAusKisten(tn), true)}
+          ${pp ? `<details class="karte"><summary class="fett">Einladereihenfolge beim Metzger</summary><ol class="klein" style="padding-left:20px;margin:8px 0 0">${pp.einladen.map(e => `<li>${esc(e.replace(/^\d+\.\s*/, ''))}</li>`).join('')}</ol></details>` : ''}</div>
+        <div class="karte" style="padding:0">
+          <div class="tabwrap" style="border:none"><table class="tab ktab"><thead><tr><th class="r">Kiste</th><th>Inhalt</th><th class="r">Plan</th><th class="r">gewogen kg</th><th>Stellplatz</th><th class="r">Rest</th><th></th></tr></thead><tbody>
+          ${calc.map(c => { const gw = istGewogen(c.k); return `<tr data-id="${c.k.id}" class="${gw ? 'gw' : ''}">
+            <td style="width:58px"><input class="feld zahl" inputmode="numeric" data-ch="kf" data-f="nr" value="${c.k.nr}"></td>
+            <td><select class="feld" data-ch="kf" data-f="art">${kistenArtOpt(c.k.art)}</select>${c.teile ? `<div class="klein teile">${esc(c.teile)}</div>` : ''}</td>
+            <td class="r klein">${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}</td>
+            <td style="width:96px"><input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="kg" value="${gw ? fmtNum(c.k.kg, 2) : ''}" placeholder="${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}"></td>
+            <td style="width:150px"><input class="feld klein" data-ch="kf" data-f="platz" value="${esc(c.k.platz || '')}"></td>
+            <td class="r fett">${fmtNum(c.rest, 1)}</td>
+            <td style="width:44px"><button class="btn klein rot" data-act="kweg" data-id="${c.k.id}">✕</button></td></tr>`; }).join('')}
+          </tbody></table></div>
+          <div class="knopfleiste" style="padding:10px 12px"><button class="btn klein" data-act="kneu">+ Kistenzeile</button><span class="platz"></span><button class="btn braun klein" data-act="abschluss">Tier abgeschlossen → Reste an Hofladen</button></div>
+        </div>
+      </div>
+      <p class="klein">Grün = gewogen. Leeres Feld bei „gewogen“ = es wird mit dem Planwert gerechnet. „Rest“ = was nach allen Bestellungen in der Kiste übrig bleibt.</p>`;
+  }
+  ui.acts.planen = async () => {
+    const neu = packplan(S, tn);
+    if (neu.fehler) return meldung(neu.fehler, true);
+    if (gewogen && !(await frage('Plan neu berechnen', `<b>${gewogen} Kistenzeilen sind schon gewogen.</b> Beim Neuberechnen werden alle Kisten von ${esc(tn)} durch den neuen Plan ersetzt und die gewogenen kg gehen verloren.`, 'Trotzdem neu berechnen', 'Abbrechen', 'rot'))) return;
+    S.packplaene[tn] = neu; packplanUebernehmen(S, neu); speichern(); render();
+    meldung(`Plan erstellt: ${neu.kisten.length} Kisten.`);
+    if (neu.warn.length) dialog('Hinweis zum Plan', neu.warn.map(w => `<p class="warn">${esc(w)}</p>`).join(''));
+  };
   const find = id => S.kisten.find(k => k.id === +id);
   ui.acts.kf = el => {
     const k = find(el.closest('tr').dataset.id); const f = el.dataset.f;
     if (f === 'nr') { const n = Math.round(num(el.value)); if (n < 1 || n > 29) { meldung('Kistennummer 1 bis 29', true); render(); return; } k.nr = n; }
-    else if (f === 'kg') k.kg = el.value.trim() === '' ? null : num(el.value);
+    else if (f === 'kg') { if (el.value.trim() === '') { k.kg = has(k.plan) ? k.plan : null; k.gewogen = false; } else { k.kg = num(el.value); k.gewogen = true; } }
     else k[f] = el.value;
     speichern(); render();
   };
@@ -187,17 +211,21 @@ function tabKisten(tn, ziel) {
   ui.acts.kneu = () => {
     const id = S.kisten.reduce((m, k) => Math.max(m, k.id || 0), 0) + 1;
     const nr = Math.min(29, calc.reduce((m, c) => Math.max(m, c.k.nr), 0) + 1);
-    S.kisten.push({ id, tier: tn, nr, art: 'Braten', kg: null, plan: null, platz: '' }); speichern(); render();
+    S.kisten.push({ id, tier: tn, nr, art: 'Braten', kg: null, plan: null, platz: '', gewogen: false }); speichern(); render();
   };
-  ui.acts.teilen = async () => { const d = docKisten(tn, calc); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
-  ui.acts.drucken = () => docDrucken(docKisten(tn, calc));
+  const teilen = async d => { const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
+  ui.acts.teilenPlan = () => pp ? teilen(docPackplan(pp, t)) : meldung('Bitte zuerst „Plan neu berechnen“.', true);
+  ui.acts.teilenKisten = () => teilen(docKisten(tn, kistenCalc(S, tn)));
+  ui.acts.drucken = () => docDrucken(pp ? [docPackplan(pp, t), docKisten(tn, kistenCalc(S, tn))] : docKisten(tn, kistenCalc(S, tn)));
   ui.acts.abschluss = async () => {
-    const reste = calc.filter(c => c.rest > 0.0001);
-    if (!(await frage('Tier abschließen', `${calc.length} Kistenzeilen von <b>${esc(tn)}</b> abschließen?<br>${reste.length} Reste gehen an den Hofladen, danach werden die Kisten geleert.`, 'Abschließen'))) return;
-    const n = tierAbschliessen(S, tn); speichern();
+    const reste = calc.filter(c => c.rest > 0.0001 && c.k.art !== 'Sonderfälle (beschriftet)');
+    const offen = ordersOfTier(S, tn).filter(o => (o.status || 'offen') === 'offen').length;
+    if (!(await frage('Tier abschließen', `${calc.length} Kistenzeilen von <b>${esc(tn)}</b> abschließen?<br>${reste.length} Reste gehen an den Hofladen, danach werden die Kisten geleert.${offen ? `<br><span class="warn">${offen} Bestellung(en) sind noch nicht gepackt.</span>` : ''}`, 'Abschließen'))) return;
+    const n = tierAbschliessen(S, tn); delete S.packplaene[tn]; speichern();
     meldung(`${tn} abgeschlossen: ${n} Reste ins Hofladen-Blatt übernommen, Kisten geleert.`); render();
   };
 }
+const kistenArtOpt = sel => S.artikel.filter(a => !istOrgan(a.name)).map(a => opt(a.name, a.name, a.name === sel)).join('') + opt('Sonderfälle (beschriftet)', 'Sonderfälle (beschriftet)', sel === 'Sonderfälle (beschriftet)');
 
 function tabPackliste(tn, ziel) {
   const pl = packliste(S, tn);
@@ -241,7 +269,7 @@ function viewKommissionierung(q) {
       <button class="btn" data-act="vor" data-d="-1" ${idx <= 0 ? 'disabled' : ''}>◀ vorige</button>
       <select class="feld platz" data-ch="nrwahl">${ords.map(o => opt(o.nr, `Nr. ${o.nr} – ${o.name} (${o.status || 'offen'})`, o.nr === nr)).join('')}</select>
       <button class="btn" data-act="vor" data-d="1" ${idx >= ords.length - 1 ? 'disabled' : ''}>nächste ▶</button></div>
-    ${ohneKisten ? '<div class="hinweis">Für dieses Tier sind noch keine Kisten eingetragen (Schlachttag → Packplan → „In Kisten übernehmen“).</div>' : ''}
+    ${ohneKisten ? '<div class="hinweis">Für dieses Tier sind noch keine Kisten eingetragen (Schlachttag → Kisten & Ladeplan → „Plan erstellen“).</div>' : ''}
     <div class="spalten2"><div class="karte">
       <h2 style="margin-top:0">Nr. ${ko.o.nr} – ${esc(ko.o.name)} ${statusMarke(ko.o.status)}</h2>
       ${(() => { const lv = lagerVorschlag(S, ko.o); const ort = ko.o.lagerOrt || lv.ort;
@@ -290,7 +318,7 @@ function viewHofladen() {
   const liste = S.hofladen.map((h, i) => ({ h, i })).filter(x => String(x.h.datum).startsWith(jahr)).reverse();
   inhalt().innerHTML = `<div class="zeile" style="margin-bottom:12px"><h1 class="platz" style="margin:0">Reste an den Hofladen</h1>
     ${jahre.length > 1 ? `<select class="feld" style="width:auto" data-ch="jahr">${jahre.map(j => opt(j, j, j === jahr)).join('')}</select>` : ''}</div>
-    <div class="klein" style="margin-bottom:10px">Wird von „Tier abgeschlossen“ (Schlachttag → Kisten) gefüllt: was nach dem Kommissionieren in den Kisten übrig bleibt.</div>
+    <div class="klein" style="margin-bottom:10px">Wird von „Tier abgeschlossen“ (Schlachttag → Kisten & Ladeplan) gefüllt: was nach dem Kommissionieren in den Kisten übrig bleibt.</div>
     <div class="spalten2"><div class="karte"><h3 style="margin-top:0">Summe ${jahr}</h3><table class="tab"><tbody>${sum.map(s => `<tr><td>${esc(s.art)}</td><td class="r fett">${fmtNum(s.summe, 2)} ${esc(s.einheit)}</td></tr>`).join('') || '<tr><td class="klein">noch nichts</td></tr>'}</tbody></table></div>
     <div class="tabwrap"><table class="tab"><thead><tr><th>Datum</th><th>Tier</th><th class="r">Kiste</th><th>Artikel</th><th class="r">Rest</th><th></th></tr></thead><tbody>
     ${liste.map(({ h, i }) => `<tr><td>${fmtDate(h.datum)}</td><td>${esc(h.tier)}</td><td class="r">${h.kiste}</td><td>${esc(h.art)}</td><td class="r">${fmtNum(h.rest, 2)} ${esc(h.einheit)}</td><td><button class="btn klein rot" data-act="weg" data-i="${i}">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="klein">keine Einträge</td></tr>'}
@@ -471,11 +499,11 @@ function tabHof(z) {
     <li><b>Bestellung</b> erfassen: Name tippen (bekannte Kunden werden vorgeschlagen), Pakete und Einzelartikel. Tier leer lassen = automatisch nächstes passendes Tier.</li>
     <li><b>Schlachttag → Mengenprüfung</b>: reicht das Tier? Rot markierte Bestellungen aufs nächste Tier umstellen.</li>
     <li><b>Schlachttag → Metzgerauftrag</b>: „Als Bild teilen“ → WhatsApp → Metzger.</li>
-    <li><b>Schlachttag → Packplan</b> erstellen und „In Kisten übernehmen“. Beim Metzger die Kisten nach Plan packen, wiegen und die kg unter <b>Kisten</b> eintragen.</li>
+    <li><b>Schlachttag → Kisten & Ladeplan</b>: „Plan erstellen“, Ladeplan an den Metzger teilen. Beim Metzger nach Plan packen, wiegen und die kg in derselben Liste eintragen (wird grün).</li>
     <li><b>Hack-Zettel</b> und <b>Innereien</b> an die Helfer geben (teilen oder drucken).</li>
     <li><b>Kommissionieren</b>: je Bestellung „aus Kiste 3 → 2,0 kg Braten“, antippen wenn erledigt, dann „Gepackt ✓ und weiter“.</li>
     <li><b>Packliste Kühlhaus</b>: Endbetrag eintragen, Status „abgeholt“ setzen.</li>
-    <li>Am Ende: <b>Kisten → Tier abgeschlossen</b> – Reste gehen an den Hofladen.</li>
+    <li>Am Ende: <b>Kisten & Ladeplan → Tier abgeschlossen</b> – Reste gehen an den Hofladen.</li>
     <li>Datensicherung: läuft automatisch in Google Drive, sobald Internet da ist (Einstellungen → Daten & Sicherung). Die Kopfzeile zeigt, wann zuletzt gesichert wurde.</li></ol></div>`;
   ui.acts.hz = el => { S.settings.hofZeile = el.value; speichern(); meldung('Gespeichert.'); };
   ui.acts.wege = el => { S.wege = el.value.split(',').map(x => x.trim()).filter(Boolean); speichern(); meldung('Gespeichert.'); };
