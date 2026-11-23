@@ -6,6 +6,7 @@
 const ORGANE = ['Leber', 'Nieren', 'Herz', 'Zunge', 'Ochsenschwanz'];
 const HACK = 'Hackfleisch';
 const GULASCH = 'Gulasch geschnitten';
+const BRATEN = 'Braten';
 const SK = 'Suppenknochen (SK)';
 const FK = 'Soßenknochen (FK)';
 const EPS = 1e-9;
@@ -197,8 +198,12 @@ function formFehler(S, o) {
 
 // ---------- Bestellungen allgemein ----------
 const sortNr = list => list.slice().sort((a, b) => a.nr - b.nr);
-const ordersOfTier = (S, tierName) => sortNr(S.bestellungen.filter(o => o.tier === tierName && o.name));
+// Reihenfolge innerhalb eines Tiers: „rang“ = Zeitpunkt, zu dem die Bestellung diesem Tier zugeordnet wurde
+// (neue Bestellung, Tier geändert, von der Warteliste geholt). Ohne rang gilt die Bestell-Nr.
+const rangVon = o => has(o.rang) ? num(o.rang) : num(o.nr);
+const ordersOfTier = (S, tierName) => S.bestellungen.filter(o => o.tier === tierName && o.name).sort((a, b) => rangVon(a) - rangVon(b) || a.nr - b.nr);
 const nextNr = S => S.bestellungen.reduce((m, o) => Math.max(m, o.nr), 0) + 1;
+const nextRang = S => S.bestellungen.reduce((m, o) => Math.max(m, rangVon(o)), 0) + 1;
 
 // ---------- Bestellung teilen ----------
 // Zeilen, die man verschieben kann: Pakete + jede Position mit Menge. „einheit“ = Eingabeeinheit beim Verschieben.
@@ -232,23 +237,9 @@ function teilZeilen(S, o) {
 // Fehlmenge je Artikel, die bei dieser Bestellung nicht mehr aus dem Tier kommt (in Eingabeeinheit der Zeile)
 function teilFehlmengen(S, o) {
   const t = tier(S, o.tier);
-  const out = {};
-  if (!t) return out;
-  const nen = num(S.settings.nenner) || 16;
-  const ords = ordersOfTier(S, t.name);
-  const pakGes = ords.reduce((s, x) => s + num(x.pakete), 0);
-  for (const a of ausbeuteArtikel(S)) {
-    const y = yieldArt(S, t, a.name);
-    let cum = a.inPaket ? pakGes * y / nen : 0; // Genusspakete zuerst (Vorrang)
-    for (const x of ords) {
-      cum += qty(S, x, a.name);
-      if (x.nr === o.nr) break;
-    }
-    const ueber = cum - y;
-    const eigen = qty(S, o, a.name);
-    if (ueber > 0.001 && eigen > 0) out[a.name] = Math.min(eigen, ueber); // kg
-  }
-  return out;
+  if (!t) return {};
+  const bil = fleischBilanz(S, t, ordersOfTier(S, t.name));
+  return Object.assign({}, bil.fehlt[o.nr] || {}); // kg je Artikel, die bei dieser Bestellung fehlen
 }
 // in Eingabeeinheit umrechnen und sinnvoll runden
 function teilRunden(zeile, wert) {
@@ -271,7 +262,7 @@ function teilVorschlag(S, o, prozent) {
 // führt die Teilung aus: verschiebt die angegebenen Mengen in eine neue Bestellung für „ziel“
 function bestellungTeilen(S, o, mengen, ziel) {
   const z = teilZeilen(S, o);
-  const neu = { nr: nextNr(S), eingang: o.eingang, tier: ziel, name: o.name, tel: o.tel, mail: o.mail, weg: o.weg, notiz: `Teil von Nr. ${o.nr}`, wunsch: '', pakete: 0, pakVak: 0, tuetenManuell: null, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
+  const neu = { nr: nextNr(S), rang: nextRang(S), eingang: o.eingang, tier: ziel, name: o.name, tel: o.tel, mail: o.mail, weg: o.weg, notiz: `Teil von Nr. ${o.nr}`, wunsch: '', pakete: 0, pakVak: 0, tuetenManuell: null, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
   let bewegt = 0;
   for (const r of z) {
     const m = teilRunden(r, mengen[r.key]);
@@ -314,30 +305,85 @@ function tierInfo(S, t) {
   const reichtNicht = ords.filter(o => (checks[o.nr] || '').startsWith('reicht')).length;
   return { sg, paketKg, pakete: pak, frei: nen - pak, anzahl: ords.length, reichtNicht };
 }
+// Fleischbilanz und Zuteilung eines Tiers.
+// 1) Genusspakete haben Vorrang: ihr Anteil (1/16 je Paket) wird zuerst reserviert.
+// 2) Danach bekommen die Einzelartikel ihre Mengen in der Reihenfolge, in der die Bestellungen dem Tier
+//    zugeordnet wurden (ordersOfTier).
+// 3) Hackfleisch ist „dehnbar“: nicht bestelltes Gulasch (Kamm/Hals) geht ins Hack; reicht das nicht,
+//    werden Schulterstücke (Bug) aufgelöst. Braten kommt zuerst aus der Keule, dann aus dem Bug.
+function fleischBilanz(S, t, ords) {
+  const nen = num(S.settings.nenner) || 16;
+  const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
+  const pakAnteil = Math.min(1, pak / nen);
+  const calc = name => {
+    const a = art(S, name);
+    const einzeln = ords.reduce((s, o) => s + qty(S, o, name), 0);
+    const separat = ords.reduce((s, o) => s + specSum(S, o, name), 0);
+    const ausPak = a && a.inPaket ? pak * yieldArt(S, t, name) / nen : 0;
+    return { einzeln, separat, ausPak, bestellt: einzeln + ausPak, ausbeute: yieldArt(S, t, name) };
+  };
+  const hack = calc(HACK), gul = calc(GULASCH), braten = calc(BRATEN);
+  const tol = has(S.settings.gulaschToleranz) ? num(S.settings.gulaschToleranz) : 1;
+  const gulStd = gul.bestellt - gul.separat;
+  gul.vorgabe = gulStd > 0.001 ? roundUp(gulStd + tol) : 0;
+  gul.insHack = Math.max(0, gul.ausbeute - gul.vorgabe - gul.separat);
+  const bugAnteil = has(S.settings.bugAnteilBraten) ? num(S.settings.bugAnteilBraten) : 0.5;
+  braten.bugKg = braten.ausbeute * bugAnteil;
+  hack.ausbeuteMitGulasch = hack.ausbeute + gul.insHack;
+  // Töpfe nach Abzug der Paket-Anteile
+  const topf = {};
+  for (const a of ausbeuteArtikel(S)) { const y = yieldArt(S, t, a.name); topf[a.name] = a.inPaket ? y * (1 - pakAnteil) : y; }
+  const bratenInPak = !!(art(S, BRATEN) || {}).inPaket;
+  let bug = topf[BRATEN] === undefined ? 0 : braten.bugKg * (bratenInPak ? 1 - pakAnteil : 1);
+  bug = Math.min(bug, topf[BRATEN] || 0);
+  let keule = (topf[BRATEN] || 0) - bug;
+  let hackTopf = (topf[HACK] || 0) + gul.insHack;
+  let bugInsHack = 0, bugFuerBraten = 0;
+  const fehlt = {}, pakUeber = {};
+  let pakCum = 0;
+  for (const o of ords) {
+    const f = {};
+    pakCum += num(o.pakete);
+    if (num(o.pakete) > 0 && pakCum > nen + 1e-9) pakUeber[o.nr] = true;
+    for (const name of Object.keys(topf)) {
+      let q = qty(S, o, name);
+      if (!(q > 0)) continue;
+      if (name === HACK) {
+        const a = Math.min(q, Math.max(0, hackTopf)); hackTopf -= a; q -= a;
+        const b = Math.min(q, Math.max(0, bug)); bug -= b; bugInsHack += b; q -= b;
+      } else if (name === BRATEN) {
+        const a = Math.min(q, Math.max(0, keule)); keule -= a; q -= a;
+        const b = Math.min(q, Math.max(0, bug)); bug -= b; bugFuerBraten += b; q -= b;
+      } else {
+        const a = Math.min(q, Math.max(0, topf[name])); topf[name] -= a; q -= a;
+      }
+      if (q > 0.001) f[name] = q;
+    }
+    fehlt[o.nr] = f;
+  }
+  hack.ausBug = bugInsHack;
+  hack.ueberAusbeute = bugInsHack > 0.001;
+  braten.bugFuerBraten = bugFuerBraten;
+  // Obergrenzen (für die Anzeige in der Mengenprüfung)
+  const kap = {};
+  kap[HACK] = hack.ausbeuteMitGulasch + braten.bugKg - bugFuerBraten;
+  kap[BRATEN] = braten.ausbeute - bugInsHack;
+  return { hack, gul, braten, kap, fehlt, pakUeber };
+}
+const kapazitaet = (S, t, bil, name) => bil.kap[name] !== undefined ? bil.kap[name] : yieldArt(S, t, name);
+
 // Mengencheck aller Bestellungen eines Tiers: {nr: text}
 function mengencheckTier(S, tierName) {
   const t = tier(S, tierName);
   const out = {};
   if (!t) return out;
   const nen = num(S.settings.nenner) || 16;
-  const arts = ausbeuteArtikel(S);
   const ords = ordersOfTier(S, t.name);
-  // Genusspakete haben Vorrang: ihre Anteile werden zuerst vom Tier reserviert,
-  // danach werden die Einzelartikel in Reihenfolge der Bestell-Nr. verteilt.
-  const pakGes = ords.reduce((s, o) => s + num(o.pakete), 0);
-  const cum = {}; arts.forEach(a => cum[a.name] = a.inPaket ? pakGes * yieldArt(S, t, a.name) / nen : 0);
-  let pakCum = 0;
+  const bil = fleischBilanz(S, t, ords);
   for (const o of ords) {
-    const fehlt = [];
-    pakCum += num(o.pakete);
-    if (num(o.pakete) > 0 && pakCum > nen + 1e-9) fehlt.push('Genusspakete (mehr als ' + nen + ')');
-    for (const a of arts) {
-      const y = yieldArt(S, t, a.name);
-      const q = qty(S, o, a.name);
-      cum[a.name] += q;
-      if (q > 0 && cum[a.name] > y + 0.001) fehlt.push(a.name);
-    }
-    out[o.nr] = fehlt.length ? 'reicht nicht: ' + fehlt.join(', ') : 'ok';
+    const f = Object.keys(bil.fehlt[o.nr] || {});
+    if (bil.pakUeber[o.nr]) f.unshift('Genusspakete (mehr als ' + nen + ')');
+    out[o.nr] = f.length ? 'reicht nicht: ' + f.join(', ') : 'ok';
   }
   return out;
 }
@@ -347,23 +393,33 @@ function mengencheck(S, o) {
   if (!tier(S, o.tier)) return 'Tier unbekannt';
   return mengencheckTier(S, o.tier)[o.nr] || '';
 }
-// TierVorschlag (Wunschtermin leer: nächstes Tier ab heute mit genug freien Paketen;
-// gesetzt: letztes Tier mit Abholtermin vor/an dem Wunschtermin)
-function tierVorschlag(S, wunschISO, pakete, ohneNr) {
+// TierVorschlag: Wunschtermin leer = frühestes Tier ab heute, gesetzt = letztes Tier mit Abholung vor/an dem Wunschtermin.
+// Bevorzugt wird ein Tier, bei dem die GANZE Bestellung „ok“ ist; passt keins, das erste mit genug freien Paketen.
+function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
   const heute = todayISO();
   const pk = num(pakete);
-  let best = '', bestD = '';
-  for (const t of S.tiere) {
-    if (!t.abhol || t.abhol < heute) continue;
+  const nen = num(S.settings.nenner) || 16;
+  const kand = S.tiere.filter(t => {
+    if (!t.abhol || t.abhol < heute) return false;
+    if (wunschISO && t.abhol > wunschISO) return false;
     if (pk > 0) {
-      const nen = num(S.settings.nenner) || 16;
       const bestellt = S.bestellungen.filter(o => o.tier === t.name && o.name && o.nr !== ohneNr).reduce((s, o) => s + num(o.pakete), 0);
-      if (nen - bestellt < pk) continue;
+      if (nen - bestellt < pk) return false;
     }
-    if (wunschISO) { if (t.abhol <= wunschISO && (!best || t.abhol > bestD)) { best = t.name; bestD = t.abhol; } }
-    else if (!best || t.abhol < bestD) { best = t.name; bestD = t.abhol; }
+    return true;
+  }).sort((a, b) => wunschISO ? b.abhol.localeCompare(a.abhol) : a.abhol.localeCompare(b.abhol));
+  if (!kand.length) return 'Warteliste';
+  if (best0) {
+    const passt = kand.find(t => {
+      const alt = S.bestellungen.find(x => x.nr === ohneNr && x.nr);
+      const probe = Object.assign({}, best0, { nr: ohneNr || -1, name: best0.name || '?', tier: t.name,
+        rang: alt && alt.tier === t.name ? rangVon(alt) : nextRang(S) });
+      const T = Object.assign({}, S, { bestellungen: S.bestellungen.filter(x => x.nr !== probe.nr).concat([probe]) });
+      return mengencheckTier(T, t.name)[probe.nr] === 'ok';
+    });
+    if (passt) return passt.name;
   }
-  return best || 'Warteliste';
+  return kand[0].name;
 }
 function wartelistePassend(S, t) {
   if (!t.abhol || t.abhol < todayISO()) return [];
@@ -406,15 +462,16 @@ function mengenpruefung(S, tierName) {
   const nen = num(S.settings.nenner) || 16;
   const ords = ordersOfTier(S, t.name);
   const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
+  const bil = fleischBilanz(S, t, ords);
   const rows = ausbeuteArtikel(S).map(a => {
-    const y = yieldArt(S, t, a.name);
+    const y = kapazitaet(S, t, bil, a.name);
     const einzel = ords.reduce((s, o) => s + qty(S, o, a.name), 0);
-    const ausPak = a.inPaket ? pak * y / nen : 0;
+    const ausPak = a.inPaket ? pak * yieldArt(S, t, a.name) / nen : 0;
     const ges = einzel + ausPak;
     return { art: a.name, ausbeute: y, einzel, ausPak, gesamt: ges, frei: y - ges, auslastung: y > 0 ? ges / y : null,
       status: y === 0 ? '' : ges > y + 0.001 ? 'reicht nicht' : ges > 0.9 * y ? 'knapp' : 'ok' };
   });
-  return { tier: t, info: tierInfo(S, t), rows };
+  return { tier: t, info: tierInfo(S, t), rows, bilanz: bil };
 }
 
 // ---------- Metzgerauftrag ----------
@@ -424,25 +481,10 @@ function metzgerauftrag(S, tierName) {
   const nen = num(S.settings.nenner) || 16;
   const ords = ordersOfTier(S, t.name);
   const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
-  const calc = name => {
-    const a = art(S, name);
-    const einzeln = ords.reduce((s, o) => s + qty(S, o, name), 0);
-    const separat = ords.reduce((s, o) => s + specSum(S, o, name), 0);
-    const ausPak = a && a.inPaket ? pak * yieldArt(S, t, name) / nen : 0;
-    return { einzeln, separat, ausPak, bestellt: einzeln + ausPak, ausbeute: yieldArt(S, t, name) };
-  };
-  const hack = calc(HACK), gul = calc(GULASCH);
-  // Hackfleisch: rechnerische Ausbeute des Tiers – oder mehr, wenn mehr bestellt ist.
+  const { hack, gul } = fleischBilanz(S, t, ords);
+  // Hackfleisch: Ausbeute + nicht bestelltes Gulasch – oder mehr, wenn mehr bestellt ist (dann Bug auflösen).
   // Separat vorbereitetes Hack (z. B. besonders mager) steht unten bei den Sonderfällen und geht hier ab.
-  // Gulasch: nur was bestellt ist (ohne Sonderfälle/„am Stück“) + Toleranz
-  const tol = has(S.settings.gulaschToleranz) ? num(S.settings.gulaschToleranz) : 1;
-  const gulStd = gul.bestellt - gul.separat;
-  gul.vorgabe = gulStd > 0.001 ? roundUp(gulStd + tol) : 0;
-  // nicht bestelltes Gulasch-Fleisch (Kamm/Hals) geht ins Hackfleisch
-  gul.insHack = Math.max(0, gul.ausbeute - gul.vorgabe - gul.separat);
-  hack.ausbeuteMitGulasch = hack.ausbeute + gul.insHack;
-  hack.ueberAusbeute = hack.bestellt > hack.ausbeuteMitGulasch + 0.001;
-  hack.vorgabe = Math.max(0, roundUp(Math.max(hack.ausbeuteMitGulasch, hack.bestellt) - hack.separat));
+  hack.vorgabe = Math.max(0, roundUp(hack.ausbeuteMitGulasch + hack.ausBug - hack.separat));
   const hk = num(S.settings.hackKiste) || 20;
   hack.kisten = hack.vorgabe > 0 ? roundUp(hack.vorgabe / hk) : 0;
   const voll = Math.floor((hack.vorgabe + 1e-9) / hk), rest = r1(hack.vorgabe - voll * hk);
@@ -498,6 +540,7 @@ function packplan(S, tierName) {
     let kg = 0;
     if (a.name === HACK) kg = ma.hack.vorgabe;
     else if (a.name === GULASCH) kg = ma.gulasch.vorgabe;
+    else if (a.name === BRATEN) kg = Math.max(0, yt - ma.hack.ausBug - (specT[a.name] || 0)); // Bug ging ins Hack
     else if (!isOrg) kg = Math.max(0, yt - (specT[a.name] || 0));
     return { art: a.name, isOrg, shr, kg };
   });
@@ -705,7 +748,8 @@ function kommissionierung(S, nr) {
   if (!o) return null;
   const t = tier(S, o.tier);
   const alle = t ? ordersOfTier(S, t.name) : [];
-  const vorher = alle.filter(x => x.nr < nr);
+  const idx = alle.findIndex(x => x.nr === nr);
+  const vorher = idx > 0 ? alle.slice(0, idx) : [];
   const pakGes = alle.reduce((s, x) => s + num(x.pakete), 0);
   // Aufteilung der Kisten: zuerst alle Genusspaket-Anteile (Vorrang), dann die Einzelartikel nach Bestell-Nr.
   const rows = S.artikel.map(a => {
@@ -732,7 +776,17 @@ function kommissionierung(S, nr) {
         picks.push({ kiste: c.k.nr, menge: r1(m), einheit: c.einheit, art: c.k.art, verpacken: verp, platz: c.k.platz || '' });
       }
     }
-    picks.sort((a, b) => a.kiste - b.kiste);
+    // Hackfleisch packt die Hilfsperson vorab am Hack-Tisch – hier nur als fertige Tüten, ohne Kistennummer
+    const hp = picks.filter(p => p.art === HACK);
+    if (hp.length) {
+      const r = rows.find(x => x.art === HACK), teile = [];
+      if (r.einzeln > 0) { const po = portionOf(S, o, HACK); teile.push(po ? po.text : `${fmtNum(r.einzeln, 2)} kg in 1 Tüte`); }
+      if (r.ausPak > 0) { const g = num(S.settings.hackPaketG) || 500; teile.push(`${Math.round(r.ausPak * 1000 / g)} × ${fmtNum(g)} g aus Paket`); }
+      const summe = r1(hp.reduce((s, p) => s + p.menge, 0));
+      for (const p of hp) picks.splice(picks.indexOf(p), 1);
+      picks.push({ kiste: null, hackTisch: true, menge: summe, einheit: 'kg', art: HACK, verpacken: 'vom Hack-Tisch, fertig verpackt: ' + teile.join(' + '), platz: '' });
+    }
+    picks.sort((a, b) => (a.kiste === null ? -1 : a.kiste) - (b.kiste === null ? -1 : b.kiste));
   }
   rows.forEach(r => { r.ausKisten = picks.filter(p => p.art === r.art).reduce((s, p) => s + p.menge, 0); r.fehlt = istOrgan(r.art) ? 0 : (r.bedarf - r.ausKisten > 0.05 ? r.bedarf - r.ausKisten : 0); });
   const innereien = ORGANE.map(n => { const q = qty(S, o, n); const a = art(S, n); return q > 0 ? `${fmtNum(q, 3)} ${a ? a.einheit : ''} ${n}` : ''; }).filter(Boolean);

@@ -127,6 +127,7 @@ textarea.feld { min-height: 70px; }
 .pick .menge { font-size: 22px; font-weight: 700; }
 .pick.erledigt { opacity: .4; }
 .pick.erledigt .kiste { background: var(--gruen); }
+.pick .kiste.hack { background: #a33a2a; font-size: 18px; padding: 10px 0; }
 
 /* Dialog / Meldung */
 #dialog { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }

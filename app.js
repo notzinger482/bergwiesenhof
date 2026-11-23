@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.5.2';
+const APP_VERSION = '1.5.3';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -282,7 +282,7 @@ function viewBestellung(nr, q, vorlage) {
       tr.classList.toggle('hat', qty(S, o, a.name) > 0);
     });
     // Tier
-    const vors = tierVorschlag(S, o.wunsch, o.pakete, o.nr);
+    const vors = tierVorschlag(S, o.wunsch, o.pakete, o.nr, o);
     $('#tierwahl').innerHTML = tierOptionen(o.tier, true, vors);
     const tn = o.tier || vors, t = tier(S, tn);
     let ti = '';
@@ -404,10 +404,15 @@ async function bestellungSpeichern(o) {
   o.pakete = num(o.pakete); o.pakVak = num(o.pakVak);
   if (!o.eingang) o.eingang = todayISO();
   let auto = false;
-  if (!o.tier) { o.tier = tierVorschlag(S, o.wunsch, o.pakete, o.nr); auto = true; }
+  if (!o.tier) { o.tier = tierVorschlag(S, o.wunsch, o.pakete, o.nr, o); auto = true; }
   const neu = !o.nr;
-  if (neu) { o.nr = nextNr(S); S.bestellungen.push(o); }
-  else { const i = S.bestellungen.findIndex(x => x.nr === o.nr); S.bestellungen[i] = o; }
+  // Reihenfolge beim Tier: neu oder Tier gewechselt → hinten anstellen
+  if (neu) { o.nr = nextNr(S); o.rang = nextRang(S); S.bestellungen.push(o); }
+  else {
+    const i = S.bestellungen.findIndex(x => x.nr === o.nr);
+    if (S.bestellungen[i].tier !== o.tier) o.rang = nextRang(S);
+    S.bestellungen[i] = o;
+  }
   const kundeNeu = kundePflegen(S, o.name, o.tel, o.mail);
   speichern();
   ui.formDirty = false; ui.letzteNr = o.nr;
@@ -569,7 +574,7 @@ function viewTier(name) {
     const tt = tier(S, t.name);
     const wl = wartelistePassend(S, tt);
     if (wl.length && await frage('Warteliste', `${wl.length} Bestellung(en) auf der Warteliste passen zu <b>${esc(tt.name)}</b> (Abholung ${fmtDate(tt.abhol)}). Jetzt diesem Tier zuordnen?`, 'Zuordnen', 'Nein')) {
-      wl.forEach(o => { o.tier = tt.name; }); speichern();
+      wl.forEach(o => { o.tier = tt.name; o.rang = nextRang(S); }); speichern();
       meldung(`${wl.length} Bestellung(en) zugeordnet. Bitte die Mengenprüfung für ${tt.name} ansehen.`);
     } else meldung('Tier gespeichert.');
     history.replaceState(null, '', '#/tier/' + encodeURIComponent(tt.name)); letzterHash = location.hash; render();

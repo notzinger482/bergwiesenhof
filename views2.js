@@ -13,7 +13,7 @@ function docMenge(mp) {
     blocks: [{ type: 'table', head: ['Teilstück', 'Ausbeute ca.', 'einzeln', 'in Paketen', 'gesamt', 'noch frei', 'Auslastung', 'Status'], align: ['', 'r', 'r', 'r', 'r', 'r', 'r', ''], widths: [3, 2, 2, 2, 2, 2, 2, 2.4],
       rows: mp.rows.map(r => [r.art, fmtNum(r.ausbeute, 1), fmtNum(r.einzel, 1), fmtNum(r.ausPak, 1), fmtNum(r.gesamt, 1), fmtNum(r.frei, 1), r.auslastung === null ? '' : fmtNum(r.auslastung * 100, 0) + ' %', r.status]),
       rowClass: mp.rows.map(r => r.status === 'reicht nicht' ? 'rot' : '') },
-      { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel nach Bestell-Nr. (kleinere zuerst). Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Knochen und Innereien werden nicht geprüft.' }], footer: fussZeile() };
+      { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel in der Reihenfolge, in der die Bestellungen dem Tier zugeordnet wurden. Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Knochen und Innereien werden nicht geprüft.' }], footer: fussZeile() };
 }
 function docMetzger(ma) {
   const t = ma.tier;
@@ -66,7 +66,7 @@ function docPick(ko) {
   return { title: `Kommissionierung Nr. ${o.nr} – ${o.name}`, sub: [`Tier: ${o.tier}`, `Genusspakete: ${fmtNum(o.pakete)}${num(o.pakVak) ? ` (davon ${fmtNum(o.pakVak)} vakuumieren)` : ''} · Vakuum-Tüten: ${ko.tueten || '–'}`],
     blocks: [{ type: 'kv', rows: [['Lagerplatz', lagerText(o) || lagerVorschlag(S, o).ort, lagerText(o) ? '' : '(' + lagerVorschlag(S, o).grund + ')'], ['Separat vom Metzger', ko.sonder.join('; ') || '–'], ['Innereien (separat)', ko.innereien.join(', ') || '–']] },
       { type: 'table', head: ['☐', 'Kiste', 'Menge', 'Inhalt', 'verpacken', 'Stellplatz'], widths: [0.5, 0.9, 1.2, 2.4, 4, 2.4], align: ['', 'r', 'r', '', '', ''],
-        rows: ko.picks.map(p => ['☐', p.kiste, `${fmtNum(p.menge, 1)} ${p.einheit}`, p.art, p.verpacken, p.platz]), leer: 'keine Kisten eingetragen' },
+        rows: ko.picks.map(p => ['☐', p.hackTisch ? 'Hack-Tisch' : p.kiste, `${fmtNum(p.menge, 1)} ${p.einheit}`, p.art, p.verpacken, p.platz]), leer: 'keine Kisten eingetragen' },
       ...ko.rows.filter(r => r.fehlt > 0).map(r => ({ type: 'text', warn: true, text: `Fehlt: ${fmtNum(r.fehlt, 2)} ${r.einheit} ${r.art}` }))], footer: fussZeile() };
 }
 
@@ -203,8 +203,9 @@ function tabKisten(tn, ziel) {
   ui.acts.drucken = () => docDrucken(pp ? [docPackplan(pp, t), docKisten(tn, kistenCalc(S, tn))] : docKisten(tn, kistenCalc(S, tn)));
   ui.acts.abschluss = async () => {
     const reste = calc.filter(c => c.rest > 0.0001 && c.k.art !== 'Sonderfälle (beschriftet)');
-    const offen = ordersOfTier(S, tn).filter(o => (o.status || 'offen') === 'offen').length;
-    if (!(await frage('Tier abschließen', `${calc.length} Kistenzeilen von <b>${esc(tn)}</b> abschließen?<br>${reste.length} Reste gehen an den Hofladen, danach werden die Kisten geleert.${offen ? `<br><span class="warn">${offen} Bestellung(en) sind noch nicht gepackt.</span>` : ''}`, 'Abschließen'))) return;
+    const offen = ordersOfTier(S, tn).filter(o => (o.status || 'offen') === 'offen');
+    if (offen.length) return dialog('Tier noch nicht fertig', `<p>${esc(tn)} kann erst abgeschlossen werden, wenn alle Bestellungen gepackt sind.</p><p class="warn">Noch offen: ${offen.map(o => 'Nr. ' + o.nr + ' ' + esc(o.name)).join(', ')}</p>`);
+    if (!(await frage('Tier abschließen', `Alle Bestellungen von <b>${esc(tn)}</b> sind gepackt.<br>${reste.length} Reste gehen an den Hofladen, danach werden die ${calc.length} Kistenzeilen geleert.`, 'Abschließen'))) return;
     const n = tierAbschliessen(S, tn); delete S.packplaene[tn]; speichern();
     meldung(`${tn} abgeschlossen: ${n} Reste ins Hofladen-Blatt übernommen, Kisten geleert.`); render();
   };
@@ -268,7 +269,7 @@ function viewKommissionierung(q) {
       ${ko.rows.filter(r => r.bedarf > 0.0001).map(r => `<tr class="${r.fehlt > 0 ? 'rot' : ''}"><td>${esc(r.art)}${istOrgan(r.art) ? ' <span class="klein">(separat)</span>' : ''}</td><td class="r">${fmtNum(r.einzeln, 2)}</td><td class="r">${fmtNum(r.ausPak, 2)}</td><td class="r">${fmtNum(r.bedarf, 2)}</td><td class="r">${fmtNum(r.ausKisten, 1)}</td><td class="r">${r.fehlt > 0 ? fmtNum(r.fehlt, 2) : ''}</td></tr>`).join('')}
       </tbody></table></div>
     <div class="karte" style="padding:0"><h3 style="margin:14px 16px 4px">Pickliste – antippen wenn erledigt</h3>
-      ${ko.picks.map((p, i) => `<div class="pick ${ticks[i] ? 'erledigt' : ''}" data-act="tick" data-i="${i}"><div class="kiste">${p.kiste}</div><div class="menge">${fmtNum(p.menge, 1)} ${p.einheit}</div><div><b>${esc(p.art)}</b>${p.verpacken ? `<div class="klein">${esc(p.verpacken)}</div>` : ''}</div><div class="klein">${esc(p.platz)}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts aus den Kisten zu holen.</div>'}
+      ${ko.picks.map((p, i) => `<div class="pick ${ticks[i] ? 'erledigt' : ''}" data-act="tick" data-i="${i}"><div class="kiste${p.hackTisch ? ' hack' : ''}">${p.hackTisch ? 'Hack' : p.kiste}</div><div class="menge">${fmtNum(p.menge, 1)} ${p.einheit}</div><div><b>${esc(p.art)}</b>${p.verpacken ? `<div class="klein">${esc(p.verpacken)}</div>` : ''}</div><div class="klein">${esc(p.platz)}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts aus den Kisten zu holen.</div>'}
     </div></div>`;
   inhalt().innerHTML = h;
   ui.acts.tierwahl = el => { ui.tierWahl = el.value; ui.kommiNr = null; render(); };
@@ -448,13 +449,14 @@ function tabAusbeute(z) {
    <div class="karte"><h3 style="margin-top:0">Einstellungen</h3><div class="zeile oben">
     ${feld('sgBulle', 'Standard-Schlachtgewicht Bulle (kg)')}${feld('sgRind', 'Standard-Schlachtgewicht Rind/Färse (kg)')}${feld('nenner', 'Ein Genusspaket = 1 / … des Tiers')}
     ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
-    ${feld('hackPaketG', 'Hack im Genusspaket portioniert à (g)')}${feld('tueteJeKg', 'Vakuumieren ohne Portionsangabe: 1 Tüte je … kg')}
+    ${feld('hackPaketG', 'Hack im Genusspaket portioniert à (g)')}<label class="f" style="width:250px">Bug-Anteil am Braten (%) – darf bei Bedarf ins Hack<input class="feld zahl" inputmode="decimal" data-ch="bug" value="${fmtNum((has(st.bugAnteilBraten) ? num(st.bugAnteilBraten) : 0.5) * 100, 1)}"></label>${feld('tueteJeKg', 'Vakuumieren ohne Portionsangabe: 1 Tüte je … kg')}
     ${feld('skKg', 'Suppenknochen (SK) je Tier ca. (kg)')}${feld('fkKg', 'Soßenknochen (FK) je Tier ca. (kg)')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">
     ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Innereien je Tier (werden vorab separat geholt)</h3><div class="zeile oben">
     ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('ochsStk', 'Ochsenschwanz ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>`;
   ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
+  ui.acts.bug = el => { S.settings.bugAnteilBraten = Math.min(100, Math.max(0, num(el.value))) / 100; speichern(); render(); };
   ui.acts.anteil = el => { if (el.readOnly) return; S.artikel[+el.closest('tr').dataset.i][el.dataset.f] = num(el.value) / 100; speichern(); render(); };
   ui.acts.rindwie = el => {
     S.settings.rindWieBulle = el.checked;
