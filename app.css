@@ -177,3 +177,9 @@ textarea.feld { min-height: 70px; }
   #inhalt { margin-left: 0; padding: 14px 12px 110px; }
   .formraster { grid-template-columns: 1fr; }
 }
+
+/* Lagerplatz */
+.lagerbox { border-radius: 12px; padding: 10px 14px; margin: 4px 0 12px; border: 2px solid; }
+.lagerbox.ks { background: #e8f3fc; border-color: #7fb2e0; }
+.lagerbox.kr { background: #fff4e3; border-color: var(--braun-h); }
+.lagerort { font-size: 22px; font-weight: 800; color: #222; }

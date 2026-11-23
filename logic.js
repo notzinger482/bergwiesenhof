@@ -754,8 +754,23 @@ function packliste(S, tierName) {
   if (!t) return null;
   return { tier: t, rows: ordersOfTier(S, t.name).map(o => ({
     nr: o.nr, name: o.name, tel: o.tel, text: bestellText(S, o), sonder: sonderOf(S, o).map(s => sonderText(S, s)).join('; '),
-    schaetz: schaetzpreis(S, o), endbetrag: has(o.endbetrag) ? num(o.endbetrag) : null, status: o.status || 'offen' })) };
+    schaetz: schaetzpreis(S, o), endbetrag: has(o.endbetrag) ? num(o.endbetrag) : null, status: o.status || 'offen', lager: lagerText(o), lagerVorschlag: lagerVorschlag(S, o).ort })) };
 }
+
+// ---------- Lagerplatz nach dem Packen ----------
+// Regel: weniger als X Artikel UND leichter als Y kg -> Kühlschrank, sonst Metzgerkiste im Kühlraum
+const LAGER = ['Kühlschrank', 'Kühlraum'];
+function lagerVorschlag(S, o) {
+  const st = S.settings;
+  const maxArt = num(st.lagerMaxArtikel) || 3, maxKg = num(st.lagerMaxKg) || 5;
+  let artikel = S.artikel.filter(a => qty(S, o, a.name) > 0).length + (num(o.pakete) > 0 ? 1 : 0);
+  const t = tier(S, o.tier);
+  const paketKg = t ? tierInfo(S, t).paketKg : (num(st.paketVon) + num(st.paketBis)) / 2;
+  const kg = einzelKg(S, o) + num(o.pakete) * paketKg;
+  const klein = artikel < maxArt && kg < maxKg;
+  return { ort: klein ? 'Kühlschrank' : 'Kühlraum', artikel, kg, grund: `${artikel} Artikel, ca. ${fmtNum(kg, 1)} kg` };
+}
+const lagerText = o => o.lagerOrt ? (o.lagerOrt === 'Kühlraum' ? 'Kühlraum (Metzgerkiste)' : o.lagerOrt) + (o.lagerPlatz ? ' – ' + o.lagerPlatz : '') : '';
 
 // ---------- Hofladen ----------
 function hofladenSummen(S, jahr) {
@@ -801,7 +816,7 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, tierUmbenennen, kundePflegen, kundenStat,
+  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, tierUmbenennen, kundePflegen, kundenStat,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, setDefaults: d => { global.DEFAULTS = d; }

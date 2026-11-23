@@ -58,13 +58,13 @@ function docInnereien(ii) {
 }
 function docPackliste(pl) {
   return { title: `Packliste Kühlhaus – ${pl.tier.name}`, sub: [abholTxt(pl.tier)],
-    blocks: [{ type: 'table', head: ['Nr.', 'Name', 'Telefon', 'Bestellung', 'Sonderfälle (separat)', 'Schätzpreis', 'Endbetrag', 'gepackt', 'abgeholt'], widths: [0.7, 2.2, 1.7, 5, 2.6, 1.3, 1.3, 0.9, 0.9], align: ['r', '', '', '', '', 'r', 'r', '', ''],
-      rows: pl.rows.map(r => [r.nr, r.name, r.tel, r.text, r.sonder, fmtEur(r.schaetz), r.endbetrag !== null ? fmtEur(r.endbetrag) : '', r.status !== 'offen' ? '☑' : '☐', r.status === 'abgeholt' ? '☑' : '☐']) }], footer: fussZeile() };
+    blocks: [{ type: 'table', head: ['Nr.', 'Name', 'Telefon', 'Bestellung', 'Sonderfälle (separat)', 'Lagerplatz', 'Schätzpreis', 'Endbetrag', 'gepackt', 'abgeholt'], widths: [0.7, 2.2, 1.6, 4.6, 2.2, 2, 1.3, 1.3, 0.9, 0.9], align: ['r', '', '', '', '', '', 'r', 'r', '', ''],
+      rows: pl.rows.map(r => [r.nr, r.name, r.tel, r.text, r.sonder, r.lager || `(${r.lagerVorschlag})`, fmtEur(r.schaetz), r.endbetrag !== null ? fmtEur(r.endbetrag) : '', r.status !== 'offen' ? '☑' : '☐', r.status === 'abgeholt' ? '☑' : '☐']) }], footer: fussZeile() };
 }
 function docPick(ko) {
   const o = ko.o;
   return { title: `Kommissionierung Nr. ${o.nr} – ${o.name}`, sub: [`Tier: ${o.tier}`, `Genusspakete: ${fmtNum(o.pakete)}${num(o.pakVak) ? ` (davon ${fmtNum(o.pakVak)} vakuumieren)` : ''} · Vakuum-Tüten: ${ko.tueten || '–'}`],
-    blocks: [{ type: 'kv', rows: [['Separat vom Metzger', ko.sonder.join('; ') || '–'], ['Innereien (separat)', ko.innereien.join(', ') || '–']] },
+    blocks: [{ type: 'kv', rows: [['Lagerplatz', lagerText(o) || lagerVorschlag(S, o).ort, lagerText(o) ? '' : '(' + lagerVorschlag(S, o).grund + ')'], ['Separat vom Metzger', ko.sonder.join('; ') || '–'], ['Innereien (separat)', ko.innereien.join(', ') || '–']] },
       { type: 'table', head: ['☐', 'Kiste', 'Menge', 'Inhalt', 'verpacken', 'Stellplatz'], widths: [0.5, 0.9, 1.2, 2.4, 4, 2.4], align: ['', 'r', 'r', '', '', ''],
         rows: ko.picks.map(p => ['☐', p.kiste, `${fmtNum(p.menge, 1)} ${p.einheit}`, p.art, p.verpacken, p.platz]), leer: 'keine Kisten eingetragen' },
       ...ko.rows.filter(r => r.fehlt > 0).map(r => ({ type: 'text', warn: true, text: `Fehlt: ${fmtNum(r.fehlt, 2)} ${r.einheit} ${r.art}` }))], footer: fussZeile() };
@@ -202,14 +202,19 @@ function tabKisten(tn, ziel) {
 function tabPackliste(tn, ziel) {
   const pl = packliste(S, tn);
   ziel.innerHTML = `<div class="knopfleiste" style="margin-bottom:10px"><button class="btn haupt" data-act="teilen">Als Bild teilen</button><button class="btn" data-act="drucken">Drucken</button></div>
-    <div class="klein" style="margin-bottom:8px">Endbetrag nach dem Wiegen eintragen. Status antippen: offen → gepackt → abgeholt.</div>
-    <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>Bestellung</th><th>Sonderfälle</th><th class="r">Schätzpreis</th><th class="r">Endbetrag</th><th>Status</th></tr></thead><tbody>
-    ${pl.rows.map(r => `<tr data-nr="${r.nr}"><td class="r"><a href="#/bestellung/${r.nr}">${r.nr}</a></td><td class="fett">${esc(r.name)}</td><td>${r.tel ? `<a href="tel:${esc(r.tel)}">${esc(r.tel)}</a>` : ''}</td><td class="klein">${esc(r.text)}</td><td class="klein">${esc(r.sonder)}</td><td class="r">${fmtEur(r.schaetz)}</td>
-      <td style="width:120px"><input class="feld zahl" inputmode="decimal" data-ch="betrag" value="${r.endbetrag !== null ? fmtNum(r.endbetrag, 2, 2) : ''}"></td><td><button class="btn klein" data-act="status">${statusMarke(r.status)}</button></td></tr>`).join('') || '<tr><td colspan="8" class="klein">Keine Bestellungen für dieses Tier.</td></tr>'}
+    <div class="klein" style="margin-bottom:8px">Endbetrag nach dem Wiegen eintragen. Status antippen: offen → gepackt (mit Lagerplatz) → abgeholt.</div>
+    <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>Bestellung</th><th>Sonderfälle</th><th>Lagerplatz</th><th class="r">Schätzpreis</th><th class="r">Endbetrag</th><th>Status</th></tr></thead><tbody>
+    ${pl.rows.map(r => `<tr data-nr="${r.nr}"><td class="r"><a href="#/bestellung/${r.nr}">${r.nr}</a></td><td class="fett">${esc(r.name)}</td><td>${r.tel ? `<a href="tel:${esc(r.tel)}">${esc(r.tel)}</a>` : ''}</td><td class="klein">${esc(r.text)}</td><td class="klein">${esc(r.sonder)}</td><td>${r.lager ? `<b>${esc(r.lager)}</b>` : `<span class="klein">Vorschlag: ${esc(r.lagerVorschlag)}</span>`}</td><td class="r">${fmtEur(r.schaetz)}</td>
+      <td style="width:120px"><input class="feld zahl" inputmode="decimal" data-ch="betrag" value="${r.endbetrag !== null ? fmtNum(r.endbetrag, 2, 2) : ''}"></td><td><button class="btn klein" data-act="status">${statusMarke(r.status)}</button></td></tr>`).join('') || '<tr><td colspan="9" class="klein">Keine Bestellungen für dieses Tier.</td></tr>'}
     </tbody></table></div>`;
   const best = el => S.bestellungen.find(o => o.nr === +el.closest('tr').dataset.nr);
   ui.acts.betrag = el => { const o = best(el); o.endbetrag = el.value.trim() === '' ? null : r2(num(el.value)); speichern(); };
-  ui.acts.status = el => { const o = best(el); const f = ['offen', 'gepackt', 'abgeholt']; o.status = f[(f.indexOf(o.status || 'offen') + 1) % 3]; speichern(); el.innerHTML = statusMarke(o.status); };
+  ui.acts.status = async el => {
+    const o = best(el); const f = ['offen', 'gepackt', 'abgeholt']; const neu = f[(f.indexOf(o.status || 'offen') + 1) % 3];
+    if (neu === 'gepackt') { if (!(await lagerDialog(o))) return; }
+    else { o.status = neu; if (neu === 'offen') { o.lagerOrt = ''; o.lagerPlatz = ''; o.gepacktAm = null; } speichern(); }
+    render();
+  };
   ui.acts.teilen = async () => { const d = docPackliste(packliste(S, tn)); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
   ui.acts.drucken = () => docDrucken(docPackliste(packliste(S, tn)));
 }
@@ -239,6 +244,8 @@ function viewKommissionierung(q) {
     ${ohneKisten ? '<div class="hinweis">Für dieses Tier sind noch keine Kisten eingetragen (Schlachttag → Packplan → „In Kisten übernehmen“).</div>' : ''}
     <div class="spalten2"><div class="karte">
       <h2 style="margin-top:0">Nr. ${ko.o.nr} – ${esc(ko.o.name)} ${statusMarke(ko.o.status)}</h2>
+      ${(() => { const lv = lagerVorschlag(S, ko.o); const ort = ko.o.lagerOrt || lv.ort;
+        return `<div class="lagerbox ${ort === 'Kühlschrank' ? 'ks' : 'kr'}"><div class="klein">${ko.o.lagerOrt ? 'verräumt' : 'Lagerplatz nach dem Packen'}</div><div class="lagerort">${ort === 'Kühlschrank' ? '❄ Kühlschrank' : '▣ Kühlraum – Metzgerkiste'}${ko.o.lagerPlatz ? ' · ' + esc(ko.o.lagerPlatz) : ''}</div><div class="klein">${esc(lv.grund)}</div></div>`; })()}
       <table class="doc-kv"><tr><td>Genusspakete</td><td class="fett">${fmtNum(ko.o.pakete) || '–'}${num(ko.o.pakVak) ? ` (davon ${fmtNum(ko.o.pakVak)} vakuumieren)` : ''}</td></tr>
       <tr><td>Separat vom Metzger</td><td class="fett">${esc(ko.sonder.join('; ') || '–')}</td></tr>
       <tr><td>Vakuum-Tüten</td><td class="fett">${ko.tueten || '–'}</td></tr>
@@ -256,10 +263,11 @@ function viewKommissionierung(q) {
   ui.acts.nrwahl = el => { ui.kommiNr = +el.value; gehe('#/kommissionierung?nr=' + el.value); };
   ui.acts.vor = el => { const o = ords[idx + num(el.dataset.d)]; if (o) gehe('#/kommissionierung?nr=' + o.nr); };
   ui.acts.tick = el => { const i = +el.dataset.i; ticks[i] = !ticks[i]; el.classList.toggle('erledigt', ticks[i]); };
-  ui.acts.gepackt = () => {
-    const o = S.bestellungen.find(x => x.nr === nr); if ((o.status || 'offen') === 'offen') o.status = 'gepackt'; speichern();
+  ui.acts.gepackt = async () => {
+    const o = S.bestellungen.find(x => x.nr === nr);
+    if (!(await lagerDialog(o))) return;
     const naechste = ords.slice(idx + 1).find(x => (x.status || 'offen') === 'offen') || ords[idx + 1];
-    meldung(`Nr. ${nr} gepackt.`);
+    meldung(`Nr. ${nr} gepackt → ${lagerText(o)}.`);
     if (naechste) gehe('#/kommissionierung?nr=' + naechste.nr); else render();
   };
   ui.acts.teilen = async () => { const d = docPick(ko); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
@@ -430,6 +438,8 @@ function tabAusbeute(z) {
     ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
     ${feld('hackPaketG', 'Hack im Genusspaket portioniert à (g)')}${feld('tueteJeKg', 'Vakuumieren ohne Portionsangabe: 1 Tüte je … kg')}
     ${feld('skKg', 'Suppenknochen (SK) je Tier ca. (kg)')}${feld('fkKg', 'Soßenknochen (FK) je Tier ca. (kg)')}</div></div>
+   <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">
+    ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Innereien je Tier (werden vorab separat geholt)</h3><div class="zeile oben">
     ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('ochsStk', 'Ochsenschwanz ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>`;
   ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
@@ -517,3 +527,26 @@ function neueVersionAnbieten(sw) {
     });
 }
 document.addEventListener('DOMContentLoaded', start);
+
+// Lagerplatz beim Packen bestätigen und in der Bestellung speichern
+async function lagerDialog(o) {
+  const lv = lagerVorschlag(S, o);
+  let ort = o.lagerOrt || lv.ort, platz = o.lagerPlatz || '';
+  const d = $('#dialog');
+  const klick = e => {
+    const b = e.target.closest('[data-ort]');
+    if (b) { e.stopPropagation(); ort = b.dataset.ort; $$('#dialog [data-ort]').forEach(x => x.classList.toggle('haupt', x.dataset.ort === ort)); }
+    if (e.target.closest('[data-k="ok"]')) platz = ($('#lplatz') || {}).value || '';
+  };
+  d.addEventListener('click', klick, true);
+  const k = await dialog(`Nr. ${o.nr} gepackt – wohin?`, `<p>${esc(o.name)} · ${esc(lv.grund)} → Vorschlag: <b>${lv.ort}</b></p>
+    <div class="knopfleiste" style="margin-bottom:12px">${LAGER.map(x => `<button class="btn ${x === ort ? 'haupt' : ''}" data-ort="${x}" style="min-height:60px;font-size:18px">${x === 'Kühlschrank' ? '❄ Kühlschrank' : '▣ Kühlraum (Metzgerkiste)'}</button>`).join('')}</div>
+    <label class="f">Fach / Kisten-Nr. (optional)<input class="feld" id="lplatz" value="${esc(platz)}" placeholder="z. B. Fach 2 oder Kiste 14" autocomplete="off"></label>`,
+    [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Gepackt ✓', cls: 'haupt' }]);
+  d.removeEventListener('click', klick, true);
+  if (k !== 'ok') return false;
+  if (o.status !== 'abgeholt') o.status = 'gepackt';
+  o.lagerOrt = ort; o.lagerPlatz = platz.trim(); o.gepacktAm = o.gepacktAm || todayISO();
+  speichern();
+  return true;
+}

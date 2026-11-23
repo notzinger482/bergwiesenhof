@@ -231,7 +231,9 @@ const DEFAULTS = {
   "leberPortionG": 500,
   "hofZeile": "Bergwiesenhof Bempflingen · Bernd & Claudia Huber · Tel. 07123 / 31543",
   "hackPlatz": "vorne rechts",
-  "rindWieBulle": true
+  "rindWieBulle": true,
+  "lagerMaxArtikel": 3,
+  "lagerMaxKg": 5
  },
  "auto": [
   {

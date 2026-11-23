@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.4.0';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -214,7 +214,7 @@ function viewBestellung(nr, q, vorlage) {
   inhalt().innerHTML = `
   <datalist id="kundenliste">${S.kunden.slice().sort((a, b) => a.name.localeCompare(b.name)).map(k => `<option value="${esc(k.name)}">`).join('')}</datalist>
   <div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">${nr ? `Bestellung Nr. ${nr}` : 'Neue Bestellung'}</h1>
-    ${nr ? `<select class="feld" style="width:auto" data-in="kopf" data-f="status">${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, (o.status || 'offen') === s)).join('')}</select>
+    ${nr ? `${o.lagerOrt ? `<span class="marke blau" style="font-size:15px;padding:6px 12px">${esc(lagerText(o))}</span>` : ''}<button class="btn" data-act="lager">Lagerplatz …</button><select class="feld" style="width:auto" data-in="kopf" data-f="status">${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, (o.status || 'offen') === s)).join('')}</select>
     <button class="btn" data-act="teilen">Teilen …</button><button class="btn rot" data-act="loeschen">Löschen</button>` : ''}
     ${ui.letzteNr && !nr ? `<a class="btn klein" href="#/bestellung/${ui.letzteNr}">Zuletzt: Nr. ${ui.letzteNr} öffnen</a>` : ''}</div>
   <div id="fehler"></div>
@@ -344,6 +344,11 @@ function viewBestellung(nr, q, vorlage) {
     S.bestellungen = S.bestellungen.filter(x => x.nr !== nr); speichern(); ui.formDirty = false; meldung(`Bestellung Nr. ${nr} gelöscht.`); gehe('#/bestellungen');
   };
   ui.acts.speichern = () => bestellungSpeichern(o);
+  ui.acts.lager = async () => {
+    if (ui.formDirty) return meldung('Bitte die Änderungen zuerst speichern.', true);
+    const echt = S.bestellungen.find(x => x.nr === nr);
+    if (await lagerDialog(echt)) { meldung(`Nr. ${nr}: ${lagerText(echt)}`); render(); }
+  };
   ui.acts.teilen = () => { if (ui.formDirty) return meldung('Bitte die Änderungen zuerst speichern, dann teilen.', true); teilenDialog(nr); };
   aktualisieren();
 }
@@ -429,7 +434,7 @@ function viewBestellungen() {
       `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Eingang</th><th>Name</th><th>Tier</th><th class="r">Pakete</th><th>Bestellung</th><th class="r">Schätzpreis</th><th>Status</th><th>Mengencheck</th></tr></thead><tbody>` +
       os.map(o => {
         const ch = o.tier === 'Warteliste' ? 'Warteliste – noch kein Tier' : tier(S, o.tier) ? (checks[o.nr] || '') : 'Tier unbekannt';
-        return `<tr class="klick ${ch.startsWith('reicht') ? 'rot' : ''}" data-act="oeffnen" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${esc(o.name)}</td><td>${esc(o.tier)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein" style="max-width:380px">${esc(kurzText(o))}</td><td class="r">${fmtEur(schaetzpreis(S, o))}</td><td>${statusMarke(o.status)}</td><td>${checkMarke(ch)}</td></tr>`;
+        return `<tr class="klick ${ch.startsWith('reicht') ? 'rot' : ''}" data-act="oeffnen" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${esc(o.name)}</td><td>${esc(o.tier)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein" style="max-width:380px">${esc(kurzText(o))}</td><td class="r">${fmtEur(schaetzpreis(S, o))}</td><td>${statusMarke(o.status)}${o.lagerOrt ? `<div class="klein">${esc(lagerText(o))}</div>` : ''}</td><td>${checkMarke(ch)}</td></tr>`;
       }).join('') + '</tbody></table></div>';
     $('#anzahl').textContent = `${os.length} Bestellung${os.length === 1 ? '' : 'en'}`;
   };
