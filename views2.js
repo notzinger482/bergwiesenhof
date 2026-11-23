@@ -413,12 +413,18 @@ function tabPreise(z) {
 }
 function tabAusbeute(z) {
   const st = S.settings;
-  const summe = S.artikel.reduce((s, a) => s + num(a.anteil), 0);
+  const eigen = st.rindWieBulle === false;
+  const sB = S.artikel.reduce((s, a) => s + num(a.anteil), 0), sR = S.artikel.reduce((s, a) => s + anteilVon(S, a, 'Rind'), 0);
   const feld = (f, t, dec = 0) => `<label class="f" style="width:250px">${t}<input class="feld zahl" inputmode="decimal" data-ch="st" data-f="${f}" value="${fmtNum(st[f], dec || 2)}"></label>`;
   z.innerHTML = `<div class="karte"><h3 style="margin-top:0">Ausbeute je Tier (Anteil am Schlachtgewicht)</h3>
-   <div class="tabwrap"><table class="tab"><thead><tr><th>Bestellartikel</th><th class="r">Anteil (%)</th><th class="r">Bulle ${fmtNum(st.sgBulle)} kg</th><th class="r">Rind ${fmtNum(st.sgRind)} kg</th><th>Teilstücke für die Kistenfüllung</th></tr></thead><tbody>
-   ${S.artikel.map((a, i) => num(a.anteil) > 0 || !istOrgan(a.name) && !a.beutelG ? `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td><td style="width:110px"><input class="feld zahl" inputmode="decimal" data-ch="anteil" value="${fmtNum(num(a.anteil) * 100, 2)}"></td><td class="r">${fmtNum(num(a.anteil) * st.sgBulle, 1)} kg</td><td class="r">${fmtNum(num(a.anteil) * st.sgRind, 1)} kg</td><td><input class="feld" data-ch="teile" value="${esc(a.teile || '')}"></td></tr>` : '').join('')}
-   <tr><td class="fett">Summe</td><td class="r fett">${fmtNum(summe * 100, 1)} %</td><td colspan="3"></td></tr></tbody></table></div></div>
+   <label class="zeile" style="gap:10px;margin-bottom:10px"><input type="checkbox" data-ch="rindwie" style="width:24px;height:24px"${eigen ? '' : ' checked'}> <b>Rind: Werte vom Bullen übernehmen</b> <span class="klein">(Haken weg = eigene Prozente für Rinder eingeben)</span></label>
+   <div class="tabwrap"><table class="tab"><thead><tr><th>Bestellartikel</th><th class="r">Anteil Bulle (%)</th><th class="r">Anteil Rind (%)</th><th class="r">Bulle ${fmtNum(st.sgBulle)} kg</th><th class="r">Rind ${fmtNum(st.sgRind)} kg</th><th>Teilstücke für die Kistenfüllung</th></tr></thead><tbody>
+   ${S.artikel.map((a, i) => num(a.anteil) > 0 || num(a.anteilRind) > 0 || !istOrgan(a.name) && !a.beutelG ? `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td>
+     <td style="width:110px"><input class="feld zahl" inputmode="decimal" data-ch="anteil" data-f="anteil" value="${fmtNum(num(a.anteil) * 100, 2)}"></td>
+     <td style="width:110px"><input class="feld zahl${eigen ? '' : ' auto'}" inputmode="decimal" data-ch="anteil" data-f="anteilRind" value="${fmtNum(anteilVon(S, a, 'Rind') * 100, 2)}"${eigen ? '' : ' readonly'}></td>
+     <td class="r">${fmtNum(num(a.anteil) * st.sgBulle, 1)} kg</td><td class="r">${fmtNum(anteilVon(S, a, 'Rind') * st.sgRind, 1)} kg</td><td><input class="feld" data-ch="teile" value="${esc(a.teile || '')}"></td></tr>` : '').join('')}
+   <tr><td class="fett">Summe</td><td class="r fett">${fmtNum(sB * 100, 1)} %</td><td class="r fett">${fmtNum(sR * 100, 1)} %</td><td colspan="3"></td></tr></tbody></table></div>
+   <p class="klein">Gilt für alle Tiere dieses Typs ohne eingetragenes Schlachtgewicht wie mit. Änderungen wirken sofort auf Mengenprüfung, Paketgewicht und Packplan.</p></div>
    <div class="karte"><h3 style="margin-top:0">Einstellungen</h3><div class="zeile oben">
     ${feld('sgBulle', 'Standard-Schlachtgewicht Bulle (kg)')}${feld('sgRind', 'Standard-Schlachtgewicht Rind/Färse (kg)')}${feld('nenner', 'Ein Genusspaket = 1 / … des Tiers')}
     ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
@@ -427,7 +433,12 @@ function tabAusbeute(z) {
    <div class="karte"><h3 style="margin-top:0">Innereien je Tier (werden vorab separat geholt)</h3><div class="zeile oben">
     ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('ochsStk', 'Ochsenschwanz ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>`;
   ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
-  ui.acts.anteil = el => { S.artikel[+el.closest('tr').dataset.i].anteil = num(el.value) / 100; speichern(); render(); };
+  ui.acts.anteil = el => { if (el.readOnly) return; S.artikel[+el.closest('tr').dataset.i][el.dataset.f] = num(el.value) / 100; speichern(); render(); };
+  ui.acts.rindwie = el => {
+    S.settings.rindWieBulle = el.checked;
+    if (!el.checked) S.artikel.forEach(a => { if (a.anteilRind === undefined || a.anteilRind === null) a.anteilRind = num(a.anteil); });
+    speichern(); render();
+  };
   ui.acts.teile = el => { S.artikel[+el.closest('tr').dataset.i].teile = el.value; speichern(); meldung('Gespeichert.'); };
 }
 function tabAuto(z) {

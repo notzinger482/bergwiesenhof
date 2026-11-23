@@ -10,7 +10,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0.192,
-   "teile": ""
+   "teile": "",
+   "anteilRind": 0.192
   },
   {
    "name": "Braten",
@@ -21,7 +22,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0.112,
-   "teile": "Keule: Unterschale mit Schwanzstück, Kugel/Nuss, Bürgermeisterstück | Schulter: dicker Bug, Schaufelstück, Mittelbug, falsches Filet, Bugdeckel"
+   "teile": "Keule: Unterschale mit Schwanzstück, Kugel/Nuss, Bürgermeisterstück | Schulter: dicker Bug, Schaufelstück, Mittelbug, falsches Filet, Bugdeckel",
+   "anteilRind": 0.112
   },
   {
    "name": "Gulasch geschnitten",
@@ -32,7 +34,8 @@ const DEFAULTS = {
    "amStueck": true,
    "beutelG": 0,
    "anteil": 0.064,
-   "teile": "Kamm/Hals, Hesse"
+   "teile": "Kamm/Hals, Hesse",
+   "anteilRind": 0.064
   },
   {
    "name": "Rostbraten",
@@ -43,7 +46,8 @@ const DEFAULTS = {
    "amStueck": true,
    "beutelG": 0,
    "anteil": 0.053,
-   "teile": "Roastbeef, Hochrippe"
+   "teile": "Roastbeef, Hochrippe",
+   "anteilRind": 0.053
   },
   {
    "name": "Filet",
@@ -54,7 +58,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0.0185,
-   "teile": "Filet"
+   "teile": "Filet",
+   "anteilRind": 0.0185
   },
   {
    "name": "Steak",
@@ -65,7 +70,8 @@ const DEFAULTS = {
    "amStueck": true,
    "beutelG": 0,
    "anteil": 0.043,
-   "teile": "Hüfte"
+   "teile": "Hüfte",
+   "anteilRind": 0.043
   },
   {
    "name": "Rouladen",
@@ -76,7 +82,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0.086,
-   "teile": "Oberschale (reicht sie nicht: Unterschale anschneiden)"
+   "teile": "Oberschale (reicht sie nicht: Unterschale anschneiden)",
+   "anteilRind": 0.086
   },
   {
    "name": "Siedfleisch",
@@ -87,7 +94,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0.098,
-   "teile": "Brust, Fehlrippe, Spannrippe"
+   "teile": "Brust, Fehlrippe, Spannrippe",
+   "anteilRind": 0.098
   },
   {
    "name": "Beinscheiben",
@@ -98,7 +106,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0.041,
-   "teile": "Vorder- und Hinterhesse"
+   "teile": "Vorder- und Hinterhesse",
+   "anteilRind": 0.041
   },
   {
    "name": "Tafelspitz",
@@ -109,7 +118,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0.014,
-   "teile": "Tafelspitz"
+   "teile": "Tafelspitz",
+   "anteilRind": 0.014
   },
   {
    "name": "Suppenknochen (SK)",
@@ -120,7 +130,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 800,
    "anteil": 0,
-   "teile": ""
+   "teile": "",
+   "anteilRind": 0
   },
   {
    "name": "Soßenknochen (FK)",
@@ -131,7 +142,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 1000,
    "anteil": 0,
-   "teile": ""
+   "teile": "",
+   "anteilRind": 0
   },
   {
    "name": "Leber",
@@ -142,7 +154,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0,
-   "teile": ""
+   "teile": "",
+   "anteilRind": 0
   },
   {
    "name": "Nieren",
@@ -153,7 +166,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0,
-   "teile": ""
+   "teile": "",
+   "anteilRind": 0
   },
   {
    "name": "Herz",
@@ -164,7 +178,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0,
-   "teile": ""
+   "teile": "",
+   "anteilRind": 0
   },
   {
    "name": "Zunge",
@@ -175,7 +190,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0,
-   "teile": ""
+   "teile": "",
+   "anteilRind": 0
   },
   {
    "name": "Ochsenschwanz",
@@ -186,7 +202,8 @@ const DEFAULTS = {
    "amStueck": false,
    "beutelG": 0,
    "anteil": 0,
-   "teile": ""
+   "teile": "",
+   "anteilRind": 0
   }
  ],
  "settings": {
@@ -197,7 +214,7 @@ const DEFAULTS = {
   "paketBis": 14,
   "preislisteTitel": "Preisliste (gültig ab 01.10.2026, inkl. 7 % MwSt.)",
   "sgBulle": 420,
-  "sgRind": 320,
+  "sgRind": 300,
   "nenner": 16,
   "hackKiste": 20,
   "kisteMax": 20,
@@ -213,7 +230,8 @@ const DEFAULTS = {
   "ochsStk": 1,
   "leberPortionG": 500,
   "hofZeile": "Bergwiesenhof Bempflingen · Bernd & Claudia Huber · Tel. 07123 / 31543",
-  "hackPlatz": "vorne rechts"
+  "hackPlatz": "vorne rechts",
+  "rindWieBulle": true
  },
  "auto": [
   {

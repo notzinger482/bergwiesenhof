@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.2.0';
+const APP_VERSION = '1.3.0';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -215,7 +215,7 @@ function viewBestellung(nr, q, vorlage) {
   <datalist id="kundenliste">${S.kunden.slice().sort((a, b) => a.name.localeCompare(b.name)).map(k => `<option value="${esc(k.name)}">`).join('')}</datalist>
   <div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">${nr ? `Bestellung Nr. ${nr}` : 'Neue Bestellung'}</h1>
     ${nr ? `<select class="feld" style="width:auto" data-in="kopf" data-f="status">${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, (o.status || 'offen') === s)).join('')}</select>
-    <button class="btn rot" data-act="loeschen">Löschen</button>` : ''}
+    <button class="btn" data-act="teilen">Teilen …</button><button class="btn rot" data-act="loeschen">Löschen</button>` : ''}
     ${ui.letzteNr && !nr ? `<a class="btn klein" href="#/bestellung/${ui.letzteNr}">Zuletzt: Nr. ${ui.letzteNr} öffnen</a>` : ''}</div>
   <div id="fehler"></div>
   <div class="spalten2">
@@ -344,6 +344,7 @@ function viewBestellung(nr, q, vorlage) {
     S.bestellungen = S.bestellungen.filter(x => x.nr !== nr); speichern(); ui.formDirty = false; meldung(`Bestellung Nr. ${nr} gelöscht.`); gehe('#/bestellungen');
   };
   ui.acts.speichern = () => bestellungSpeichern(o);
+  ui.acts.teilen = () => { if (ui.formDirty) return meldung('Bitte die Änderungen zuerst speichern, dann teilen.', true); teilenDialog(nr); };
   aktualisieren();
 }
 function letzteBestellungVon(name) {
@@ -578,4 +579,53 @@ function viewTier(name) {
 function tierBestellListe(name) {
   const os = ordersOfTier(S, name); const ch = mengencheckTier(S, name);
   return `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th class="r">Pakete</th><th>Bestellung</th><th>Mengencheck</th></tr></thead><tbody>${os.map(o => `<tr class="klick ${(ch[o.nr] || '').startsWith('reicht') ? 'rot' : ''}" data-act="best" data-nr="${o.nr}"><td class="r">${o.nr}</td><td>${esc(o.name)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein">${esc(kurzText(o))}</td><td>${checkMarke(ch[o.nr])}</td></tr>`).join('') || '<tr><td colspan="5" class="klein">noch keine Bestellungen</td></tr>'}</tbody></table></div>`;
+}
+
+// =====================================================================
+//  Bestellung teilen
+// =====================================================================
+async function teilenDialog(nr) {
+  const o = S.bestellungen.find(x => x.nr === nr);
+  const zeilen = teilZeilen(S, o);
+  if (!zeilen.length) return meldung('Die Bestellung enthält nichts zum Verschieben.', true);
+  const fehl = teilFehlmengen(S, o);
+  const hatFehl = Object.keys(fehl).length > 0;
+  // Ziel: nächstes Tier nach dem jetzigen, sonst Warteliste
+  const jetzt = tier(S, o.tier);
+  const spaeter = tiereSortiert().filter(t => t.name !== o.tier && (!jetzt || !jetzt.abhol || (t.abhol || '9999') > jetzt.abhol));
+  const zielStd = spaeter.length ? spaeter[0].name : 'Warteliste';
+  const start = teilVorschlag(S, o, hatFehl ? 'fehl' : 20);
+  const html = `<p>Bestellung Nr. ${o.nr} – <b>${esc(o.name)}</b> (jetzt: ${esc(o.tier)}). Die eingetragenen Mengen kommen in eine <b>neue Bestellung</b> beim Ziel-Tier, der Rest bleibt hier.</p>
+    ${hatFehl ? `<p class="warn">Reicht nicht: ${Object.entries(fehl).map(([k, v]) => `${esc(k)} ${fmtNum(v, 1)} kg`).join(', ')}</p>` : '<p class="ok">Mengencheck ist ok – Teilen ist trotzdem möglich.</p>'}
+    <label class="f" style="margin-bottom:10px">verschieben zu<select class="feld" id="tzziel">${tiereSortiert().filter(t => t.name !== o.tier).map(t => opt(t.name, `${t.name}${t.abhol ? ' – Abholung ' + fmtDate(t.abhol) : ''}`, t.name === zielStd)).join('')}${opt('Warteliste', 'Warteliste', zielStd === 'Warteliste')}</select></label>
+    <div class="knopfleiste" style="margin-bottom:8px">${hatFehl ? '<button class="btn klein" data-p="fehl">nur Fehlmenge</button>' : ''}<button class="btn klein" data-p="20">20 %</button><button class="btn klein" data-p="40">40 %</button><button class="btn klein" data-p="50">50 %</button><button class="btn klein" data-p="0">nichts</button></div>
+    <table class="tab"><thead><tr><th>Artikel</th><th class="r">bestellt</th><th class="r">verschieben</th><th></th><th class="r">bleibt</th></tr></thead><tbody>
+    ${zeilen.map(r => `<tr data-row="${esc(r.key)}"><td>${esc(r.text)}</td><td class="r">${fmtNum(r.bestellt, 3)}</td><td style="width:110px"><input class="feld zahl tz" inputmode="decimal" data-key="${esc(r.key)}" value="${fmtNum(start[r.key] || 0, 3)}"></td><td class="klein">${esc(r.einheit)}</td><td class="r tzb"></td></tr>`).join('')}
+    </tbody></table><p class="klein">Stück, Beutel, Portionen und Pakete werden auf ganze Zahlen gerundet, kg auf 0,1 kg. Sonderwünsche bleiben bei der ursprünglichen Bestellung.</p>`;
+  const d = $('#dialog');
+  let werte = null, ziel = zielStd;
+  const bleibt = () => $$('#dialog tbody tr').forEach(tr => {
+    const r = zeilen.find(x => x.key === tr.dataset.row); const inp = $('input', tr);
+    $('.tzb', tr).textContent = fmtNum(r.bestellt - Math.min(r.bestellt, num(inp.value)), 3);
+  });
+  const presets = e => {
+    const b = e.target.closest('[data-p]'); if (!b) return;
+    e.stopPropagation(); e.preventDefault();
+    const v = teilVorschlag(S, o, b.dataset.p === 'fehl' ? 'fehl' : num(b.dataset.p));
+    $$('#dialog input.tz').forEach(i => { i.value = fmtNum(v[i.dataset.key] || 0, 3); }); bleibt();
+  };
+  const merk = e => { if (e.target.closest('[data-k="ok"]')) { werte = {}; $$('#dialog input.tz').forEach(i => { werte[i.dataset.key] = num(i.value); }); ziel = $('#tzziel').value; } };
+  const inp = e => { if (e.target.classList.contains('tz')) bleibt(); };
+  d.addEventListener('click', presets, true); d.addEventListener('click', merk, true); d.addEventListener('input', inp);
+  const p = dialog(`Bestellung Nr. ${o.nr} teilen`, html, [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Teilen', cls: 'haupt' }]);
+  bleibt();
+  const k = await p;
+  d.removeEventListener('click', presets, true); d.removeEventListener('click', merk, true); d.removeEventListener('input', inp);
+  if (k !== 'ok' || !werte) return;
+  const neu = bestellungTeilen(S, o, werte, ziel);
+  if (!neu) return meldung('Nichts zum Verschieben eingetragen.', true);
+  speichern();
+  const c1 = mengencheck(S, o), c2 = mengencheck(S, neu);
+  await dialog('Bestellung geteilt', `<p>Nr. ${o.nr} bleibt bei <b>${esc(o.tier)}</b> – Mengencheck: <b>${esc(c1 || '–')}</b><br>Neu: <b>Nr. ${neu.nr}</b> bei <b>${esc(neu.tier)}</b> – Mengencheck: <b>${esc(c2 || '–')}</b></p><p class="klein">Beide Bestellungen sind miteinander vermerkt (Notiz).</p>`);
+  ui.formDirty = false; render();
 }

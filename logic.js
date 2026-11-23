@@ -58,7 +58,10 @@ const artList = S => S.artikel;
 const art = (S, name) => S.artikel.find(a => a.name === name);
 const istOrgan = name => ORGANE.includes(name);
 const einheitForm = a => a.beutelG > 0 ? 'Btl' : a.einheit; // wie im Eingabeblatt: kg / Btl / Stk
-const ausbeuteArtikel = S => S.artikel.filter(a => num(a.anteil) > 0);
+// Anteil am Schlachtgewicht: Bulle = a.anteil; Rind = a.anteilRind (oder Bulle-Werte, wenn „Werte übernehmen“)
+const rindEigene = S => S.settings.rindWieBulle === false;
+const anteilVon = (S, a, typ) => num(typ === 'Bulle' || !rindEigene(S) ? a.anteil : a.anteilRind);
+const ausbeuteArtikel = S => S.artikel.filter(a => num(a.anteil) > 0 || (rindEigene(S) && num(a.anteilRind) > 0));
 
 // ---------- Bestellung: Mengen ----------
 // Menge je Artikel wie in Blatt "Bestellungen" (kg; Beutel-Artikel in kg; Stück-Artikel in Stk)
@@ -182,17 +185,99 @@ const sortNr = list => list.slice().sort((a, b) => a.nr - b.nr);
 const ordersOfTier = (S, tierName) => sortNr(S.bestellungen.filter(o => o.tier === tierName && o.name));
 const nextNr = S => S.bestellungen.reduce((m, o) => Math.max(m, o.nr), 0) + 1;
 
+// ---------- Bestellung teilen ----------
+// Zeilen, die man verschieben kann: Pakete + jede Position mit Menge. „einheit“ = Eingabeeinheit beim Verschieben.
+function teilZeilen(S, o) {
+  const z = [];
+  if (num(o.pakete) > 0) z.push({ key: '__pakete', text: 'Genusspakete', bestellt: num(o.pakete), einheit: 'Stk', ganz: true });
+  for (const a of S.artikel) {
+    const p = o.pos && o.pos[a.name];
+    if (!p || !(qty(S, o, a.name) > 0)) continue;
+    const eh = einheitForm(a);
+    if (eh === 'kg' && num(p.anzahl) > 0 && !(num(p.menge) > 0)) {
+      const g = num(p.g) > 0 ? num(p.g) : 0;
+      z.push({ key: a.name, text: a.name, bestellt: num(p.anzahl), einheit: g ? `× ${fmtNum(g)} g` : 'Stück', ganz: true, feld: 'anzahl' });
+    } else z.push({ key: a.name, text: a.name, bestellt: num(p.menge), einheit: eh, ganz: eh !== 'kg', feld: 'menge' });
+  }
+  return z;
+}
+// Fehlmenge je Artikel, die bei dieser Bestellung nicht mehr aus dem Tier kommt (in Eingabeeinheit der Zeile)
+function teilFehlmengen(S, o) {
+  const t = tier(S, o.tier);
+  const out = {};
+  if (!t) return out;
+  const nen = num(S.settings.nenner) || 16;
+  for (const a of ausbeuteArtikel(S)) {
+    const y = yieldArt(S, t, a.name);
+    let cum = 0;
+    for (const x of ordersOfTier(S, t.name)) {
+      cum += qty(S, x, a.name) + (a.inPaket ? num(x.pakete) * y / nen : 0);
+      if (x.nr === o.nr) break;
+    }
+    const ueber = cum - y;
+    const eigen = qty(S, o, a.name);
+    if (ueber > 0.001 && eigen > 0) out[a.name] = Math.min(eigen, ueber); // kg
+  }
+  return out;
+}
+// in Eingabeeinheit umrechnen und sinnvoll runden
+function teilRunden(zeile, wert) {
+  const v = Math.max(0, Math.min(zeile.bestellt, num(wert)));
+  return zeile.ganz ? Math.round(v) : Math.round(v * 10) / 10;
+}
+function teilVorschlag(S, o, prozent) {
+  const z = teilZeilen(S, o), v = {};
+  if (prozent === 'fehl') {
+    const f = teilFehlmengen(S, o);
+    for (const r of z) {
+      if (!f[r.key]) { v[r.key] = 0; continue; }
+      const q = qty(S, o, r.key);
+      const anteil = q > 0 ? f[r.key] / q : 0;
+      v[r.key] = r.ganz ? Math.min(r.bestellt, Math.ceil(r.bestellt * anteil - 1e-9)) : Math.min(r.bestellt, Math.ceil(r.bestellt * anteil * 10 - 1e-9) / 10);
+    }
+  } else for (const r of z) v[r.key] = teilRunden(r, r.bestellt * prozent / 100);
+  return v;
+}
+// führt die Teilung aus: verschiebt die angegebenen Mengen in eine neue Bestellung für „ziel“
+function bestellungTeilen(S, o, mengen, ziel) {
+  const z = teilZeilen(S, o);
+  const neu = { nr: nextNr(S), eingang: o.eingang, tier: ziel, name: o.name, tel: o.tel, mail: o.mail, weg: o.weg, notiz: `Teil von Nr. ${o.nr}`, wunsch: '', pakete: 0, pakVak: 0, tuetenManuell: null, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
+  let bewegt = 0;
+  for (const r of z) {
+    const m = teilRunden(r, mengen[r.key]);
+    if (!(m > 0)) continue;
+    bewegt++;
+    if (r.key === '__pakete') {
+      neu.pakete = m;
+      const bleibt = num(o.pakete) - m;
+      neu.pakVak = Math.max(0, num(o.pakVak) - bleibt);
+      o.pakVak = Math.min(num(o.pakVak), bleibt);
+      o.pakete = bleibt;
+      continue;
+    }
+    const p = o.pos[r.key];
+    const np = neu.pos[r.key] = { menge: null, anzahl: null, g: p.g || null, amStueck: !!p.amStueck, vak: !!p.vak };
+    if (r.feld === 'anzahl') { np.anzahl = m; p.anzahl = r3(num(p.anzahl) - m); if (!(p.anzahl > 0)) delete o.pos[r.key]; }
+    else { np.menge = m; p.menge = r3(num(p.menge) - m); if (!(p.menge > 0)) delete o.pos[r.key]; }
+  }
+  if (!bewegt) return null;
+  o.tuetenManuell = null;
+  o.notiz = ((o.notiz ? o.notiz + ' · ' : '') + `Teil verschoben → Nr. ${neu.nr} (${ziel})`).trim();
+  S.bestellungen.push(neu);
+  return neu;
+}
+
 // ---------- Tiere ----------
 const tier = (S, name) => S.tiere.find(t => sameText(t.name, name));
 function sgRechnung(S, t) {
   if (num(t.sg) > 0) return num(t.sg);
   return t.typ === 'Bulle' ? num(S.settings.sgBulle) : num(S.settings.sgRind);
 }
-const yieldArt = (S, t, name) => { const a = art(S, name); return t && a ? sgRechnung(S, t) * num(a.anteil) : 0; };
+const yieldArt = (S, t, name) => { const a = art(S, name); return t && a ? sgRechnung(S, t) * anteilVon(S, a, t.typ) : 0; };
 function tierInfo(S, t) {
   const sg = sgRechnung(S, t);
   const nen = num(S.settings.nenner) || 16;
-  const paketKg = S.artikel.filter(a => a.inPaket && num(a.anteil) > 0).reduce((s, a) => s + num(a.anteil), 0) * sg / nen;
+  const paketKg = S.artikel.filter(a => a.inPaket).reduce((s, a) => s + anteilVon(S, a, t.typ), 0) * sg / nen;
   const ords = ordersOfTier(S, t.name);
   const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
   const checks = mengencheckTier(S, t.name);
@@ -687,7 +772,7 @@ function hofladenSummen(S, jahr) {
 function leererStand() {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   return {
-    app: 'Bestellsystem Bergwiesenhof', version: 1, gespeichert: null,
+    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 3, gespeichert: null,
     artikel: d.artikel, settings: d.settings, auto: d.auto, wege: d.wege,
     kunden: [], tiere: [], bestellungen: [], kisten: [], hofladen: [],
     metzgerManuell: {}, packplaene: {}, letzteSicherung: null
@@ -700,10 +785,15 @@ function bewegungsdatenLeeren(S, mitKunden) {
 function standPruefen(x) {
   if (!x || typeof x !== 'object' || !Array.isArray(x.bestellungen) || !Array.isArray(x.artikel)) throw new Error('Keine gültige Sicherungsdatei des Bestellsystems.');
   const base = leererStand();
+  const altSchema = num(x.schema);
   for (const k of Object.keys(base)) if (x[k] === undefined) x[k] = base[k];
   x.settings = Object.assign({}, base.settings, x.settings);
   if (!x.settings.hackPlatz) x.settings.hackPlatz = 'vorne rechts';
   (x.auto || []).forEach(f => { if (f.spaeter === undefined) f.spaeter = /^hinten/i.test(f.name || ''); });
+  // Version 1.3: eigene Rind-Anteile, Standard-SG Rind 300 kg
+  (x.artikel || []).forEach(a => { if (a.anteilRind === undefined) a.anteilRind = num(a.anteil); });
+  if (x.settings.rindWieBulle === undefined) x.settings.rindWieBulle = true;
+  if (!(altSchema >= 3)) { if (num(x.settings.sgRind) === 320) x.settings.sgRind = 300; x.schema = 3; }
   return x;
 }
 
@@ -711,7 +801,7 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, tierUmbenennen, kundePflegen, kundenStat,
+  tierInfo, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, tierUmbenennen, kundePflegen, kundenStat,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, setDefaults: d => { global.DEFAULTS = d; }
