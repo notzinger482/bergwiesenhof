@@ -494,12 +494,26 @@ async function start() {
       reg.addEventListener('updatefound', () => {
         const nw = reg.installing;
         nw && nw.addEventListener('statechange', () => {
-          if (nw.state === 'installed' && navigator.serviceWorker.controller)
-            dialog('Neue Version', '<p>Eine neue Version der App ist geladen. Jetzt neu starten? (Die Daten bleiben erhalten.)</p>', [{ k: 'x', t: 'Später' }, { k: 'ok', t: 'Neu starten', cls: 'haupt' }]).then(k => { if (k === 'ok') { navigator.serviceWorker.addEventListener('controllerchange', () => location.reload()); nw.postMessage('jetztAktualisieren'); } });
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) neueVersionAnbieten(nw);
         });
       });
+      // eine schon geladene, aber wartende Version sofort anbieten
+      if (reg.waiting && navigator.serviceWorker.controller) neueVersionAnbieten(reg.waiting);
       if (navigator.onLine) reg.update().catch(() => { });
+      // beim Zurückholen der App (ohne Neustart) erneut nach Updates schauen
+      document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && navigator.onLine) reg.update().catch(() => { }); });
     }).catch(() => { });
   }
+}
+let updateAngeboten = false;
+function neueVersionAnbieten(sw) {
+  if (updateAngeboten) return; updateAngeboten = true;
+  dialog('Neue Version', '<p>Eine neue Version der App ist geladen. Jetzt neu starten? (Die Daten bleiben erhalten.)</p>', [{ k: 'x', t: 'Später' }, { k: 'ok', t: 'Neu starten', cls: 'haupt' }])
+    .then(k => {
+      if (k !== 'ok') { updateAngeboten = false; return; }
+      navigator.serviceWorker.addEventListener('controllerchange', () => location.reload());
+      sw.postMessage('jetztAktualisieren');
+      setTimeout(() => location.reload(), 3000);
+    });
 }
 document.addEventListener('DOMContentLoaded', start);
