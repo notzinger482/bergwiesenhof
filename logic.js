@@ -417,10 +417,14 @@ function packplan(S, tierName) {
     if (p.need < C[k].need) C[k].need = p.need;
     C[k].items.push({ art: p.art, kg: r1(p.w) });
   }
-  // jedes Feld im Auto braucht mindestens eine Kiste
+  // Stellplätze vorbereiten
   const auto = S.auto;
-  const nFeld = auto.filter(f => num(f.hoehe) > 0).length;
   const warn = [];
+  const nurHack = c => c.items.length > 0 && c.items.every(i => i.art === HACK);
+  const hackIdx = auto.findIndex(f => sameText(f.name, st.hackPlatz || 'vorne rechts') && num(f.hoehe) > 0);
+  const hatHack = C.some(nurHack);
+  // jedes Feld im Auto braucht mindestens eine Kiste (Hack-Platz nur, wenn es Hack gibt)
+  const nFeld = auto.filter((f, i) => num(f.hoehe) > 0 && (i !== hackIdx || hatHack)).length;
   while (C.length < nFeld) {
     let aMax = -1, wMax = 0;
     C.forEach((c, j) => { if (c.w > wMax && !c.items.some(i => i.art === 'Sonderfälle (beschriftet)' || i.art === HACK)) { wMax = c.w; aMax = j; } });
@@ -434,16 +438,43 @@ function packplan(S, tierName) {
     C.push(neu);
   }
   C = selSort(C, (x, y) => x.need < y.need || (x.need === y.need && x.w > y.w));
-  // Stellplätze
+  // Hackfleisch-Kisten zuerst nummerieren (K1, K2 … der Reihe nach vom Hack-Platz)
+  if (hackIdx >= 0) C = C.filter(nurHack).concat(C.filter(c => !nurHack(c)));
   const cap = auto.reduce((s, f) => s + num(f.hoehe), 0);
   const ordW = (f, i) => (num(f.reihenfolge) > 0 ? num(f.reihenfolge) : 99) * 100 + i;
   const fo = auto.map((f, i) => i).sort((a, b) => ordW(auto[a], a) - ordW(auto[b], b));
   const cnt = auto.map(() => 0);
-  let rest = C.length;
-  for (const i of fo) if (num(auto[i].hoehe) > 0 && rest > 0) { cnt[i] = 1; rest--; }
-  for (const i of fo) if (rest > 0) { let j = Math.min(num(auto[i].hoehe) - cnt[i], rest); if (j > 0) { cnt[i] += j; rest -= j; } }
-  let idx = 0;
-  for (const i of fo) for (let j = 1; j <= cnt[i]; j++) { if (idx < C.length) { C[idx].platz = i; C[idx].ebene = cnt[i] - j + 1; } idx++; }
+  const liste = auto.map(() => []);   // Kisten je Feld in Entnahme-Reihenfolge (erste = oben)
+  // 1) Hackfleisch fest auf den Hack-Platz, der Reihe nach (erste Kiste oben)
+  let pool = C;
+  if (hackIdx >= 0) {
+    const hk = C.filter(nurHack);
+    const passt = hk.slice(0, num(auto[hackIdx].hoehe));
+    passt.forEach(c => liste[hackIdx].push(c));
+    if (hk.length > passt.length) warn.push(`${hk.length} Hack-Kisten, aber auf „${auto[hackIdx].name}“ passen nur ${passt.length} übereinander – der Rest steht woanders.`);
+    pool = C.filter(c => !passt.includes(c));
+  }
+  // 2) übrige Kisten: Plätze zählen – erst je Feld eine, dann die bevorzugten Felder füllen,
+  //    Felder mit „erst stapeln, wenn Rest voll“ (hinten links/rechts) zuletzt, Hack-Platz nur als Notreserve
+  const felderRest = fo.filter(i => i !== hackIdx && num(auto[i].hoehe) > 0);
+  const anz = auto.map(() => 0);
+  let rest = pool.length;
+  for (const i of felderRest) if (rest > 0) { anz[i] = 1; rest--; }
+  const auffuellen = ids => { for (const i of ids) if (rest > 0) { const j = Math.min(num(auto[i].hoehe) - anz[i], rest); if (j > 0) { anz[i] += j; rest -= j; } } };
+  auffuellen(felderRest.filter(i => !auto[i].spaeter));
+  auffuellen(felderRest.filter(i => auto[i].spaeter));
+  if (hackIdx >= 0 && rest > 0) {
+    const frei = num(auto[hackIdx].hoehe) - liste[hackIdx].length;
+    const j = Math.min(frei, rest);
+    if (j > 0) { anz[hackIdx] = j; rest -= j; warn.push(`Platz wird knapp: ${j} Kiste(n) stehen unter dem Hackfleisch auf „${auto[hackIdx].name}“.`); }
+  }
+  // 3) verteilen: früh gebrauchte Kisten an die zuerst erreichbaren Plätze (Entnahme-Reihenfolge), jeweils oben
+  let p = 0;
+  for (const i of felderRest.concat(hackIdx >= 0 ? [hackIdx] : [])) for (let j = 0; j < anz[i]; j++) if (p < pool.length) liste[i].push(pool[p++]);
+  auto.forEach((f, i) => {
+    cnt[i] = liste[i].length;
+    liste[i].forEach((c, j) => { c.platz = i; c.ebene = cnt[i] - j; }); // erste = oberste Ebene
+  });
   if (C.length < nFeld) warn.push(`Nur ${C.length} Kisten – es können nicht alle ${nFeld} Felder im Auto belegt werden.`);
   if (C.length > cap) warn.push(`Achtung: ${C.length} Kisten, aber nur ${cap} Plätze im Auto. Die Kisten ohne Platz sind markiert.`);
   if (C.length > 29) warn.push(`Mehr als 29 Kisten – es gibt nur 29 Etiketten. Nur die ersten 29 kommen ins Kisten-Blatt.`);
@@ -465,9 +496,12 @@ function packplan(S, tierName) {
     const ks = kisten.filter(k => k.platzIdx === i).sort((a, b) => b.ebeneNr - a.ebeneNr);
     return { name: f.name, belegt: cnt[i], hoehe: num(f.hoehe), kisten: ks.map(k => ({ nr: k.nr, text: k.text, oben: k.ebeneNr === cnt[i] })) };
   });
-  // Einladereihenfolge (umgekehrte Entnahme)
-  const einladen = kisten.filter(k => k.platzIdx >= 0).slice().reverse().map((k, n) =>
-    `${n + 1}. Kiste ${k.nr} (${k.text}) → ${k.platz}, ${k.ebeneNr === 1 ? 'unten' : k.ebeneNr + '. Ebene'}`);
+  // Einladereihenfolge: umgekehrt zur Entnahme – hinterste Plätze zuletzt, je Feld von unten nach oben
+  const einladen = [];
+  for (const i of fo.slice().reverse()) {
+    kisten.filter(k => k.platzIdx === i).sort((a, b) => a.ebeneNr - b.ebeneNr)
+      .forEach(k => einladen.push(`${einladen.length + 1}. Kiste ${k.nr} (${k.text}) → ${k.platz}, ${k.ebeneNr === 1 ? 'unten' : k.ebeneNr + '. Ebene'}`));
+  }
   return { tier: t.name, erstellt: new Date().toISOString(), kisten, felder, einladen, cap, warn };
 }
 function selSort(arr, less) {
@@ -668,6 +702,8 @@ function standPruefen(x) {
   const base = leererStand();
   for (const k of Object.keys(base)) if (x[k] === undefined) x[k] = base[k];
   x.settings = Object.assign({}, base.settings, x.settings);
+  if (!x.settings.hackPlatz) x.settings.hackPlatz = 'vorne rechts';
+  (x.auto || []).forEach(f => { if (f.spaeter === undefined) f.spaeter = /^hinten/i.test(f.name || ''); });
   return x;
 }
 

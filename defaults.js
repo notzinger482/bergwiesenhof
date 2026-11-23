@@ -212,56 +212,65 @@ const DEFAULTS = {
   "zungeStk": 1,
   "ochsStk": 1,
   "leberPortionG": 500,
-  "hofZeile": "Bergwiesenhof Bempflingen · Bernd & Claudia Huber · Tel. 07123 / 31543"
+  "hofZeile": "Bergwiesenhof Bempflingen · Bernd & Claudia Huber · Tel. 07123 / 31543",
+  "hackPlatz": "vorne rechts"
  },
  "auto": [
   {
    "name": "hinten links",
    "hoehe": 4,
    "reihenfolge": 1,
-   "zugang": "Tür hinten"
+   "zugang": "Tür hinten",
+   "spaeter": true
   },
   {
    "name": "hinten rechts",
    "hoehe": 4,
    "reihenfolge": 2,
-   "zugang": "Tür hinten"
+   "zugang": "Tür hinten",
+   "spaeter": true
   },
   {
    "name": "vorne rechts",
    "hoehe": 4,
    "reihenfolge": 3,
-   "zugang": "rechte Tür"
+   "zugang": "rechte Tür",
+   "spaeter": false
   },
   {
    "name": "Mitte rechts",
    "hoehe": 3,
    "reihenfolge": 4,
-   "zugang": "wenn hinten rechts leer"
+   "zugang": "wenn hinten rechts leer",
+   "spaeter": false
   },
   {
    "name": "Mitte Mitte",
    "hoehe": 4,
    "reihenfolge": 5,
-   "zugang": "wenn hinten leer"
+   "zugang": "wenn hinten leer",
+   "spaeter": false
   },
   {
    "name": "Mitte links",
    "hoehe": 3,
    "reihenfolge": 6,
-   "zugang": "wenn hinten links leer"
+   "zugang": "wenn hinten links leer",
+   "spaeter": false
   },
   {
    "name": "vorne Mitte",
    "hoehe": 3,
    "reihenfolge": 7,
-   "zugang": "wenn Mitte leer"
+   "zugang": "wenn Mitte leer",
+   "spaeter": false
   },
   {
    "name": "vorne links",
    "hoehe": 4,
    "reihenfolge": 8,
-   "zugang": "wenn Mitte links leer"
+   "zugang": "wenn Mitte links leer",
+   "spaeter": false
   }
  ],
  "wege": [

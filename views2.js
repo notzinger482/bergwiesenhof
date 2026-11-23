@@ -123,7 +123,7 @@ function tabPackplan(tn, ziel, zeige) {
   const t = tier(S, tn);
   const knoepfe = `<button class="btn braun" data-act="erstellen">${pp ? 'Packplan neu berechnen' : 'Packplan erstellen'}</button>${pp ? '<button class="btn" data-act="uebernehmen">In „Kisten“ übernehmen</button>' : ''}`;
   if (!pp) {
-    ziel.innerHTML = `<div class="karte"><p>Für <b>${esc(tn)}</b> gibt es noch keinen Packplan.</p><p class="klein">Der Packplan rechnet aus, welche Stücke in welche Metzgerkiste kommen (max. ${fmtNum(S.settings.kisteMax)} kg, nur Rostbraten + Steak und Filet + Braten + Tafelspitz gemischt), wo jede Kiste im Auto steht und in welcher Reihenfolge eingeladen wird.</p><div class="knopfleiste">${knoepfe}</div></div>`;
+    ziel.innerHTML = `<div class="karte"><p>Für <b>${esc(tn)}</b> gibt es noch keinen Packplan.</p><p class="klein">Der Packplan rechnet aus, welche Stücke in welche Metzgerkiste kommen (max. ${fmtNum(S.settings.kisteMax)} kg, nur Rostbraten + Steak und Filet + Braten + Tafelspitz gemischt), wo jede Kiste im Auto steht und in welcher Reihenfolge eingeladen wird. Hackfleisch steht immer auf „${esc(S.settings.hackPlatz || 'vorne rechts')}“, die übrigen Kisten werden von der Tür hinten aus entnommen.</p><div class="knopfleiste">${knoepfe}</div></div>`;
   } else {
     const draufsicht = autoDraufsicht(pp);
     zeige(docPackplan(pp, t), knoepfe, draufsicht);
@@ -431,11 +431,16 @@ function tabAusbeute(z) {
   ui.acts.teile = el => { S.artikel[+el.closest('tr').dataset.i].teile = el.value; speichern(); meldung('Gespeichert.'); };
 }
 function tabAuto(z) {
-  z.innerHTML = `<div class="karte"><p class="klein">Reihenfolge = in welcher Folge man an die Stapel herankommt (1 = zuerst). Stapelhöhe = max. Kisten übereinander. Jedes Feld bekommt mindestens eine Kiste.</p>
-   <div class="tabwrap"><table class="tab"><thead><tr><th>Stellplatz</th><th class="r">Stapelhöhe</th><th class="r">Reihenfolge (Entnahme)</th><th>Zugang</th></tr></thead><tbody>
-   ${S.auto.map((f, i) => `<tr data-i="${i}"><td class="fett">${esc(f.name)}</td><td style="width:120px"><input class="feld zahl" inputmode="numeric" data-ch="auto" data-f="hoehe" value="${num(f.hoehe)}"></td><td style="width:150px"><input class="feld zahl" inputmode="numeric" data-ch="auto" data-f="reihenfolge" value="${num(f.reihenfolge)}"></td><td><input class="feld" data-ch="auto" data-f="zugang" value="${esc(f.zugang || '')}"></td></tr>`).join('')}
-   <tr><td class="fett">Kisten gesamt (max. pro Tier)</td><td class="r fett">${S.auto.reduce((s, f) => s + num(f.hoehe), 0)}</td><td colspan="2"></td></tr></tbody></table></div></div>`;
-  ui.acts.auto = el => { const f = S.auto[+el.closest('tr').dataset.i]; f[el.dataset.f] = el.dataset.f === 'zugang' ? el.value : num(el.value); speichern(); render(); };
+  const hp = S.settings.hackPlatz || 'vorne rechts';
+  z.innerHTML = `<div class="karte"><p class="klein">Reihenfolge = in welcher Folge man an die Stapel herankommt (1 = zuerst, von der Tür hinten aus). Stapelhöhe = max. Kisten übereinander. Jedes Feld bekommt mindestens eine Kiste.<br>
+   Felder mit „erst stapeln, wenn Rest voll“ bekommen nur <b>eine</b> Kiste, bis alle anderen Felder voll sind. Hackfleisch steht immer auf dem Hack-Platz, Kiste 1 oben.</p>
+   <label class="f" style="max-width:320px;margin-bottom:12px">Hackfleisch-Platz<select class="feld" data-ch="hackplatz">${S.auto.map(f => opt(f.name, f.name, sameText(f.name, hp))).join('')}</select></label>
+   <div class="tabwrap"><table class="tab"><thead><tr><th>Stellplatz</th><th class="r">Stapelhöhe</th><th class="r">Reihenfolge (Entnahme)</th><th class="c">erst stapeln, wenn Rest voll</th><th>Zugang</th></tr></thead><tbody>
+   ${S.auto.map((f, i) => `<tr data-i="${i}"><td class="fett">${esc(f.name)}${sameText(f.name, hp) ? ' <span class="marke gelb">Hack</span>' : ''}</td><td style="width:120px"><input class="feld zahl" inputmode="numeric" data-ch="auto" data-f="hoehe" value="${num(f.hoehe)}"></td><td style="width:150px"><input class="feld zahl" inputmode="numeric" data-ch="auto" data-f="reihenfolge" value="${num(f.reihenfolge)}"></td><td class="c"><label class="check"><input type="checkbox" data-ch="auto" data-f="spaeter"${f.spaeter ? ' checked' : ''}></label></td><td><input class="feld" data-ch="auto" data-f="zugang" value="${esc(f.zugang || '')}"></td></tr>`).join('')}
+   <tr><td class="fett">Kisten gesamt (max. pro Tier)</td><td class="r fett">${S.auto.reduce((s, f) => s + num(f.hoehe), 0)}</td><td colspan="3"></td></tr></tbody></table></div>
+   <p class="klein">Änderungen wirken beim nächsten „Packplan neu berechnen“.</p></div>`;
+  ui.acts.auto = el => { const f = S.auto[+el.closest('tr').dataset.i]; const k = el.dataset.f; f[k] = k === 'zugang' ? el.value : k === 'spaeter' ? el.checked : num(el.value); speichern(); render(); };
+  ui.acts.hackplatz = el => { S.settings.hackPlatz = el.value; speichern(); render(); };
 }
 function tabHof(z) {
   z.innerHTML = `<div class="karte"><label class="f">Fußzeile auf allen Unterlagen (Metzgerauftrag usw.)<input class="feld" data-ch="hz" value="${esc(S.settings.hofZeile || '')}"></label>
