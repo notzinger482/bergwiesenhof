@@ -173,3 +173,65 @@ function excelExport(S) {
     rows: S.artikel.map(a => [a.name, a.einheit, n(a.preis), a.inPaket ? 'ja' : 'nein', n(a.stueckG) || '', a.amStueck ? 'ja' : 'nein', n(a.beutelG) || '', n(a.anteil) || '', a.teile]) };
   return xlsx([B, SW, PO, K, T, KI, H, P]);
 }
+
+// ---------- Automatische Sicherung in Google Drive (über eigenes Google-Skript) ----------
+const autoMeta = { gesendetAm: null, stand: null, letzterVersuch: 0, fehler: null, datei: null };
+let autoLaeuft = false;
+async function autoMetaLaden() { Object.assign(autoMeta, (await idbGet('autoSicherung')) || {}); }
+const autoMetaSpeichern = () => idbSet('autoSicherung', { ...autoMeta }).catch(() => { });
+function sicherungsAdresse(roh) {
+  const t = String(roh || '').trim();
+  if (!t) return null;
+  try {
+    const u = new URL(t);
+    const k = u.searchParams.get('k');
+    u.searchParams.delete('k');
+    if (u.protocol !== 'https:' || !k) return null;
+    return { url: u.toString(), k };
+  } catch (e) { return null; }
+}
+// Sendet die Sicherung; ohne "erzwingen" nur bei Änderungen, mit Internet und höchstens 1× pro Stunde
+async function autoSicherung(erzwingen, test) {
+  const a = sicherungsAdresse(S && S.settings.sicherungUrl);
+  if (!a) return { ok: false, fehler: 'Keine gültige Sicherungs-Adresse eingetragen.' };
+  if (!navigator.onLine) return { ok: false, fehler: 'Kein Internet.' };
+  if (!erzwingen && !test) {
+    if (autoMeta.stand && autoMeta.stand === S.gespeichert) return { ok: true, uebersprungen: 'keine Änderungen' };
+    if (autoMeta.gesendetAm && Date.now() - new Date(autoMeta.gesendetAm) < 60 * 60e3) return { ok: true, uebersprungen: 'letzte Sicherung < 1 Std.' };
+    if (autoMeta.fehler && Date.now() - autoMeta.letzterVersuch < 15 * 60e3) return { ok: false, uebersprungen: 'letzter Versuch fehlgeschlagen' };
+  }
+  if (autoLaeuft) return { ok: false, uebersprungen: 'läuft schon' };
+  autoLaeuft = true;
+  const stand = S.gespeichert;
+  try {
+    autoMeta.letzterVersuch = Date.now();
+    const body = test ? { k: a.k, test: true } : { k: a.k, inhalt: JSON.stringify(S) };
+    const r = await fetch(a.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), redirect: 'follow' });
+    const txt = await r.text();
+    let j; try { j = JSON.parse(txt); } catch (e) { throw new Error('Antwort ist keine Sicherungsbestätigung – ist das Skript als Web-App „für jeden“ bereitgestellt?'); }
+    if (!j.ok) throw new Error(j.fehler || 'unbekannter Fehler');
+    if (!test) { autoMeta.gesendetAm = new Date().toISOString(); autoMeta.stand = stand; autoMeta.datei = j.datei || null; }
+    autoMeta.fehler = null;
+    await autoMetaSpeichern();
+    if (typeof kopfStatus === 'function') kopfStatus();
+    return { ok: true, datei: j.datei, test: !!j.test };
+  } catch (e) {
+    autoMeta.fehler = e.message || String(e);
+    await autoMetaSpeichern();
+    if (typeof kopfStatus === 'function') kopfStatus();
+    return { ok: false, fehler: autoMeta.fehler };
+  } finally { autoLaeuft = false; }
+}
+function autoSicherungStarten() {
+  const versuch = () => { if (S && S.settings.sicherungUrl) autoSicherung(false).catch(() => { }); };
+  setTimeout(versuch, 8000);                       // kurz nach dem Start
+  setInterval(versuch, 5 * 60e3);                  // alle 5 Minuten prüfen
+  window.addEventListener('online', () => setTimeout(versuch, 5000)); // sobald wieder Internet da ist
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(versuch, 3000); });
+}
+// letzte Sicherung egal ob von Hand oder automatisch
+function letzteSicherungZeit() {
+  const a = S.letzteSicherung ? new Date(S.letzteSicherung).getTime() : 0;
+  const b = autoMeta.gesendetAm ? new Date(autoMeta.gesendetAm).getTime() : 0;
+  return Math.max(a, b) || null;
+}

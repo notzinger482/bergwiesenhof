@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -22,9 +22,11 @@ function kopfStatus(txt, warn) {
   const el = $('#kopf .status');
   if (!el) return;
   if (txt) { el.textContent = txt; el.classList.toggle('warn', !!warn); return; }
-  const tage = S.letzteSicherung ? Math.floor((Date.now() - new Date(S.letzteSicherung)) / 864e5) : null;
-  el.classList.toggle('warn', tage === null ? S.bestellungen.length > 0 : tage >= 7);
-  el.innerHTML = `gespeichert ✓<br>${tage === null ? 'noch keine Sicherung' : 'Sicherung: ' + (tage === 0 ? 'heute' : 'vor ' + tage + ' Tag' + (tage === 1 ? '' : 'en'))}`;
+  const ls = letzteSicherungZeit();
+  const tage = ls ? Math.floor((Date.now() - ls) / 864e5) : null;
+  const warnTage = S.settings.sicherungUrl ? 3 : 7;
+  el.classList.toggle('warn', tage === null ? S.bestellungen.length > 0 : tage >= warnTage);
+  el.innerHTML = `gespeichert ✓<br>${tage === null ? 'noch keine Sicherung' : 'Sicherung: ' + (tage === 0 ? 'heute' : 'vor ' + tage + ' Tag' + (tage === 1 ? '' : 'en'))}${autoMeta.fehler && S.settings.sicherungUrl ? ' ⚠' : ''}`;
 }
 
 // ---------- Meldungen / Dialoge ----------
@@ -142,10 +144,11 @@ function viewStart() {
   const offen = S.bestellungen.filter(o => (o.status || 'offen') === 'offen').length;
   const warte = S.bestellungen.filter(o => o.tier === 'Warteliste').length;
   const kommende = tiereSortiert().filter(t => !t.abhol || t.abhol >= isoOf(new Date(Date.now() - 14 * 864e5)));
-  const tage = S.letzteSicherung ? Math.floor((Date.now() - new Date(S.letzteSicherung)) / 864e5) : null;
+  const ls = letzteSicherungZeit();
+  const tage = ls ? Math.floor((Date.now() - ls) / 864e5) : null;
   let h = '';
-  if (S.bestellungen.length && (tage === null || tage >= 7))
-    h += `<div class="hinweis zeile"><div class="platz"><b>Datensicherung:</b> ${tage === null ? 'Es gibt noch keine Sicherung.' : `Letzte Sicherung vor ${tage} Tagen.`} Bitte zu Hause im WLAN eine Sicherung erstellen.</div><button class="btn haupt" data-act="sichern">Jetzt sichern</button></div>`;
+  if (S.bestellungen.length && (tage === null || tage >= (S.settings.sicherungUrl ? 3 : 7)))
+    h += `<div class="hinweis zeile"><div class="platz"><b>Datensicherung:</b> ${tage === null ? 'Es gibt noch keine Sicherung.' : `Letzte Sicherung vor ${tage} Tagen.`} ${S.settings.sicherungUrl ? 'Die automatische Sicherung hat nicht geklappt' + (autoMeta.fehler ? ' (' + esc(autoMeta.fehler) + ')' : '') + '. Bitte ins WLAN gehen oder unter Einstellungen prüfen.' : 'Bitte zu Hause im WLAN eine Sicherung erstellen.'}</div><button class="btn haupt" data-act="sichern">Jetzt sichern</button></div>`;
   if (!ui.dauerhaft) h += `<div class="hinweis klein">Hinweis: Der dauerhafte Speicher ist noch nicht bestätigt. Bitte die App über „Zum Startbildschirm hinzufügen“ installieren – dann löscht Android die Daten nicht von selbst.</div>`;
   h += `<div class="zeile" style="margin-bottom:16px"><a class="btn haupt" href="#/neu" style="min-height:60px;font-size:19px;padding:0 28px">+ Neue Bestellung</a>
     <div class="kachel"><div class="gross">${offen}</div><div class="klein">offene Bestellungen</div></div>
@@ -156,7 +159,7 @@ function viewStart() {
   if (!kommende.length) h += `<div class="karte">Noch keine Tiere angelegt. <a href="#/tier/neu">Tier anlegen</a></div>`;
   h += '<div class="raster">' + kommende.map(tierKarte).join('') + '</div>';
   inhalt().innerHTML = h;
-  ui.acts.sichern = () => sicherungErstellen();
+  ui.acts.sichern = async () => { if (S.settings.sicherungUrl) { const r = await autoSicherung(true); if (r.ok) { meldung('Sicherung in Google Drive abgelegt: ' + r.datei); render(); return; } meldung('Google-Drive-Sicherung fehlgeschlagen: ' + r.fehler, true); } sicherungErstellen(true); };
   ui.acts.tier = el => gehe('#/schlachttag/menge?tier=' + encodeURIComponent(el.dataset.t));
 }
 function tierKarte(t) {

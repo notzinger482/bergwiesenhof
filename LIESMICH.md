@@ -1,6 +1,6 @@
 # Bestellsystem Bergwiesenhof – Tablet-App
 
-Version 1.0.0 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
+Version 1.1.0 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
 
 Die App ersetzt die Excel-Datei mit allen Makros. Sie läuft nach der Installation **komplett offline**.
 Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in die Cloud und für Updates.
@@ -38,11 +38,15 @@ Die Daten (Bestellungen, Kunden …) liegen **nur auf dem Tablet**, nicht auf de
 
 ## Datensicherung
 
-**Einstellungen → Daten & Sicherung → „Sicherung teilen“** (zu Hause im WLAN) → z. B. OneDrive, Google Drive oder Mail an dich selbst.
-Bitte jede Woche machen. Die App erinnert, wenn die letzte Sicherung älter als 7 Tage ist.
+**Automatisch in Google Drive:** Sobald das Tablet Internet hat und die App offen ist, sichert sie bei Änderungen
+(höchstens 1× pro Stunde) in den Drive-Ordner **„Bergwiesenhof“**. Dafür läuft in deinem Google-Konto das kleine
+Skript `Google-Sicherung\Code.gs` (Einrichtung siehe Anleitung im Chat). Aufgeräumt wird automatisch:
+die neuesten 30 Sicherungen bleiben, davor eine pro Tag für 90 Tage.
+
+**Von Hand:** Einstellungen → Daten & Sicherung → „Sicherung teilen“ (z. B. Gmail an dich selbst).
 Zusätzlich legt die App selbst eine Tageskopie der letzten 14 Tage auf dem Tablet an.
 
-Mit **„Sicherung einspielen“** lässt sich alles wiederherstellen, z. B. auf einem neuen Tablet.
+**Wiederherstellen:** Sicherungsdatei aus Drive aufs Tablet laden → Einstellungen → „Sicherung einspielen“.
 
 ## Updates
 

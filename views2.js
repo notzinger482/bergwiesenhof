@@ -314,9 +314,18 @@ async function tabDaten(z) {
   const tage = S.letzteSicherung ? new Date(S.letzteSicherung).toLocaleString('de-DE') : 'noch nie';
   const snaps = await schnappschuesse();
   if (!document.body.contains(z)) return;
+  const adr = sicherungsAdresse(S.settings.sicherungUrl);
+  const autoTxt = !S.settings.sicherungUrl ? 'aus' : !adr ? '<span class="warn">Adresse ungültig</span>' :
+    (autoMeta.gesendetAm ? `letzte: <b>${new Date(autoMeta.gesendetAm).toLocaleString('de-DE')}</b>${autoMeta.datei ? ' (' + esc(autoMeta.datei) + ')' : ''}` : 'noch keine') +
+    (autoMeta.fehler ? `<br><span class="warn">Letzter Versuch fehlgeschlagen: ${esc(autoMeta.fehler)}</span>` : '');
   z.innerHTML = `<div class="spalten2"><div>
-    <div class="karte"><h3 style="margin-top:0">Datensicherung</h3>
-      <p>Letzte Sicherung: <b>${tage}</b><br><span class="klein">Alle Daten liegen nur auf diesem Tablet. Bitte regelmäßig (z. B. jeden Sonntag) zu Hause im WLAN sichern und die Datei in OneDrive/Google Drive oder per Mail ablegen.</span></p>
+    <div class="karte"><h3 style="margin-top:0">Automatische Sicherung in Google Drive</h3>
+      <p class="klein">Sobald das Tablet Internet hat und die App offen ist, wird bei Änderungen automatisch gesichert (höchstens 1× pro Stunde) – in den Drive-Ordner „Bergwiesenhof“.</p>
+      <label class="f">Sicherungs-Adresse (aus der Mail an dich selbst einfügen)<input class="feld" id="sadr" value="${esc(S.settings.sicherungUrl || '')}" placeholder="https://script.google.com/macros/s/…/exec?k=…" autocomplete="off"></label>
+      <p class="klein">Status: ${autoTxt}</p>
+      <div class="knopfleiste"><button class="btn" data-act="sadrSpeichern">Adresse speichern & testen</button>${adr ? '<button class="btn haupt" data-act="sJetzt">Jetzt sichern</button>' : ''}</div></div>
+    <div class="karte"><h3 style="margin-top:0">Datensicherung von Hand</h3>
+      <p>Letzte Sicherung von Hand: <b>${tage}</b><br><span class="klein">Zusätzlich oder falls die automatische Sicherung nicht eingerichtet ist: Datei per Gmail an dich selbst oder in Drive ablegen.</span></p>
       <div class="knopfleiste"><button class="btn haupt" data-act="teilen">Sicherung teilen (Drive, Mail …)</button><button class="btn" data-act="datei">Sicherung als Datei speichern</button></div></div>
     <div class="karte"><h3 style="margin-top:0">Sicherung einspielen</h3><p class="klein">Ersetzt alle Daten auf diesem Tablet durch die Sicherungsdatei (z. B. nach einem Gerätewechsel).</p>
       <input type="file" accept=".json,application/json" id="datei" style="display:none"><button class="btn" data-act="laden">Sicherungsdatei wählen …</button></div>
@@ -331,6 +340,18 @@ async function tabDaten(z) {
       <button class="btn braun" data-act="jahr">Neues Jahr beginnen …</button></div>
     <div class="karte"><h3 style="margin-top:0">Alles zurücksetzen</h3><p class="klein">Löscht Bewegungsdaten (optional auch Kunden). Preisliste und Einstellungen bleiben.</p><button class="btn rot" data-act="reset">Zurücksetzen …</button></div>
   </div></div>`;
+  ui.acts.sadrSpeichern = async () => {
+    const roh = $('#sadr').value.trim();
+    if (roh && !sicherungsAdresse(roh)) return meldung('Die Adresse muss mit https:// beginnen und am Ende ?k=… (den Schlüssel) enthalten.', true);
+    S.settings.sicherungUrl = roh; speichern();
+    if (!roh) { meldung('Automatische Sicherung ausgeschaltet.'); return render(); }
+    meldung('Teste Verbindung …');
+    const t = await autoSicherung(true, true);
+    if (!t.ok) { meldung('Test fehlgeschlagen: ' + t.fehler, true); return render(); }
+    const r = await autoSicherung(true);
+    meldung(r.ok ? 'Verbindung klappt – erste Sicherung in Google Drive: ' + r.datei : 'Fehler: ' + r.fehler, !r.ok); render();
+  };
+  ui.acts.sJetzt = async () => { meldung('Sichere …'); const r = await autoSicherung(true); meldung(r.ok ? 'Gesichert in Google Drive: ' + r.datei : 'Fehler: ' + r.fehler, !r.ok); render(); };
   ui.acts.teilen = () => sicherungErstellen(true);
   ui.acts.datei = () => sicherungErstellen(false);
   ui.acts.excel = async () => { const r = await teilenDatei(excelExport(S), `Bergwiesenhof_Export_${stempel()}.xlsx`, 'Excel-Export', ''); if (r === 'gespeichert') meldung('Excel-Datei im Ordner „Download“ gespeichert.'); };
@@ -429,7 +450,7 @@ function tabHof(z) {
     <li><b>Kommissionieren</b>: je Bestellung „aus Kiste 3 → 2,0 kg Braten“, antippen wenn erledigt, dann „Gepackt ✓ und weiter“.</li>
     <li><b>Packliste Kühlhaus</b>: Endbetrag eintragen, Status „abgeholt“ setzen.</li>
     <li>Am Ende: <b>Kisten → Tier abgeschlossen</b> – Reste gehen an den Hofladen.</li>
-    <li>Jede Woche: <b>Einstellungen → Sicherung teilen</b> (zu Hause im WLAN).</li></ol></div>`;
+    <li>Datensicherung: läuft automatisch in Google Drive, sobald Internet da ist (Einstellungen → Daten & Sicherung). Die Kopfzeile zeigt, wann zuletzt gesichert wurde.</li></ol></div>`;
   ui.acts.hz = el => { S.settings.hofZeile = el.value; speichern(); meldung('Gespeichert.'); };
   ui.acts.wege = el => { S.wege = el.value.split(',').map(x => x.trim()).filter(Boolean); speichern(); meldung('Gespeichert.'); };
 }
@@ -446,10 +467,12 @@ async function start() {
   } catch (e) {
     document.body.innerHTML = `<div style="padding:30px"><h2>Daten konnten nicht geladen werden</h2><p>${esc(e.message)}</p></div>`; return;
   }
+  await autoMetaLaden().catch(() => { });
   ui.dauerhaft = await istDauerhaft();
   if (!ui.dauerhaft) ui.dauerhaft = await dauerhaftAnfordern();
   kopfStatus();
   render();
+  autoSicherungStarten();
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
     navigator.serviceWorker.register('sw.js').then(reg => {
       reg.addEventListener('updatefound', () => {
