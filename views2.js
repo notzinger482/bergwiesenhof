@@ -316,7 +316,7 @@ function viewHofladen() {
 // =====================================================================
 //  Einstellungen & Datensicherung
 // =====================================================================
-const EREITER = [['daten', 'Daten & Sicherung'], ['preise', 'Preisliste'], ['ausbeute', 'Ausbeute & Kisten'], ['auto', 'Auto (Stellplätze)'], ['hof', 'Hof & Hilfe']];
+const EREITER = [['daten', 'Daten & Sicherung'], ['preise', 'Preisliste'], ['paket', 'Genusspaket'], ['ausbeute', 'Ausbeute & Kisten'], ['auto', 'Auto (Stellplätze)'], ['hof', 'Hof & Hilfe']];
 async function sicherungErstellen(teilen) {
   const blob = sicherungBlob(S), name = sicherungName();
   const r = teilen ? await teilenDatei(blob, name, 'Sicherung Bestellsystem', '') : (download(blob, name), 'gespeichert');
@@ -330,6 +330,7 @@ function viewEinstellungen(tab) {
   else if (tab === 'preise') tabPreise(z);
   else if (tab === 'ausbeute') tabAusbeute(z);
   else if (tab === 'auto') tabAuto(z);
+  else if (tab === 'paket') tabPaket(z);
   else tabHof(z);
 }
 async function tabDaten(z) {
@@ -420,16 +421,16 @@ async function tabDaten(z) {
 function tabPreise(z) {
   const st = S.settings;
   z.innerHTML = `<div class="karte"><label class="f">Überschrift der Preisliste<input class="feld" data-ch="st" data-f="preislisteTitel" value="${esc(st.preislisteTitel || '')}"></label></div>
-   <div class="karte"><h3 style="margin-top:0">Genusspaket</h3><div class="zeile">
-    ${[['preisPaketKg', 'Preis je kg (€)'], ['preisVakPaket', 'Vakuumieren je Paket (€)'], ['preisTuete', 'Vakuumieren je Tüte (€)'], ['paketVon', 'Gewicht ca. von (kg)'], ['paketBis', 'Gewicht ca. bis (kg)']].map(([f, t]) => `<label class="f" style="width:180px">${t}<input class="feld zahl" inputmode="decimal" data-ch="st" data-f="${f}" value="${fmtNum(st[f], 2)}"></label>`).join('')}</div></div>
-   <div class="tabwrap"><table class="tab"><thead><tr><th>Artikel</th><th>bestellt in</th><th class="r">Preis (€/kg)</th><th class="c">im Genusspaket</th><th class="r">Stückgewicht (g)</th><th class="c">„am Stück“ möglich</th><th class="r">fester Beutel (g)</th></tr></thead><tbody>
+   <div class="karte"><h3 style="margin-top:0">Genusspaket <span class="klein">– Inhalt unter Einstellungen → Genusspaket, zurzeit ca. ${fmtNum(paketGewicht(S), 1)} kg</span></h3><div class="zeile">
+    ${[['preisPaketKg', 'Preis je kg (€)'], ['preisVakPaket', 'Vakuumieren je Paket (€)'], ['preisTuete', 'Vakuumieren je Tüte (€)']].map(([f, t]) => `<label class="f" style="width:180px">${t}<input class="feld zahl" inputmode="decimal" data-ch="st" data-f="${f}" value="${fmtNum(st[f], 2)}"></label>`).join('')}</div></div>
+   <div class="tabwrap"><table class="tab"><thead><tr><th>Artikel</th><th>bestellt in</th><th class="r">Preis (€/kg)</th><th class="r">im Genusspaket</th><th class="r">Stückgewicht (g)</th><th class="c">„am Stück“ möglich</th><th class="r">fester Beutel (g)</th></tr></thead><tbody>
    ${S.artikel.map((a, i) => `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td><td>${esc(a.einheit)}</td>
      <td style="width:110px"><input class="feld zahl" inputmode="decimal" data-ch="art" data-f="preis" value="${fmtNum(a.preis, 2)}"></td>
-     <td class="c"><label class="check"><input type="checkbox" data-ch="art" data-f="inPaket"${a.inPaket ? ' checked' : ''}></label></td>
+     <td class="r klein">${paketListe(S).filter(p => p.art === a.name).map(p => `${fmtNum(p.anzahl)} × ${fmtNum(p.g)} g`).join(' + ')}</td>
      <td style="width:110px"><input class="feld zahl" inputmode="numeric" data-ch="art" data-f="stueckG" value="${num(a.stueckG) || ''}"></td>
      <td class="c"><label class="check"><input type="checkbox" data-ch="art" data-f="amStueck"${a.amStueck ? ' checked' : ''}></label></td>
      <td style="width:110px"><input class="feld zahl" inputmode="numeric" data-ch="art" data-f="beutelG" value="${num(a.beutelG) || ''}"></td></tr>`).join('')}
-   </tbody></table></div><p class="klein">„im Genusspaket“: davon bekommt jedes Paket 1/${num(st.nenner)}. Stückgewicht: für Bestellungen nach Stück (z. B. 4 Rostbraten). Preisänderungen gelten sofort auch für die Schätzpreise bestehender Bestellungen.</p>`;
+   </tbody></table></div><p class="klein">„im Genusspaket“ wird unter Einstellungen → Genusspaket festgelegt. Stückgewicht: für Bestellungen nach Stück (z. B. 4 Rostbraten). Preisänderungen gelten sofort auch für die Schätzpreise bestehender Bestellungen.</p>`;
   ui.acts.st = el => { S.settings[el.dataset.f] = el.type === 'text' && !el.classList.contains('zahl') ? el.value : num(el.value); speichern(); meldung('Gespeichert.'); };
   ui.acts.art = el => { const a = S.artikel[+el.closest('tr').dataset.i]; a[el.dataset.f] = el.type === 'checkbox' ? el.checked : num(el.value); speichern(); meldung('Gespeichert.'); };
 }
@@ -448,9 +449,9 @@ function tabAusbeute(z) {
    <tr><td class="fett">Summe</td><td class="r fett">${fmtNum(sB * 100, 1)} %</td><td class="r fett">${fmtNum(sR * 100, 1)} %</td><td colspan="3"></td></tr></tbody></table></div>
    <p class="klein">Gilt für alle Tiere dieses Typs ohne eingetragenes Schlachtgewicht wie mit. Änderungen wirken sofort auf Mengenprüfung, Paketgewicht und Packplan.</p></div>
    <div class="karte"><h3 style="margin-top:0">Einstellungen</h3><div class="zeile oben">
-    ${feld('sgBulle', 'Standard-Schlachtgewicht Bulle (kg)')}${feld('sgRind', 'Standard-Schlachtgewicht Rind/Färse (kg)')}${feld('nenner', 'Ein Genusspaket = 1 / … des Tiers')}
+    ${feld('sgBulle', 'Standard-Schlachtgewicht Bulle (kg)')}${feld('sgRind', 'Standard-Schlachtgewicht Rind/Färse (kg)')}
     ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
-    ${feld('hackPaketG', 'Hack im Genusspaket portioniert à (g)')}<label class="f" style="width:250px">Bug-Anteil am Braten (%) – darf bei Bedarf ins Hack<input class="feld zahl" inputmode="decimal" data-ch="bug" value="${fmtNum((has(st.bugAnteilBraten) ? num(st.bugAnteilBraten) : 0.5) * 100, 1)}"></label>${feld('tueteJeKg', 'Vakuumieren ohne Portionsangabe: 1 Tüte je … kg')}
+    <label class="f" style="width:250px">Bug-Anteil am Braten (%) – darf bei Bedarf ins Hack<input class="feld zahl" inputmode="decimal" data-ch="bug" value="${fmtNum((has(st.bugAnteilBraten) ? num(st.bugAnteilBraten) : 0.5) * 100, 1)}"></label>${feld('tueteJeKg', 'Vakuumieren ohne Portionsangabe: 1 Tüte je … kg')}
     ${feld('skKg', 'Suppenknochen (SK) je Tier ca. (kg)')}${feld('fkKg', 'Soßenknochen (FK) je Tier ca. (kg)')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">
     ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}</div></div>
@@ -465,6 +466,35 @@ function tabAusbeute(z) {
     speichern(); render();
   };
   ui.acts.teile = el => { S.artikel[+el.closest('tr').dataset.i].teile = el.value; speichern(); meldung('Gespeichert.'); };
+}
+function tabPaket(z) {
+  const st = S.settings;
+  if (!Array.isArray(st.paket)) st.paket = [];
+  const P = st.paket;
+  const artOpt = sel => S.artikel.filter(a => !istOrgan(a.name)).map(a => opt(a.name, a.name, a.name === sel)).join('');
+  const kg = p => num(p.anzahl) * num(p.g) / 1000;
+  const sum = paketGewicht(S);
+  const knochen = P.filter(p => p.art === 'Suppenknochen (SK)' || p.art === 'Soßenknochen (FK)').reduce((s, p) => s + kg(p), 0);
+  const tierTxt = typ => { const t = { name: '', typ, sg: null }; return `${typ} ${fmtNum(sgRechnung(S, t))} kg: max. <b>${maxPakete(S, t)}</b> Pakete`; };
+  z.innerHTML = `<div class="spalten2" style="grid-template-columns:minmax(560px,1.3fr) minmax(330px,1fr)"><div class="karte" style="padding:0"><div class="tabwrap" style="border:none"><table class="tab"><thead><tr><th>Inhalt je Genusspaket</th><th class="r">Anzahl</th><th class="r">g je Stück</th><th class="r">= kg</th><th></th></tr></thead><tbody>
+    ${P.map((p, i) => `<tr data-i="${i}"><td><select class="feld" data-ch="pk" data-f="art">${artOpt(p.art)}</select></td>
+      <td style="width:84px"><input class="feld zahl" inputmode="numeric" data-ch="pk" data-f="anzahl" value="${fmtNum(p.anzahl)}"></td>
+      <td style="width:104px"><input class="feld zahl" inputmode="numeric" data-ch="pk" data-f="g" value="${fmtNum(p.g)}"></td>
+      <td class="r fett">${fmtNum(kg(p), 2)}</td><td style="width:50px"><button class="btn klein rot" data-act="pkweg" data-i="${i}">✕</button></td></tr>`).join('') || '<tr><td colspan="5" class="klein">Noch kein Inhalt.</td></tr>'}
+    <tr><td class="fett">Gewicht je Paket</td><td></td><td></td><td class="r fett">${fmtNum(sum, 2)} kg</td><td></td></tr>
+    <tr><td class="klein">davon Knochen</td><td></td><td></td><td class="r klein">${fmtNum(knochen, 2)} kg</td><td></td></tr>
+    <tr><td class="klein">Fleisch ohne Knochen</td><td></td><td></td><td class="r klein">${fmtNum(sum - knochen, 2)} kg</td><td></td></tr></tbody></table></div>
+    <div class="knopfleiste" style="padding:10px 12px"><button class="btn klein" data-act="pkneu">+ Inhalt</button></div></div>
+    <div><div class="karte"><h3 style="margin-top:0">Hackfleisch im Paket</h3><p class="klein">Offen: eine Tüte mit der ganzen Hack-Menge. Vakuumiert: in Portionen.</p>
+      <label class="f" style="width:260px">vakuumiert portioniert à (g)<input class="feld zahl" inputmode="numeric" data-ch="st" data-f="hackPaketG" value="${fmtNum(st.hackPaketG)}"></label></div>
+     <div class="karte"><h3 style="margin-top:0">Pakete je Tier</h3>
+      <label class="f" style="width:260px">höchstens … Genusspakete je Tier<input class="feld zahl" inputmode="numeric" data-ch="st" data-f="nenner" value="${fmtNum(st.nenner)}"></label>
+      <p class="klein" style="margin-bottom:0">Zusätzlich begrenzt durch die Ausbeute (Hack inkl. Gulasch):<br>${tierTxt('Rind')} · ${tierTxt('Bulle')}</p></div>
+     <div class="karte klein">Preis: ${fmtEur(st.preisPaketKg)} je kg × ${fmtNum(sum, 2)} kg = ca. <b>${fmtEur(sum * num(st.preisPaketKg))}</b> je Paket (Preis unter „Preisliste“). Änderungen gelten sofort für Mengencheck, Metzgerauftrag, Ladeplan, Kommissionieren und Schätzpreise.</div></div></div>`;
+  ui.acts.pk = el => { const p = P[+el.closest('tr').dataset.i]; const f = el.dataset.f; p[f] = f === 'art' ? el.value : num(el.value); speichern(); render(); };
+  ui.acts.pkweg = el => { P.splice(+el.dataset.i, 1); speichern(); render(); };
+  ui.acts.pkneu = () => { P.push({ art: 'Braten', anzahl: 1, g: 1000 }); speichern(); render(); };
+  ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
 }
 function tabAuto(z) {
   const hp = S.settings.hackPlatz || 'vorne rechts';

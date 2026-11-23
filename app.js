@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.5.4';
+const APP_VERSION = '1.6.0';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -164,7 +164,7 @@ function viewStart() {
 }
 function tierKarte(t) {
   const i = tierInfo(S, t);
-  const nen = num(S.settings.nenner) || 16;
+  const nen = i.maxPak || 1;
   const pct = Math.min(100, i.pakete / nen * 100);
   return `<div class="karte tierkarte" data-act="tier" data-t="${esc(t.name)}">
     <div class="kopfz"><span class="name">${esc(t.name)}</span><span class="klein">${esc(t.typ || '')}</span></div>
@@ -238,7 +238,7 @@ function viewBestellung(nr, q, vorlage) {
           <label class="f ganz">Notiz intern<input class="feld" data-in="kopf" data-f="notiz" value="${esc(o.notiz)}"></label>
         </div>
       </div>
-      <div class="karte"><h3 style="margin-top:0">Genusspakete <span class="klein">(1/${num(st.nenner)} Tier, ca. ${fmtNum(st.paketVon)}–${fmtNum(st.paketBis)} kg, ${fmtEur(st.preisPaketKg)}/kg)</span></h3>
+      <div class="karte"><h3 style="margin-top:0">Genusspakete <span class="klein">(ca. ${fmtNum(paketGewicht(S), 1)} kg, ${fmtEur(st.preisPaketKg)}/kg)</span></h3><div class="klein" style="margin:-4px 0 8px">${esc(paketListe(S).map(p => (num(p.anzahl) > 1 ? fmtNum(p.anzahl) + ' ' : fmtNum(num(p.anzahl) * num(p.g) / 1000, 2) + ' kg ') + p.art).join(' · '))}</div>
         <div class="zeile">
           <div><div class="klein fett">Anzahl</div><div class="stepper"><button data-act="step" data-f="pakete" data-d="-1">−</button><input class="feld zahl" inputmode="numeric" data-in="kopf" data-f="pakete" value="${num(o.pakete) || ''}"><button data-act="step" data-f="pakete" data-d="1">+</button></div></div>
           <div><div class="klein fett">davon vakuumiert (${fmtEur(st.preisVakPaket)})</div><div class="stepper"><button data-act="step" data-f="pakVak" data-d="-1">−</button><input class="feld zahl" inputmode="numeric" data-in="kopf" data-f="pakVak" value="${num(o.pakVak) || ''}"><button data-act="step" data-f="pakVak" data-d="1">+</button></div></div>

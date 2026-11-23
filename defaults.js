@@ -220,6 +220,17 @@ const DEFAULTS = {
   "kisteMax": 20,
   "kisteAusnahme": 25,
   "hackPaketG": 500,
+  "paket": [
+   { "art": "Hackfleisch", "anzahl": 1, "g": 3000 },
+   { "art": "Soßenknochen (FK)", "anzahl": 1, "g": 1000 },
+   { "art": "Suppenknochen (SK)", "anzahl": 1, "g": 800 },
+   { "art": "Rostbraten", "anzahl": 6, "g": 250 },
+   { "art": "Steak", "anzahl": 6, "g": 250 },
+   { "art": "Beinscheiben", "anzahl": 4, "g": 400 },
+   { "art": "Rouladen", "anzahl": 8, "g": 180 },
+   { "art": "Siedfleisch", "anzahl": 1, "g": 1500 },
+   { "art": "Braten", "anzahl": 1, "g": 3000 }
+  ],
   "tueteJeKg": 1,
   "skKg": 15,
   "fkKg": 10,
