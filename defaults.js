@@ -279,6 +279,8 @@ const DEFAULTS = {
   "hackKiste": 20,
   "fettSiedProzent": 50,
   "hackHof500Prozent": 50,
+  "kommToleranz": 15,
+  "lagerKuehlhaus": 30,
   "kisteMax": 20,
   "kisteAusnahme": 25,
   "hackPaketG": 500,

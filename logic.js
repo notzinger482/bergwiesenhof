@@ -1162,6 +1162,101 @@ function abholGruppe(S, tierName) {
   return g.sort((a, b) => String(a.schlacht || '').localeCompare(String(b.schlacht || '')) || S.tiere.indexOf(a) - S.tiere.indexOf(b)).map(x => x.name);
 }
 const PP_BIG = 100000;
+// ---------- Kommissionieren mit Ist-Gewicht (seit 3.1, Wunsch Nutzer) ----------
+// Jede Pick-Zeile wird gewogen (Summe der Teile der Zeile, z. B. 6 Steaks zusammen); Hack und Innereien sind vorgepackt → nur abhaken.
+// Abweichung über der Toleranz (Standard ±15 %) braucht einen Vermerk an der Bestellung. Preis bleibt bei der Waage beim Abholen –
+// die Ist-Gewichte sind für die Ausbeute-Statistik und die Referenz-Einzelgewichte.
+const ohneWiegen = name => name === HACK || istOrgan(name);
+const kommToleranz = S => (has(S.settings.kommToleranz) ? num(S.settings.kommToleranz) : 15) / 100;
+const mitStueck = (S, name) => name === OCHS || (art(S, name) && num(art(S, name).stueckG) > 0 && !(num(art(S, name).beutelG) > 0));
+function stkSoll(S, p) {
+  if (p.einheit === 'Stk') return Math.round(num(p.menge));
+  const a = art(S, p.art);
+  if (!a || !mitStueck(S, p.art)) return null;
+  return Math.max(1, Math.round(num(p.menge) * 1000 / num(a.stueckG)));
+}
+// Abweichung Ist zu Soll (Anteil); bei Stück-Artikeln zählt die Stückzahl
+function kommAbweichung(S, p, ist) {
+  if (p.einheit === 'Stk') return num(p.menge) > 0 ? Math.abs(num(ist.stk) - num(p.menge)) / num(p.menge) : 0;
+  return num(p.menge) > 0 ? Math.abs(num(ist.kg) - num(p.menge)) / num(p.menge) : 0;
+}
+function kommSetzen(S, o, p, ist) {
+  o.komm = o.komm || {};
+  const e = { kg: has(ist.kg) ? r3(num(ist.kg)) : null, stk: has(ist.stk) ? num(ist.stk) : null, soll: p.menge, einheit: p.einheit, art: p.art, kiste: p.kiste, zeit: new Date().toISOString() };
+  if (ist.vermerk) e.vermerk = String(ist.vermerk).trim();
+  if (ist.ok) e.ok = true;
+  o.komm[p.key] = e;
+  // Statistik: als Erfassung beim Tier der Bestellung (ersetzt die Karte „Ausbeute wiegen“)
+  const t = tier(S, o.tier);
+  if (t) {
+    const k = 'K' + o.nr + '|' + p.key;
+    t.erfassung = (t.erfassung || []).filter(x => x.key !== k);
+    if (p.wiegen && num(e.kg) > 0) t.erfassung.push({ art: p.art, teil: '', kg: e.kg, nr: o.nr, key: k, zeit: e.zeit });
+  }
+}
+function kommLoeschen(S, o, p) {
+  if (o.komm) delete o.komm[p.key];
+  const t = tier(S, o.tier); if (t && t.erfassung) t.erfassung = t.erfassung.filter(x => x.key !== 'K' + o.nr + '|' + p.key);
+}
+const kommVermerke = o => Object.values(o.komm || {}).filter(e => e.vermerk).map(e => `${e.art}: ${e.vermerk}`);
+
+// ---------- Hofladen-Päckchen beim Kommissionieren (seit 3.1) ----------
+// Was nach allen Bestellungen in den Kisten übrig ist, wird vakuumiert und gewogen; Lagerplatz Kühlhaus-Kiste je Päckchen.
+const HOF_REGELN = {
+  Beinscheiben: { r: 'stk', n: 1 }, Rostbraten: { r: 'stk', n: 2 }, Steak: { r: 'stk', n: 2 }, Rouladen: { r: 'stk', n: 4 },
+  Braten: { r: 'kg', von: 1, bis: 1.5 }, Tafelspitz: { r: 'kg', von: 1.5, bis: 2 }, Filet: { r: 'halb' }, 'Gulasch geschnitten': { r: 'kg', von: 1, bis: 1 },
+  Siedfleisch: { r: 'kg', von: 1, bis: 1.5 }, Ochsenschwanz: { r: 'ganz' }, 'Suppenknochen (SK)': { r: 'kiste' }, 'Soßenknochen (FK)': { r: 'kiste' }
+};
+const HOF_REGEL_ARTEN = ['stk', 'kg', 'ganz', 'halb', 'kiste'];
+function hofRegel(S, name) { const x = (S.settings.hofPack || {})[name]; return Object.assign({}, HOF_REGELN[name] || { r: 'kg', von: 1, bis: 1.5 }, x || {}); }
+function hofRegelText(S, name) {
+  const g = hofRegel(S, name);
+  let t = g.r === 'stk' ? `je ${fmtNum(g.n)} Stück vakuumieren` : g.r === 'kg' ? (num(g.von) === num(g.bis) ? `je ${fmtNum(g.von, 2)} kg vakuumieren` : `je ${fmtNum(g.von, 2)}–${fmtNum(g.bis, 2)} kg vakuumieren, Reste kleiner`)
+    : g.r === 'ganz' ? 'ganz lassen, vakuumieren' : g.r === 'halb' ? 'ganze Stücke halbieren, vakuumieren' : 'bleibt in der Kiste';
+  if (name === BRATEN) t += ' · Teilstück angeben · Bürgermeisterstück ganz (oder Rest)';
+  return t;
+}
+// Träger der Hofladen-Daten: Tier bzw. bei gemeinsamer Abholung das erste Tier des Topfs
+function hofTraeger(S, tierName) { const c = kistenKontext(S, tierName); return c.topf ? tier(S, c.t.glieder[0]) : tier(S, tierName); }
+function hofListe(S, tierName) {
+  const T = hofTraeger(S, tierName); if (!T) return [];
+  const packs = T.hofPacks || [], fertig = T.hofFertig || {};
+  return kistenCalc(S, tierName).filter(c => c.rest > 0.05 && c.k.art !== HACK && c.k.art !== SONDERKISTE && !istOrgan(c.k.art)).map(c => {
+    const key = c.k.nr + '|' + c.k.art, pk = packs.filter(x => x.key === key);
+    return { key, kiste: c.k.nr, art: c.k.art, rest: c.rest, einheit: c.einheit, platz: c.k.platz || '', regel: hofRegel(S, c.k.art), regelText: hofRegelText(S, c.k.art),
+      packs: pk, kg: pk.reduce((s, x) => s + num(x.kg), 0), fertig: !!fertig[key] };
+  });
+}
+function hofPackDazu(S, tierName, key, p) {
+  const T = hofTraeger(S, tierName); if (!T) return null;
+  T.hofPacks = T.hofPacks || [];
+  const id = (T.hofPacks.reduce((m, x) => Math.max(m, num(x.id)), 0) || 0) + 1;
+  const [kiste, ...an] = key.split('|'), artName = an.join('|');
+  const e = { id, key, kiste: +kiste, art: artName, teil: p.teil || '', kg: has(p.kg) ? r3(num(p.kg)) : null, stk: has(p.stk) ? num(p.stk) : null, kh: has(p.kh) && num(p.kh) > 0 ? num(p.kh) : null, zeit: new Date().toISOString() };
+  T.hofPacks.push(e);
+  if (num(e.kg) > 0 && !ohneWiegen(artName)) { T.erfassung = T.erfassung || []; T.erfassung.push({ art: artName, teil: '', kg: e.kg, nr: 0, key: 'H' + id, zeit: e.zeit }); }
+  return e;
+}
+function hofPackWeg(S, tierName, id) {
+  const T = hofTraeger(S, tierName); if (!T) return;
+  T.hofPacks = (T.hofPacks || []).filter(x => x.id !== id);
+  T.erfassung = (T.erfassung || []).filter(x => x.key !== 'H' + id);
+}
+function hofFertigSetzen(S, tierName, key, wert) { const T = hofTraeger(S, tierName); if (!T) return; T.hofFertig = T.hofFertig || {}; if (wert) T.hofFertig[key] = true; else delete T.hofFertig[key]; }
+// Vorauswahl Kühlhaus-Kiste: wie beim letzten Päckchen desselben Artikels
+function hofLetzteKiste(S, tierName, artName) { const T = hofTraeger(S, tierName); const l = (T && T.hofPacks || []).filter(x => x.art === artName && x.kh).pop(); return l ? l.kh : null; }
+
+// ---------- Referenz-Einzelgewichte aus den Ist-Werten (seit 3.1) ----------
+// g je Stück aus allen gewogenen Zeilen mit Stückzahl (Bestellungen und Hofladen-Päckchen, auch Archiv)
+function kommReferenz(S) {
+  const r = {};
+  const dazu = (name, kg, stk) => { if (!(num(kg) > 0) || !(num(stk) > 0) || !mitStueck(S, name)) return; const x = r[name] = r[name] || { kg: 0, stk: 0, n: 0 }; x.kg += num(kg); x.stk += num(stk); x.n++; };
+  for (const o of S.bestellungen) for (const e of Object.values(o.komm || {})) if (e.einheit !== 'Stk' || e.art === OCHS) dazu(e.art, e.kg, e.stk);
+  for (const t of S.tiere || []) for (const p of t.hofPacks || []) dazu(p.art, p.kg, p.stk);
+  for (const x of Object.values(r)) x.g = x.stk > 0 ? x.kg * 1000 / x.stk : 0;
+  return r;
+}
+
 // Hack-Kisten (seit 3.0.3, Wunsch Nutzer): jede Kiste auf hk kg (20 kg) füllen. Eine weitere Kiste wird nur angefangen,
 // wenn der Rest nicht mehr auf die vollen Kisten passt, ohne dass eine über „max“ (25 kg) kommt –
 // bei 4 vollen Kisten also erst, wenn noch mehr als 20 kg offen sind. Sonst wird der Rest gleichmäßig auf die vollen Kisten verteilt.
@@ -1615,8 +1710,14 @@ function tierAbschliessen(S, tierName) {
   const calc = kistenCalc(S, tierName);
   let n = 0;
   const heute = todayISO();
+  // seit 3.1: gewogene Hofladen-Päckchen (mit Kühlhaus-Kiste) statt rechnerischem Rest, wo es sie gibt
+  const T0 = hofTraeger(S, tierName), packs = (T0 && T0.hofPacks) || [];
+  const hofName = ctx.topf ? ctx.key : tierName;
   for (const c of calc) {
-    if (c.rest > 0.0001 && c.k.art !== 'Sonderfälle (beschriftet)') { S.hofladen.push({ datum: heute, tier: ctx.topf ? ctx.key : tierName, kiste: c.k.nr, art: c.k.art, rest: r2(c.rest), einheit: c.einheit }); n++; }
+    if (c.k.art === 'Sonderfälle (beschriftet)') continue;
+    const pk = packs.filter(x => x.key === c.k.nr + '|' + c.k.art);
+    if (pk.length) { for (const x of pk) { S.hofladen.push({ datum: heute, tier: hofName, kiste: c.k.nr, art: c.k.art, ...(x.teil ? { teil: x.teil } : {}), rest: c.einheit === 'Stk' ? num(x.stk) || 1 : r3(num(x.kg)), einheit: c.einheit, ...(x.stk && c.einheit !== 'Stk' ? { stk: x.stk } : {}), ...(c.einheit === 'Stk' && x.kg ? { kg: x.kg } : {}), ...(x.kh ? { kuehlhaus: x.kh } : {}), paeckchen: true }); n++; } }
+    else if (c.rest > 0.0001) { S.hofladen.push({ datum: heute, tier: hofName, kiste: c.k.nr, art: c.k.art, rest: r2(c.rest), einheit: c.einheit }); n++; }
   }
   // Archiv: Stand der Kisten am Ende festhalten, Tier(e) archivieren (wird nicht gelöscht).
   // Topf: erst für alle Tiere festhalten, dann archivieren (sonst zerfällt der Topf mittendrin).
@@ -1692,11 +1793,13 @@ function kommissionierung(S, nr) {
     }
     // Sonderfälle vom Metzger (beschriftet mit der Bestell-Nr.) liegen in der Sonderfälle-Kiste
     const skAlle = ctx.rows.filter(k => k.art === SONDERKISTE);
+    let si = 0;
     for (const s of sonderOf(S, o)) {
+      si++;
       if (!(num(s.menge) > 0) || istOrgan(s.art)) continue;
       const a = art(S, s.art);
       const sk = skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null;
-      picks.push({ kiste: sk ? sk.nr : null, sonderfall: true, menge: r2(num(s.menge)), roh: 0, einheit: a ? a.einheit : 'kg', art: s.art,
+      picks.push({ kiste: sk ? sk.nr : null, sonderfall: true, key: 'S' + si + '|' + s.art, menge: r2(num(s.menge)), roh: 0, einheit: a ? a.einheit : 'kg', art: s.art,
         verpacken: `Sonderfall${s.wunsch ? ' „' + s.wunsch + '“' : ''} – beim Metzger mit Nr. ${o.nr} beschriftet${sk ? '' : ' (keine Kiste dafür im Plan)'}`, platz: sk ? sk.platz || '' : '' });
     }
     picks.sort((a, b) => (a.kiste === null ? -1 : a.kiste) - (b.kiste === null ? -1 : b.kiste));
@@ -1704,6 +1807,13 @@ function kommissionierung(S, nr) {
   rows.forEach(r => { r.ausKisten = picks.filter(p => p.art === r.art).reduce((s, p) => s + p.roh, 0); r.fehlt = istOrgan(r.art) ? 0 : (r.bedarf - r.ausKisten > 0.05 ? r.bedarf - r.ausKisten : 0); });
   const innereien = ORGANE.map(n => { const q = qty(S, o, n); const a = art(S, n); return q > 0 ? `${fmtNum(q, 3)} ${a ? a.einheit : ''} ${n}` : ''; }).filter(Boolean);
   const sonder = sonderOf(S, o).map(s => sonderText(S, s));
+  // Ist-Werte (seit 3.1): je Pick-Zeile gespeichert (o.komm[key]); Hack/Innereien nur abhaken
+  for (const p of picks) {
+    if (!p.key) p.key = (p.hackTisch ? 'H' : p.kiste === null ? '-' : p.kiste) + '|' + p.art;
+    p.wiegen = !ohneWiegen(p.art);
+    p.ist = (o.komm || {})[p.key] || null;
+    p.stkSoll = stkSoll(S, p);
+  }
   return { o, tier: t, rows, picks, innereien, sonder, nichtVak: nichtVak(S, o) };
 }
 

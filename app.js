@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.0.8';
+const APP_VERSION = '3.1';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -333,7 +333,7 @@ function viewBestellung(nr, q, vorlage) {
           <div><div class="klein fett">davon vakuumiert (${fmtEur(vakPreisPaket(S, preislisteAm(S, preisDatum(S, o))))})</div><div class="stepper"><button data-act="step" data-f="pakVak" data-d="-1">−</button><input class="feld zahl" inputmode="numeric" data-in="kopf" data-f="pakVak" value="${num(o.pakVak) || ''}"><button data-act="step" data-f="pakVak" data-d="1">+</button></div></div>
         </div>
       </div>
-      <div class="karte"><label class="f ganz"><span class="fett">Notiz zur Bestellung</span> <span class="klein">– erscheint beim Kommissionieren und in der Packliste</span><textarea class="feld" rows="2" data-in="kopf" data-f="packNotiz" placeholder="z. B. „Steak in 2er-Packungen“, „holt Nachbar ab“">${esc(o.packNotiz || '')}</textarea></label></div>
+      <div class="karte"><label class="f ganz"><span class="fett">Notiz zur Bestellung</span> <span class="klein">– erscheint beim Kommissionieren und in der Packliste</span><textarea class="feld" rows="2" data-in="kopf" data-f="packNotiz" placeholder="z. B. „Steak in 2er-Packungen“, „holt Nachbar ab“">${esc(o.packNotiz || '')}</textarea></label>${kommVermerke(o).length ? `<div class="packnotiz" style="margin-top:10px"><span class="klein">Vermerke vom Kommissionieren (Abweichung zum Soll)</span><div>${kommVermerke(o).map(esc).join('<br>')}</div></div>` : ''}</div>
       <div class="karte"><h3 style="margin-top:0">Sonderwünsche <span class="klein">– macht der Metzger separat</span></h3>
         <div class="klein" style="margin-bottom:6px">z. B. Hackfleisch 2000 g „besonders mager“ (bei Hackfleisch darunter auswählen: fettig zählt zur Hälfte als Siedfleisch, mager als Bugstück). Die Menge gehört trotzdem rechts mit in die Bestellung. Nur den Wunsch eintragen, keine Gründe wie Krankheiten.</div>
         <div id="sonderliste">${sonderRows()}</div>

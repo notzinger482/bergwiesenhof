@@ -141,13 +141,115 @@ function docPackliste(pl) {
     blocks: [{ type: 'table', head: ['Nr.', 'Name', 'Telefon', 'Bestellung', 'Sonderfälle (separat)', 'Lagerplatz', 'Schätzpreis', 'Endbetrag', 'gepackt', 'abgeholt'], fest: true, widths: [0.7, 2.4, 2.3, 6.6, 2.4, 2.2, 1.5, 1.5, 1.1, 1.1], align: ['r', '', '', '', '', '', 'r', 'r', '', ''],
       rows: pl.rows.map(r => [r.nr, r.name, r.tel, r.text + (r.notiz ? '\nNOTIZ: ' + r.notiz : ''), r.sonder, r.lager || `(${r.lagerVorschlag})`, fmtEur(r.schaetz), r.endbetrag !== null ? fmtEur(r.endbetrag) : '', r.status !== 'offen' ? '☑' : '☐', r.status === 'abgeholt' ? '☑' : '☐']) }], footer: fussZeile() };
 }
+// Ist-Wert einer Pick-Zeile als Text
+function istText(e, p) {
+  if (!e) return '';
+  if (e.ok && !has(e.kg) && !has(e.stk)) return 'erledigt';
+  const kg = has(e.kg) ? fmtNum(e.kg, 3) + ' kg' : '', stk = has(e.stk) ? fmtNum(e.stk) + ' Stk' : '';
+  return p && p.einheit === 'Stk' ? [stk, kg].filter(Boolean).join(' · ') : [kg, stk && p && p.stkSoll ? stk : ''].filter(Boolean).join(' · ');
+}
+// Gewicht in Gramm aus einer Eingabe („1.450“, „1450“, „1,45 kg“)
+function grammAus(v) {
+  const t = String(v || '').trim().toLowerCase();
+  if (!t) return 0;
+  if (/kg$/.test(t)) return Math.round(parseFloat(t.replace(/kg$/, '').replace(/\s/g, '').replace(',', '.')) * 1000) || 0;
+  return Math.round(parseFloat(t.replace(/[\s.]/g, '').replace(',', '.')) || 0);
+}
+// Pick-Zeile wiegen (seit 3.1): Gewicht (und ggf. Stück) eintragen; Abweichung über Toleranz → Vermerk nötig
+async function pickDialog(o, p) {
+  if (!p.wiegen) { if (p.ist) kommLoeschen(S, o, p); else kommSetzen(S, o, p, { ok: true }); speichern(); return true; }
+  const stkFeld = p.einheit === 'Stk' || !!p.stkSoll, tol = kommToleranz(S);
+  let w = { pg: p.ist && has(p.ist.kg) ? fmtIn(num(p.ist.kg) * 1000, 0) : '', pstk: p.ist && has(p.ist.stk) ? String(p.ist.stk) : p.stkSoll ? String(p.stkSoll) : '', pverm: p.ist && p.ist.vermerk || '' }, fehler = '';
+  for (;;) {
+    const sollTxt = `${fmtNum(p.menge, 2)} ${p.einheit}${p.stkSoll && p.einheit !== 'Stk' ? ` (ca. ${fmtNum(p.stkSoll)} Stück)` : ''}`;
+    const { k, werte } = await dialogFelder(`${p.kiste !== null ? 'Kiste ' + p.kiste + ' – ' : ''}${p.art}`, `
+      <p>Nr. ${o.nr} ${esc(o.name)} · Soll <b>${esc(sollTxt)}</b> · Toleranz ±${fmtNum(tol * 100, 0)} %</p>
+      ${fehler ? `<div class="fehlerbox">${esc(fehler)}</div>` : ''}
+      <div class="zeile oben">
+        <label class="f" style="width:200px">Gewicht in Gramm${p.einheit === 'Stk' ? ' (optional)' : ''}<input class="feld zahl" id="pg" inputmode="numeric" style="font-size:24px" value="${esc(w.pg)}" placeholder="z. B. 1450"></label>
+        ${stkFeld ? `<label class="f" style="width:140px">Stückzahl<input class="feld zahl" id="pstk" inputmode="numeric" style="font-size:24px" value="${esc(w.pstk)}"></label>` : ''}
+      </div>
+      <label class="f">Vermerk an die Bestellung <span class="klein">(Pflicht bei Abweichung über ±${fmtNum(tol * 100, 0)} %)</span><input class="feld" id="pverm" value="${esc(w.pverm)}" placeholder="z. B. Steaks kleiner, Kunde informieren"></label>
+      <p class="klein">Alle Teile der Zeile zusammen wiegen (z. B. alle Steaks). Der Preis bleibt bei der Waage beim Abholen – das Gewicht ist für die Auswertung.</p>`,
+      [{ k: 'x', t: 'Abbrechen' }, ...(p.ist ? [{ k: 'weg', t: 'Wert löschen', cls: 'rot' }] : []), { k: 'ok', t: 'Bestätigen ✓', cls: 'haupt' }]);
+    if (k === 'weg') { kommLoeschen(S, o, p); speichern(); return true; }
+    if (k !== 'ok') return false;
+    w = Object.assign(w, werte);
+    const g = grammAus(w.pg), stk = stkFeld ? Math.round(num(w.pstk)) : null;
+    if (p.einheit !== 'Stk' && !(g > 0)) { fehler = 'Bitte das Gewicht in Gramm eintragen.'; continue; }
+    if (g > 0 && g < 20) { fehler = `${fmtNum(g)} g? Bitte in Gramm eintippen (z. B. 1450 für 1,45 kg).`; continue; }
+    if (g > 80000) { fehler = `${fmtNum(g)} g? Bitte prüfen (in Gramm).`; continue; }
+    if (stkFeld && p.einheit === 'Stk' && !(stk > 0)) { fehler = 'Bitte die Stückzahl eintragen.'; continue; }
+    const ist = { kg: g > 0 ? g / 1000 : null, stk: stkFeld && stk > 0 ? stk : null, vermerk: String(w.pverm || '').trim() };
+    const ab = kommAbweichung(S, p, ist);
+    if (ab > tol + 1e-9 && !ist.vermerk) { fehler = `Abweichung ${fmtNum(ab * 100, 0)} % (Toleranz ±${fmtNum(tol * 100, 0)} %) – bitte einen Vermerk an die Bestellung schreiben.`; continue; }
+    kommSetzen(S, o, p, ist); speichern(); meldung(`${p.art}: ${istText(o.komm[p.key], p)} gespeichert.`);
+    return true;
+  }
+}
+// Hofladen am Ende des Kommissionierens (seit 3.1): Reste je Kiste verpacken, jedes Päckchen wiegen, Kühlhaus-Kiste wählen
+function kommiHofladen(tn, h) {
+  const L = hofListe(S, tn);
+  const offen = L.filter(r => !r.fertig).length;
+  h += `<div class="karte" style="padding:0"><div class="zeile" style="margin:14px 16px 4px"><h3 class="platz" style="margin:0">Hofladen – Reste verpacken <span class="klein">${L.length ? (offen ? offen + ' von ' + L.length + ' offen' : 'alles erledigt ✓') : ''}</span></h3><button class="btn" data-act="hofdruck">Drucken</button></div>
+    <p class="klein" style="margin:0 16px 8px">Zeile antippen → jedes Päckchen vakuumieren, wiegen, Kühlhaus-Kiste wählen. Hack und Innereien stehen auf ihren Zetteln.</p>
+    ${L.map((r, i) => `<div class="pick ${r.fertig ? 'erledigt' : ''}" data-act="hofzeile" data-i="${i}"><div class="kiste">${r.kiste}</div><div class="menge">ca. ${fmtNum(r.rest, r.einheit === 'Stk' ? 0 : 1)} ${r.einheit}</div>
+      <div><b>${esc(r.art)}</b><div class="klein">${esc(r.regelText)}</div>${r.packs.length ? `<div class="klein">${r.packs.map(x => `${x.teil ? esc(x.teil) + ' ' : ''}${has(x.kg) ? fmtNum(x.kg, 3) + ' kg' : ''}${x.stk ? ' · ' + fmtNum(x.stk) + ' Stk' : ''}${x.kh ? ' → KH ' + x.kh : ''}`).join(' | ')}</div>` : ''}</div>
+      <div class="klein r">${r.packs.length ? `<span class="ist">${r.packs.length} Päckchen · ${fmtNum(r.kg, 2)} kg</span><br>` : ''}${esc(r.platz)}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts übrig – oder noch kein Kistenplan.</div>'}</div>`;
+  inhalt().innerHTML = h;
+  ui.acts.hofzeile = async el => { const r = L[+el.dataset.i]; if (r && (await hofDialog(tn, r))) render(); };
+  ui.acts.hofdruck = () => docDrucken(docHofladen(tn, hofListe(S, tn)));
+}
+function docHofladen(tn, L) {
+  return { title: `Hofladen – Reste verpacken – ${tierAnzeige(S, tn)}`, sub: [abholTxt(tier(S, tn))],
+    blocks: [{ type: 'table', head: ['✓', 'Kiste', 'Artikel', 'Rest ca.', 'verpacken', 'Päckchen (Gewicht → Kühlhaus-Kiste)'], widths: [0.5, 0.8, 2, 1.2, 3.4, 5], align: ['', 'r', '', 'r', '', ''],
+      rows: L.map(r => [r.fertig ? '✓' : '☐', r.kiste, r.art, `${fmtNum(r.rest, r.einheit === 'Stk' ? 0 : 1)} ${r.einheit}`, r.regelText, r.packs.map(x => `${x.teil ? x.teil + ' ' : ''}${has(x.kg) ? fmtNum(x.kg, 3) + ' kg' : ''}${x.stk ? ' (' + fmtNum(x.stk) + ' Stk)' : ''}${x.kh ? ' → KH ' + x.kh : ''}`).join('\n')]),
+      rowClass: L.map(r => r.fertig ? 'erledigt' : '') }], footer: fussZeile() };
+}
+async function hofDialog(tn, r) {
+  if (r.regel.r === 'kiste') { hofFertigSetzen(S, tn, r.key, !r.fertig); speichern(); meldung(r.fertig ? `${r.art}: wieder offen.` : `${r.art}: bleibt in Kiste ${r.kiste} ✓`); return true; }
+  const anzKH = () => { const n = num(S.settings.lagerKuehlhaus); return n >= 1 ? Math.min(99, Math.round(n)) : 30; };
+  const braten = r.art === BRATEN, stkFeld = r.regel.r === 'stk' || mitStueck(S, r.art) || r.art === OCHS;
+  let kh = hofLetzteKiste(S, tn, r.art), fehler = '', aenderung = false, teil = '';
+  const d = $('#dialog');
+  const klick = e => { const b = e.target.closest('[data-kh]'); if (!b) return; e.stopPropagation(); kh = +b.dataset.kh; $$('#dialog [data-kh]').forEach(x => x.classList.toggle('haupt', +x.dataset.kh === kh)); };
+  for (;;) {
+    const L = hofListe(S, tn).find(x => x.key === r.key) || r;
+    const restNoch = Math.max(0, L.rest - L.kg);
+    d.addEventListener('click', klick, true);
+    const { k, werte } = await dialogFelder(`Hofladen: Kiste ${r.kiste} – ${r.art}`, `
+      <p><b>${esc(hofRegelText(S, r.art))}</b> · Rest laut Plan ca. ${fmtNum(L.rest, 1)} ${r.einheit}${L.packs.length ? ` · schon ${L.packs.length} Päckchen (${fmtNum(L.kg, 2)} kg), noch ca. ${fmtNum(restNoch, 1)} kg` : ''}</p>
+      ${fehler ? `<div class="fehlerbox">${esc(fehler)}</div>` : ''}
+      ${L.packs.length ? `<div class="klein" style="margin-bottom:8px">${L.packs.map(x => `<span class="marke" style="margin:2px">${x.teil ? esc(x.teil) + ' ' : ''}${has(x.kg) ? fmtNum(x.kg, 3) + ' kg' : ''}${x.stk ? ' · ' + x.stk + ' Stk' : ''}${x.kh ? ' → KH ' + x.kh : ''} <button class="btn klein rot" data-k="weg:${x.id}" style="min-height:0;padding:0 6px">✕</button></span>`).join('')}</div>` : ''}
+      <div class="zeile oben">
+        <label class="f" style="width:190px">Gewicht in Gramm<input class="feld zahl" id="hg" inputmode="numeric" style="font-size:24px" placeholder="z. B. 1250"></label>
+        ${stkFeld ? `<label class="f" style="width:120px">Stück${r.regel.r === 'stk' ? '' : ' (optional)'}<input class="feld zahl" id="hs" inputmode="numeric" style="font-size:24px" value="${r.regel.r === 'stk' ? fmtNum(r.regel.n) : r.art === OCHS ? '1' : ''}"></label>` : ''}
+        ${braten ? `<label class="f" style="width:220px">Teilstück (Pflicht)<select class="feld" id="ht">${opt('', 'bitte wählen …', !teil)}${bratenTeile(S).map(x => opt(x.name, x.name, x.name === teil)).join('')}</select></label>` : ''}
+      </div>
+      <div class="klein fett" style="margin:8px 0 6px">Kühlhaus-Kiste</div>
+      <div class="lnr">${Array.from({ length: anzKH() }, (_, i) => i + 1).map(n => `<button class="btn ${n === kh ? 'haupt' : ''}" data-kh="${n}">${n}</button>`).join('')}</div>`,
+      [{ k: 'x', t: 'Schließen' }, { k: 'fertig', t: L.fertig ? 'Zeile wieder öffnen' : 'Zeile fertig ✓' }, { k: 'ok', t: 'Päckchen speichern', cls: 'haupt' }]);
+    d.removeEventListener('click', klick, true);
+    if (k && k.startsWith('weg:')) { hofPackWeg(S, tn, +k.slice(4)); speichern(); aenderung = true; fehler = ''; continue; }
+    if (k === 'fertig') { hofFertigSetzen(S, tn, r.key, !L.fertig); speichern(); return true; }
+    if (k !== 'ok') return aenderung;
+    const g = grammAus(werte.hg), stk = stkFeld ? Math.round(num(werte.hs)) : null; teil = werte.ht || '';
+    if (!(g > 0)) { fehler = 'Bitte das Gewicht des Päckchens in Gramm eintragen.'; continue; }
+    if (g < 20 || g > 30000) { fehler = `${fmtNum(g)} g? Bitte in Gramm eintippen (z. B. 1250).`; continue; }
+    if (braten && !teil) { fehler = 'Bitte das Teilstück wählen – es wird aufs Päckchen geschrieben.'; continue; }
+    if (!kh) { fehler = 'Bitte die Kühlhaus-Kiste wählen.'; continue; }
+    hofPackDazu(S, tn, r.key, { kg: g / 1000, stk: stk > 0 ? stk : null, teil, kh }); speichern(); aenderung = true; fehler = '';
+    meldung(`Päckchen ${fmtNum(g)} g → Kühlhaus-Kiste ${kh} gespeichert.`);
+  }
+}
 function docPick(ko) {
   const o = ko.o;
   return { title: `Kommissionierung Nr. ${o.nr} – ${o.name}`, sub: [`Tier: ${o.tier}`, `Genusspakete: ${fmtNum(o.pakete)}${num(o.pakVak) ? ` (davon ${fmtNum(o.pakVak)} vakuumieren)` : ''}${ko.nichtVak.length ? ' · nicht vakuumieren: ' + ko.nichtVak.join(', ') : ''}`],
     blocks: [{ type: 'kv', rows: [['Lagerplatz', lagerText(o) || lagerVorschlag(S, o).ort, lagerText(o) ? '' : '(' + lagerVorschlag(S, o).grund + ')'], ['Sonderfälle (Metzger)', ko.sonder.join('; ') || '–'], ['Innereien (separat)', ko.innereien.join(', ') || '–']] },
       ...(o.packNotiz ? [{ type: 'text', bold: true, text: 'Notiz: ' + o.packNotiz }] : []),
-      { type: 'table', head: ['☐', 'Kiste', 'Menge', 'Inhalt', 'verpacken', 'Stellplatz'], widths: [0.5, 0.9, 1.2, 2.4, 4, 2.4], align: ['', 'r', 'r', '', '', ''],
-        rows: ko.picks.map(p => ['☐', p.hackTisch ? 'Hack-Tisch' : p.kiste === null ? '–' : p.kiste, `${fmtNum(p.menge, 2)} ${p.einheit}`, p.art, p.verpacken, p.platz]), leer: 'keine Kisten eingetragen' },
+      { type: 'table', head: ['✓', 'Kiste', 'Soll', 'Ist', 'Inhalt', 'verpacken', 'Stellplatz'], widths: [0.5, 0.9, 1.1, 1.3, 2.2, 3.8, 2.2], align: ['', 'r', 'r', 'r', '', '', ''],
+        rows: ko.picks.map(p => [p.ist ? '✓' : '☐', p.hackTisch ? 'Hack-Tisch' : p.kiste === null ? '–' : p.kiste, `${fmtNum(p.menge, 2)} ${p.einheit}`, p.ist ? istText(p.ist, p) : '', p.art, p.verpacken + (p.ist && p.ist.vermerk ? '\nVermerk: ' + p.ist.vermerk : ''), p.platz]),
+        rowClass: ko.picks.map(p => p.ist && p.ist.vermerk ? 'rot' : p.ist ? 'erledigt' : ''), leer: 'keine Kisten eingetragen' },
       ...ko.rows.filter(r => r.fehlt > 0).map(r => ({ type: 'text', warn: true, text: `Fehlt: ${fmtNum(r.fehlt, 2)} ${r.einheit} ${r.art}` }))], footer: fussZeile() };
 }
 
@@ -418,20 +520,26 @@ function viewKommissionierung(q) {
   titel('Kommissionieren' + (tn ? ' – ' + tn : ''));
   // Topf: alle Bestellungen des Abholtags in einer Reihenfolge (wie die Kisten geplant sind)
   const ords = !tn ? [] : kistenRows(S, tn).length ? kistenKontext(S, tn).ords : ordersOfTopf(S, topfTier(S, tn));
-  let nr = +q.get('nr') || ui.kommiNr;
-  if (!ords.some(o => o.nr === nr)) nr = (ords.find(o => (o.status || 'offen') === 'offen') || ords[0] || {}).nr;
+  let nr = q.get('nr') === 'hof' ? 'hof' : +q.get('nr') || ui.kommiNr;
+  if (nr !== 'hof' && !ords.some(o => o.nr === nr)) nr = (ords.find(o => (o.status || 'offen') === 'offen') || ords[0] || {}).nr;
   ui.kommiNr = nr;
   let h = `<div class="zeile" style="margin-bottom:12px"><h1 class="platz" style="margin:0">Kommissionieren</h1>
     <label class="f" style="min-width:300px">Tier<select class="feld" data-ch="tierwahl">${tiereSortiert().map(t => { const tp = topfTier(S, t.name); return opt(t.name, `${t.name} – ${abholTxt(t)}${tp && tp.glieder ? ' (ein Topf: ' + tp.name + ')' : ''}`, t.name === tn); }).join('')}</select></label></div>`;
   if (!ords.length) { inhalt().innerHTML = h + '<div class="karte">Keine Bestellungen für dieses Tier.</div>'; ui.acts.tierwahl = el => { ui.tierWahl = el.value; ui.kommiNr = null; render(); }; return; }
-  const ko = kommissionierung(S, nr);
-  const idx = ords.findIndex(o => o.nr === nr);
-  const ticks = ui.ticks[nr] = ui.ticks[nr] || {};
+  const idx = nr === 'hof' ? ords.length : ords.findIndex(o => o.nr === nr);
   const ohneKisten = !kistenRows(S, tn).length;
   h += `<div class="zeile" style="margin-bottom:12px">
       <button class="btn" data-act="vor" data-d="-1" ${idx <= 0 ? 'disabled' : ''}>◀ vorige</button>
-      <select class="feld platz" data-ch="nrwahl">${ords.map(o => opt(o.nr, `Nr. ${o.nr} – ${o.name} (${o.status || 'offen'})`, o.nr === nr)).join('')}</select>
-      <button class="btn" data-act="vor" data-d="1" ${idx >= ords.length - 1 ? 'disabled' : ''}>nächste ▶</button></div>
+      <select class="feld platz" data-ch="nrwahl">${ords.map(o => opt(o.nr, `Nr. ${o.nr} – ${o.name} (${o.status || 'offen'})`, o.nr === nr)).join('')}${ohneKisten ? '' : opt('hof', '▣ Hofladen – Reste verpacken (zum Schluss)', nr === 'hof')}</select>
+      <button class="btn" data-act="vor" data-d="1" ${idx >= ords.length - (ohneKisten ? 1 : 0) ? 'disabled' : ''}>nächste ▶</button></div>`;
+  ui.acts.tierwahl = el => { ui.tierWahl = el.value; ui.kommiNr = null; render(); };
+  ui.acts.nrwahl = el => { ui.kommiNr = el.value === 'hof' ? 'hof' : +el.value; gehe('#/kommissionierung?nr=' + el.value); };
+  ui.acts.vor = el => { const i = idx + num(el.dataset.d); const o = ords[i]; if (o) gehe('#/kommissionierung?nr=' + o.nr); else if (i === ords.length) gehe('#/kommissionierung?nr=hof'); };
+  if (nr === 'hof') return kommiHofladen(tn, h);
+  const ko = kommissionierung(S, nr);
+  const offenZeilen = ko.picks.filter(p => !p.ist).length;
+  const verm = kommVermerke(ko.o);
+  h += `
     ${ohneKisten ? '<div class="hinweis">Für dieses Tier sind noch keine Kisten eingetragen (Schlachttag → Kisten & Ladeplan → „Plan erstellen“).</div>' : ''}
     <div class="spalten2"><div class="karte">
       <h2 style="margin-top:0">Nr. ${ko.o.nr} – ${esc(ko.o.name)} ${statusMarke(ko.o.status)}${zahlMarke(ko.o)}</h2>
@@ -442,27 +550,24 @@ function viewKommissionierung(q) {
       <tr><td>Sonderfälle (Metzger)</td><td class="fett">${esc(ko.sonder.join('; ') || '–')}</td></tr>
       <tr><td>Nicht vakuumieren</td><td class="fett">${esc(ko.nichtVak.join(', ') || '–')}</td></tr>
       <tr><td>Innereien (separat)</td><td class="fett">${esc(ko.innereien.join(', ') || '–')}</td></tr>
-      ${ko.o.notiz ? `<tr><td>Notiz</td><td class="fett">${esc(ko.o.notiz)}</td></tr>` : ''}</table>
+      ${ko.o.notiz ? `<tr><td>Notiz</td><td class="fett">${esc(ko.o.notiz)}</td></tr>` : ''}
+      ${verm.length ? `<tr><td>Vermerke Kommission</td><td class="fett warn">${esc(verm.join(' · '))}</td></tr>` : ''}</table>
       <div class="knopfleiste" style="margin-top:14px"><button class="btn haupt" data-act="gepackt">Gepackt ✓ und weiter</button><button class="btn" data-act="teilen">Als Bild teilen</button><button class="btn" data-act="drucken">Drucken</button></div>
       <h3>Bedarf</h3><table class="tab"><thead><tr><th>Artikel</th><th class="r">einzeln</th><th class="r">aus Paketen</th><th class="r">Bedarf</th><th class="r">aus Kisten</th><th class="r">fehlt</th></tr></thead><tbody>
       ${ko.rows.filter(r => r.bedarf > 0.0001).map(r => `<tr class="${r.fehlt > 0 ? 'rot' : ''}"><td>${esc(r.art)}${istOrgan(r.art) ? ' <span class="klein">(separat)</span>' : ''}</td><td class="r">${fmtNum(r.einzeln, 2)}</td><td class="r">${fmtNum(r.ausPak, 2)}</td><td class="r">${fmtNum(r.bedarf, 2)}</td><td class="r">${fmtNum(r.ausKisten, 2)}</td><td class="r">${r.fehlt > 0 ? fmtNum(r.fehlt, 2) : ''}</td></tr>`).join('')}
       </tbody></table></div>
-    <div class="karte" style="padding:0"><h3 style="margin:14px 16px 4px">Pickliste – antippen wenn erledigt</h3>
-      ${ko.picks.map((p, i) => `<div class="pick ${ticks[i] ? 'erledigt' : ''}" data-act="tick" data-i="${i}"><div class="kiste${p.hackTisch ? ' hack' : ''}${p.sonderfall ? ' sonder' : ''}">${p.hackTisch ? 'Hack' : p.kiste === null ? '–' : p.kiste}</div><div class="menge">${fmtNum(p.menge, 2)} ${p.einheit}</div><div><b>${esc(p.art)}</b>${p.verpacken ? `<div class="klein">${esc(p.verpacken)}</div>` : ''}</div><div class="klein">${esc(p.platz)}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts aus den Kisten zu holen.</div>'}
-    </div></div>
-    ${wiegeKarte(ko.o.tier && tier(S, ko.o.tier) ? ko.o.tier : tn, nr)}`;
+    <div class="karte" style="padding:0"><h3 style="margin:14px 16px 4px">Pickliste – antippen, wiegen, bestätigen <span class="klein">${offenZeilen ? offenZeilen + ' offen' : 'alles erledigt ✓'}</span></h3>
+      ${ko.picks.map((p, i) => `<div class="pick ${p.ist ? 'erledigt' : ''}" data-act="pick" data-i="${i}"><div class="kiste${p.hackTisch ? ' hack' : ''}${p.sonderfall ? ' sonder' : ''}">${p.hackTisch ? 'Hack' : p.kiste === null ? '–' : p.kiste}</div><div class="menge">${fmtNum(p.menge, 2)} ${p.einheit}${p.stkSoll && p.einheit !== 'Stk' ? `<div class="klein">ca. ${fmtNum(p.stkSoll)} Stk</div>` : ''}</div><div><b>${esc(p.art)}</b>${p.verpacken ? `<div class="klein">${esc(p.verpacken)}</div>` : ''}${p.ist && p.ist.vermerk ? `<div class="klein warn">Vermerk: ${esc(p.ist.vermerk)}</div>` : ''}</div><div class="klein r">${p.ist ? `<span class="ist">✓ ${istText(p.ist, p)}</span><br>` : p.wiegen ? '<span class="klein">wiegen</span><br>' : ''}${esc(p.platz)}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts aus den Kisten zu holen.</div>'}
+    </div></div>`;
   inhalt().innerHTML = h;
-  wiegeAktionen(tn, nr);
-  ui.acts.tierwahl = el => { ui.tierWahl = el.value; ui.kommiNr = null; render(); };
-  ui.acts.nrwahl = el => { ui.kommiNr = +el.value; gehe('#/kommissionierung?nr=' + el.value); };
-  ui.acts.vor = el => { const o = ords[idx + num(el.dataset.d)]; if (o) gehe('#/kommissionierung?nr=' + o.nr); };
-  ui.acts.tick = el => { const i = +el.dataset.i; ticks[i] = !ticks[i]; el.classList.toggle('erledigt', ticks[i]); };
+  ui.acts.pick = async el => { const p = ko.picks[+el.dataset.i]; const o = S.bestellungen.find(x => x.nr === nr); if (!p || !o) return; if (await pickDialog(o, p)) render(); };
   ui.acts.gepackt = async () => {
     const o = S.bestellungen.find(x => x.nr === nr);
+    if (offenZeilen && !(await frage('Noch nicht alles gewogen', `${offenZeilen} ${offenZeilen === 1 ? 'Zeile ist' : 'Zeilen sind'} noch nicht gewogen bzw. abgehakt. Trotzdem als gepackt melden?`, 'Trotzdem gepackt', 'Zurück'))) return;
     if (!(await lagerDialog(o))) return;
     const naechste = ords.slice(idx + 1).find(x => (x.status || 'offen') === 'offen') || ords[idx + 1];
     meldung(`Nr. ${nr} gepackt → ${lagerText(o)}.`);
-    if (naechste) gehe('#/kommissionierung?nr=' + naechste.nr); else render();
+    if (naechste) gehe('#/kommissionierung?nr=' + naechste.nr); else if (!ohneKisten) gehe('#/kommissionierung?nr=hof'); else render();
   };
   ui.acts.teilen = async () => { const d = docPick(ko); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
   ui.acts.drucken = () => {
@@ -484,10 +589,10 @@ function viewHofladen() {
   const liste = S.hofladen.map((h, i) => ({ h, i })).filter(x => String(x.h.datum).startsWith(jahr)).reverse();
   inhalt().innerHTML = `<div class="zeile" style="margin-bottom:12px"><h1 class="platz" style="margin:0">Reste an den Hofladen</h1>
     ${jahre.length > 1 ? `<select class="feld" style="width:auto" data-ch="jahr">${jahre.map(j => opt(j, j, j === jahr)).join('')}</select>` : ''}</div>
-    <div class="klein" style="margin-bottom:10px">Wird von „Tier abgeschlossen“ (Schlachttag → Kisten & Ladeplan) gefüllt: was nach dem Kommissionieren in den Kisten übrig bleibt.</div>
+    <div class="klein" style="margin-bottom:10px">Wird von „Tier abgeschlossen“ (Schlachttag → Kisten & Ladeplan) gefüllt: die beim Kommissionieren gewogenen Hofladen-Päckchen (mit Kühlhaus-Kiste) – wo keine gewogen wurden, der rechnerische Rest in den Kisten.</div>
     <div class="spalten2"><div class="karte"><h3 style="margin-top:0">Summe ${jahr}</h3><table class="tab"><tbody>${sum.map(s => `<tr><td>${esc(s.art)}</td><td class="r fett">${fmtNum(s.summe, 2)} ${esc(s.einheit)}</td></tr>`).join('') || '<tr><td class="klein">noch nichts</td></tr>'}</tbody></table></div>
     <div class="tabwrap"><table class="tab"><thead><tr><th>Datum</th><th>Tier</th><th class="r">Kiste</th><th>Artikel</th><th class="r">Rest</th><th></th></tr></thead><tbody>
-    ${liste.map(({ h, i }) => `<tr><td>${fmtDate(h.datum)}</td><td>${esc(h.tier)}</td><td class="r">${h.kiste}</td><td>${esc(h.art)}</td><td class="r">${fmtNum(h.rest, 2)} ${esc(h.einheit)}</td><td><button class="btn klein rot" data-act="weg" data-i="${i}">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="klein">keine Einträge</td></tr>'}
+    ${liste.map(({ h, i }) => `<tr><td>${fmtDate(h.datum)}</td><td>${esc(h.tier)}</td><td class="r">${h.kiste}${h.kuehlhaus ? `<div class="klein">→ Kühlhaus ${h.kuehlhaus}</div>` : ''}</td><td>${esc(h.art)}${h.teil ? ` <span class="klein">– ${esc(h.teil)}</span>` : ''}${h.paeckchen ? ' <span class="klein">(Päckchen)</span>' : ''}</td><td class="r">${fmtNum(h.rest, h.paeckchen ? 3 : 2)} ${esc(h.einheit)}${h.stk ? ` <span class="klein">· ${fmtNum(h.stk)} Stk</span>` : ''}${h.kg ? ` <span class="klein">· ${fmtNum(h.kg, 2)} kg</span>` : ''}</td><td><button class="btn klein rot" data-act="weg" data-i="${i}">✕</button></td></tr>`).join('') || '<tr><td colspan="6" class="klein">keine Einträge</td></tr>'}
     </tbody></table></div></div>`;
   ui.acts.jahr = el => { ui.hofJahr = el.value; render(); };
   ui.acts.weg = async el => { if (!(await frage('Eintrag löschen', 'Diesen Hofladen-Eintrag löschen?', 'Löschen', 'Abbrechen', 'rot'))) return; S.hofladen.splice(+el.dataset.i, 1); speichern(); render(); };
@@ -709,6 +814,8 @@ function tabAusbeute(z) {
   const sB = S.artikel.reduce((s, a) => s + num(a.anteil), 0), sR = S.artikel.reduce((s, a) => s + anteilRef(S, a, 'Rind'), 0);
   const messTxt = (typ, kind, name, f = 100, dec = 2, eh = ' %') => { const g = gemessenRoh(S, typ, kind, name); return g ? `<div class="klein ${g.n >= STAT_MIN_TIERE ? 'ok fett' : ''}" title="${esc(g.tiere.join(', '))}">gemessen ${fmtNum(g.wert * f, dec)}${eh} (${g.n} ${g.n === 1 ? 'Tier' : 'Tiere'}${g.n >= STAT_MIN_TIERE ? ' – gilt' : ', ab ' + STAT_MIN_TIERE})</div>` : ''; };
   const feld = (f, t, dec = 0) => `<label class="f" style="width:250px">${t}<input class="feld zahl" inputmode="decimal" data-ch="st" data-f="${f}" value="${fmtIn(st[f], dec || 2)}"></label>`;
+  const kref = kommReferenz(S);
+  const hofArten = ausbeuteArtikel(S).map(a => a.name).filter(n => n !== HACK && !istOrgan(n)).concat(art(S, OCHS) ? [OCHS] : []);
   z.innerHTML = `<div class="karte"><h3 style="margin-top:0">Ausbeute je Tier (Anteil am Schlachtgewicht)</h3>
    <label class="zeile" style="gap:10px;margin-bottom:10px"><input type="checkbox" data-ch="rindwie" style="width:24px;height:24px"${eigen ? '' : ' checked'}> <b>Rind: Werte vom Bullen übernehmen</b> <span class="klein">(Haken weg = eigene Prozente für Rinder eingeben)</span></label>
    <div class="tabwrap"><table class="tab"><thead><tr><th>Bestellartikel</th><th class="r">Anteil Bulle (%)</th><th class="r">Anteil Rind (%)</th><th class="r">Referenz</th><th class="r">Bulle ${fmtNum(st.sgBulle)} kg</th><th class="r">Rind ${fmtNum(st.sgRind)} kg</th><th>Teilstücke für die Kistenfüllung</th></tr></thead><tbody>
@@ -746,7 +853,16 @@ function tabAusbeute(z) {
     <p class="klein">Damit wird überall gerechnet: Bestellungen nach Stück (z. B. „Steak 3“ = 3 × Stückgewicht), Genusspaket, Beutelgrößen der Knochen. Leer = Artikel wird nur nach kg bestellt.</p>
     <div class="tabwrap" style="max-width:640px"><table class="tab"><tbody>${S.artikel.map((a, i) => ({ a, i })).filter(({ a }) => !istOrgan(a.name) || a.einheit === 'Stk').map(({ a, i }) => { const btl = num(a.beutelG) > 0; return `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td>
       <td style="width:130px"><input class="feld zahl${!btl && !(num(a.ganzeStuecke) > 0) && num(a.stueckG) > 0 && ausserhalb(num(a.stueckG) / 1000, a.stkMin, a.stkMax) ? ' fehlt' : ''}" title="${!(num(a.ganzeStuecke) > 0) ? refText(a.stkMin, a.stkMax, 1000, 0, 'g') : ''}" inputmode="numeric" data-ch="eg" data-f="${btl ? 'beutelG' : 'stueckG'}" value="${btl ? fmtIn(a.beutelG) : num(a.stueckG) > 0 ? fmtIn(a.stueckG) : ''}" placeholder="–"></td>
-      <td class="klein" style="width:110px">g je ${btl ? 'Beutel' : 'Stück'}${a.einheit === 'Stk' ? ' (für Schätzpreis)' : ''}</td><td class="klein r" style="width:110px">${!(num(a.ganzeStuecke) > 0) ? refText(a.stkMin, a.stkMax, 1000, 0, 'g') : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
+      <td class="klein" style="width:110px">g je ${btl ? 'Beutel' : 'Stück'}${a.einheit === 'Stk' ? ' (für Schätzpreis)' : ''}</td><td class="klein r" style="width:110px">${!(num(a.ganzeStuecke) > 0) ? refText(a.stkMin, a.stkMax, 1000, 0, 'g') : ''}</td>
+      <td class="klein r" style="width:190px">${kref[a.name] ? `gewogen Ø <b>${fmtNum(kref[a.name].g, 0)} g</b> (${fmtNum(kref[a.name].stk)} Stk)${a.name !== OCHS ? ` <button class="btn klein" data-act="egref" data-i="${i}" title="Referenz aus dem Kommissionieren als Einzelgewicht übernehmen">übernehmen</button>` : ''}` : ''}</td></tr>`; }).join('')}</tbody></table></div>
+    <p class="klein" style="margin:6px 0 0">„gewogen Ø“ = Mittelwert aus dem Kommissionieren (Ist-Gewicht ÷ Stückzahl, Bestellungen und Hofladen-Päckchen).</p></div>
+   <div class="karte"><h3 style="margin-top:0">Kommissionieren &amp; Hofladen verpacken</h3><div class="zeile oben">
+    ${feld('kommToleranz', 'Toleranz Ist zu Soll ± (%) – darüber Vermerk nötig')}${feld('lagerKuehlhaus', 'Kühlhaus: Anzahl Kisten (Hofladen)')}</div>
+    <p class="klein">So werden die Reste für den Hofladen verpackt (je Päckchen, vakuumiert; jedes Päckchen wird gewogen):</p>
+    <div class="tabwrap" style="max-width:760px"><table class="tab"><tbody>${hofArten.map(n => { const g = hofRegel(S, n); return `<tr data-art="${esc(n)}"><td class="fett">${esc(n)}</td>
+      <td style="width:190px"><select class="feld" data-ch="hofregel" data-f="r">${[['stk', 'je … Stück'], ['kg', 'je … kg'], ['ganz', 'ganz lassen'], ['halb', 'ganze Stücke halbieren'], ['kiste', 'bleibt in der Kiste']].map(([v, t]) => opt(v, t, g.r === v)).join('')}</select></td>
+      <td style="width:260px">${g.r === 'stk' ? `<input class="feld zahl" style="width:90px" inputmode="numeric" data-ch="hofregel" data-f="n" value="${fmtIn(g.n)}"> Stück` : g.r === 'kg' ? `<input class="feld zahl" style="width:80px" inputmode="decimal" data-ch="hofregel" data-f="von" value="${fmtIn(g.von, 2)}"> bis <input class="feld zahl" style="width:80px" inputmode="decimal" data-ch="hofregel" data-f="bis" value="${fmtIn(g.bis, 2)}"> kg` : ''}</td>
+      <td class="klein">${n === BRATEN ? 'Teilstück wird abgefragt · Bürgermeisterstück ganz' : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
    <div class="karte"><h3 style="margin-top:0">Einstellungen</h3><div class="zeile oben">
     ${feld('sgBulle', 'Standard-Schlachtgewicht Bulle (kg)')}${feld('sgRind', 'Standard-Schlachtgewicht Rind/Färse (kg)')}
     ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('fettSiedProzent', 'Fettiges Hack: Anteil Siedfleisch (%)')}${feld('hackHof500Prozent', 'Hack für Hofladen: Anteil 500-g-Päckchen (%)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
@@ -758,6 +874,15 @@ function tabAusbeute(z) {
     ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('baeckleStk', 'Bäckle ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Ochsenschwanz</h3><div class="zeile oben">${feld('ochsStk', 'Ochsenschwanz je Tier (Stk)')}<p class="klein" style="max-width:420px;margin:22px 0 0">Kein Innereien-Artikel: kommt immer zu den Beinscheiben/Waden in die Kiste und wird gewogen. Mit Häkchen „am Stück“ bestellt → bleibt ganz (Zeile im Metzgerauftrag), sonst schneidet der Metzger ihn wie gewohnt. Verkauf immer als ganzer Schwanz an eine Bestellung, Preis nach kg; nicht bestellte gehen beim Abschluss an den Hofladen.</p></div></div>`;
   ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
+  ui.acts.egref = el => { const a = S.artikel[+el.dataset.i]; const r = kref[a.name]; if (!r) return; a.stueckG = Math.round(r.g); speichern(); meldung(`${a.name}: Einzelgewicht ${fmtNum(a.stueckG)} g übernommen.`); render(); };
+  ui.acts.hofregel = el => {
+    const n = el.closest('tr').dataset.art, f = el.dataset.f; S.settings.hofPack = S.settings.hofPack || {};
+    const g = S.settings.hofPack[n] = Object.assign({}, hofRegel(S, n), S.settings.hofPack[n] || {});
+    if (f === 'r') { g.r = el.value; if (g.r === 'stk' && !(num(g.n) > 0)) g.n = 1; if (g.r === 'kg' && !(num(g.von) > 0)) { g.von = 1; g.bis = 1.5; } }
+    else g[f] = Math.max(0, num(el.value));
+    if (g.r === 'kg' && num(g.bis) < num(g.von)) g.bis = g.von;
+    speichern(); render();
+  };
   ui.acts.eg = el => {
     const a = S.artikel[+el.closest('tr').dataset.i], f = el.dataset.f, v = num(el.value);
     if (f === 'beutelG' && !(v > 0)) { meldung('Beutelgröße muss größer 0 sein.', true); return render(); }
