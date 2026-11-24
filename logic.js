@@ -365,6 +365,13 @@ function preisDatum(S, o) {
   if (o && o.wunsch) return o.wunsch;
   return todayISO();
 }
+// Genusspaket einzeln gekauft (seit 3.0.7): was der Inhalt zu Einzelpreisen dieser Preisliste kosten würde – gesamt und je kg
+function paketEinzelwert(S, pl) {
+  let eur = 0;
+  for (const p of paketListe(S)) { const a = art(S, p.art); if (a) eur += num(p.anzahl) * paketG(S, p) / 1000 * artPreis(S, a, pl); }
+  const kg = paketGewicht(S);
+  return { eur, kg, jeKg: kg > 0 ? eur / kg : 0 };
+}
 const artPreis = (S, a, pl) => pl && pl.preise && has(pl.preise[a.name]) ? num(pl.preise[a.name]) : num(a.preis);
 const paketPreisKg = (S, pl) => pl && has(pl.preisPaketKg) ? num(pl.preisPaketKg) : num(S.settings.preisPaketKg);
 const vakPreisPaket = (S, pl) => pl && has(pl.preisVakPaket) ? num(pl.preisVakPaket) : num(S.settings.preisVakPaket);
