@@ -278,6 +278,7 @@ const DEFAULTS = {
   "nenner": 16,
   "hackKiste": 20,
   "fettSiedProzent": 50,
+  "hackHof500Prozent": 50,
   "kisteMax": 20,
   "kisteAusnahme": 25,
   "hackPaketG": 500,

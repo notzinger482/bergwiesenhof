@@ -106,7 +106,10 @@ function docHack(hz) {
   return { title: `Hackfleisch-Zettel – ${hz.tier.name}`, sub: [abholTxt(hz.tier), `Summe einzeln ${fmtNum(hz.sumEinzeln, 2)} kg · aus Paketen ${fmtNum(hz.sumPak, 1)} kg`],
     blocks: [{ type: 'text', text: 'Unabhängig von den Bestellungen vorab verpacken; Tüten mit Bestell-Nr. und Namen beschriften. Mageres Hack (Sonderfall) kommt separat vom Metzger.' },
       { type: 'table', head: ['Nr.', 'Name', 'EINZELN kg', 'verpacken als', 'vak.?', 'Pakete', 'aus PAKET kg', 'verpacken als', 'vak.?', '✓'], widths: [0.8, 2.6, 1.2, 2, 1.2, 0.9, 1.2, 1.6, 2, 0.6], align: ['r', '', 'r', '', '', 'r', 'r', '', '', ''],
-        rows: hz.rows.map(r => [r.nr, r.name, fmtNum(r.einzeln, 3), r.einzelnAls, r.einzelnVak, r.pakete || '', fmtNum(r.ausPak, 1), r.ausPakAls, r.pakVak, r.ok ? '✓' : '☐']), rowClass: hz.rows.map(r => r.ok ? 'erledigt' : ''), abhaken: 'hack' }], footer: fussZeile() };
+        rows: hz.rows.map(r => [r.nr, r.name, fmtNum(r.einzeln, 3), r.einzelnAls, r.einzelnVak, r.pakete || '', fmtNum(r.ausPak, 1), r.ausPakAls, r.pakVak, r.ok ? '✓' : '☐'])
+          .concat(hz.hof.text ? [['', 'HOFLADEN', fmtNum(hz.hof.rest, 1), hz.hof.text, 'VAKUUM', '', '', '', '', hz.hof.ok ? '✓' : '☐']] : []),
+        rowClass: hz.rows.map(r => r.ok ? 'erledigt' : '').concat(hz.hof.text ? [hz.hof.ok ? 'erledigt' : 'fett'] : []), abhaken: 'hack' },
+      { type: 'text', text: hz.hof.text ? `Hofladen: übriges Hack nach allen Bestellungen – Hack ${hz.hof.gewogen ? 'gewogen' : 'geplant'} ${fmtNum(hz.hof.gesamt, 1)} kg − bestellt ${fmtNum(hz.sumEinzeln + hz.sumPak, 1)} kg = ${fmtNum(hz.hof.rest, 1)} kg, alles vakuumieren (${fmtNum(has(S.settings.hackHof500Prozent) ? num(S.settings.hackHof500Prozent) : 50, 0)} % in 500-g-Päckchen, Rest 1 kg).` : (hz.hof.rest < -0.25 ? `Achtung: bestellt ist ${fmtNum(-hz.hof.rest, 1)} kg mehr Hack, als in den Kisten ist.` : 'Kein Hack für den Hofladen übrig.') }], footer: fussZeile() };
 }
 // Eingabe „Nach dem Zuschnitt“ über dem Innereien-Zettel (leer = Schätzwert)
 function innZuschnittKarte(ii) {
@@ -170,7 +173,7 @@ function viewSchlachttag(tab, q) {
   if (tab === 'menge') zeige(docMenge(mengenpruefung(S, tn)));
   else if (tab === 'metzger') tabMetzger(tn, ziel, zeige);
   else if (tab === 'kisten' || tab === 'packplan') tabKisten(tn, ziel);
-  else if (tab === 'hack') { const hz = hackZettel(S, tn); zeige(docHack(hz)); abhakenAn(ziel, { hack: hz.rows.map(r => r.nr) }); }
+  else if (tab === 'hack') { const hz = hackZettel(S, tn); zeige(docHack(hz)); abhakenAn(ziel, { hack: hz.rows.map(r => r.nr).concat(hz.hof.text ? ['hof'] : []) }); }
   else if (tab === 'innereien') { const ii = innereien(S, tn); zeige(docInnereien(ii), '', innZuschnittKarte(ii)); abhakenAn(ziel, { inn: ii.rows.map(r => r.nr), innrest: ii.uebersicht.map(u => u.art) }); }
   else if (tab === 'packliste') tabPackliste(tn, ziel);
   ui.acts.innist = el => { const v = el.value.trim(); innIstSetzen(S, tn, el.dataset.f, v === '' ? null : Math.max(0, num(v))); speichern(); render(); };
@@ -178,6 +181,7 @@ function viewSchlachttag(tab, q) {
   ui.acts.abhaken = el => {
     const art = el.dataset.abh, key = el.dataset.key;
     if (art === 'innrest') innRestUmschalten(S, tn, key);
+    else if (art === 'hack' && key === 'hof') hackHofUmschalten(S, tn);
     else { const o = S.bestellungen.find(x => x.nr === +key); if (!o) return; const f = art === 'hack' ? 'hackOk' : 'innOk'; if (o[f]) delete o[f]; else o[f] = true; }
     speichern(); render();
   };
@@ -745,7 +749,7 @@ function tabAusbeute(z) {
       <td class="klein" style="width:110px">g je ${btl ? 'Beutel' : 'Stück'}${a.einheit === 'Stk' ? ' (für Schätzpreis)' : ''}</td><td class="klein r" style="width:110px">${!(num(a.ganzeStuecke) > 0) ? refText(a.stkMin, a.stkMax, 1000, 0, 'g') : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
    <div class="karte"><h3 style="margin-top:0">Einstellungen</h3><div class="zeile oben">
     ${feld('sgBulle', 'Standard-Schlachtgewicht Bulle (kg)')}${feld('sgRind', 'Standard-Schlachtgewicht Rind/Färse (kg)')}
-    ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('fettSiedProzent', 'Fettiges Hack: Anteil Siedfleisch (%)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
+    ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('fettSiedProzent', 'Fettiges Hack: Anteil Siedfleisch (%)')}${feld('hackHof500Prozent', 'Hack für Hofladen: Anteil 500-g-Päckchen (%)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
 
 </div></div>
    <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">

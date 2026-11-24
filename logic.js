@@ -1719,6 +1719,33 @@ function hackPortionText(po, ein, gesamt) {
   }
   return `${fmtNum(ein, 3)} kg in 1 Tüte`;
 }
+// Hack insgesamt: gewogene/geplante Hack-Kisten, sonst Metzger-Vorgabe
+function hackGesamt(S, tierName) {
+  const ctx = kistenKontext(S, tierName), hk = ctx.rows.filter(k => k.art === HACK);
+  if (hk.length) return { kg: hk.reduce((s, k) => s + num(k.kg), 0), gewogen: hk.every(k => kisteGewogen(k)), quelle: 'kisten' };
+  const pp = S.packplaene && S.packplaene[tierName];
+  const ma = metzgerauftrag(S, tierName, pp && pp.gruppe ? pp.hackKisteKg : null);
+  return { kg: ma ? num(ma.hack.vorgabe) : 0, gewogen: false, quelle: 'plan' };
+}
+function hackHofladen(S, tierName, t, bestellt) {
+  const g = hackGesamt(S, tierName), rest = g.kg - bestellt;
+  const T = t && t.glieder ? tier(S, t.glieder[0]) : t;
+  const out = { gesamt: g.kg, gewogen: g.gewogen, rest, n500: 0, n1000: 0, restG: 0, text: '', ok: !!(T && T.hackHofOk) };
+  if (!(rest > 0.25)) return out;
+  const p = Math.min(100, Math.max(0, has(S.settings.hackHof500Prozent) ? num(S.settings.hackHof500Prozent) : 50)) / 100;
+  let g500 = Math.floor(rest * p / 0.5 + 1e-9);
+  let n1000 = Math.floor((rest - g500 * 0.5) + 1e-9);
+  let uebrig = rest - g500 * 0.5 - n1000;
+  const dazu = Math.floor(uebrig / 0.5 + 1e-9); g500 += dazu; uebrig -= dazu * 0.5; // was für 1 kg nicht reicht, in 500-g-Päckchen
+  out.n500 = g500; out.n1000 = n1000; out.restG = Math.round(uebrig * 1000);
+  out.text = [g500 ? `${g500} × 500 g` : '', n1000 ? `${n1000} × 1 kg` : ''].filter(Boolean).join(' + ') + (out.restG >= 50 ? ` + Rest ca. ${out.restG} g` : '');
+  return out;
+}
+function hackHofUmschalten(S, tierName) {
+  const T = topfTier(S, tierName); if (!T) return;
+  const neu = !hackHofladen(S, tierName, T, 0).ok;
+  for (const n of T.glieder || [T.name]) { const x = tier(S, n); if (x) { if (neu) x.hackHofOk = true; else delete x.hackHofOk; } }
+}
 function hackZettel(S, tierName) {
   const t = topfTier(S, tierName);
   if (!t) return null;
@@ -1744,7 +1771,10 @@ function hackZettel(S, tierName) {
       ok: !!o.hackOk
     });
   }
-  return { tier: t, rows, sumEinzeln: rows.reduce((s, r) => s + num(r.einzeln), 0), sumPak: rows.reduce((s, r) => s + num(r.ausPak), 0) };
+  const sumEinzeln = rows.reduce((s, r) => s + num(r.einzeln), 0), sumPak = rows.reduce((s, r) => s + num(r.ausPak), 0);
+  // Hofladen (seit 3.0.8): was an Hack nach allen Bestellungen übrig bleibt – alles vakuumiert, x % in 500-g-, Rest in 1-kg-Päckchen
+  const hof = hackHofladen(S, tierName, t, sumEinzeln + sumPak);
+  return { tier: t, rows, sumEinzeln, sumPak, hof };
 }
 
 // ---------- Innereien ----------
