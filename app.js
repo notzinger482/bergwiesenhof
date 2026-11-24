@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '2.9';
+const APP_VERSION = '3.0';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -184,7 +184,7 @@ function checkMarke(txt, o) {
 }
 function tierOptionen(gewaehlt, mitAuto, vorschlag) {
   let h = mitAuto ? opt('', `automatisch${vorschlag ? ' → ' + vorschlag : ''}`, !gewaehlt) : '';
-  for (const t of tiereSortiert()) h += opt(t.name, `${t.name}${t.abhol ? ' – Abholung ' + fmtDate(t.abhol) : ''}`, gewaehlt === t.name);
+  for (const t of tiereSortiert()) { const tp = topfTier(S, t.name); h += opt(t.name, `${t.name}${t.abhol ? ' – Abholung ' + fmtDate(t.abhol) : ''}${tp && tp.glieder ? ' (ein Topf: ' + tp.name + ')' : ''}`, gewaehlt === t.name); }
   h += opt('Warteliste', 'Warteliste', gewaehlt === 'Warteliste');
   if (gewaehlt && gewaehlt !== 'Warteliste' && !tier(S, gewaehlt)) h += opt(gewaehlt, gewaehlt + ' (unbekannt)', true);
   else if (gewaehlt && tier(S, gewaehlt) && tier(S, gewaehlt).archiv) h += opt(gewaehlt, gewaehlt + ' (Archiv)', true);
@@ -209,7 +209,8 @@ function viewStart() {
   const inaktiv = inaktiveKunden(S).length;
   if (inaktiv) h += `<div class="hinweis zeile"><div class="platz"><b>Datenschutz:</b> ${inaktiv} Kunde${inaktiv > 1 ? 'n haben' : ' hat'} seit über ${kundenFrist(S)} Jahren nicht bestellt und ${inaktiv > 1 ? 'sollten' : 'sollte'} anonymisiert werden.</div><a class="btn" href="#/einstellungen/daten">Ansehen</a></div>`;
   // Kistenpläne, die nicht mehr zu den Bestellungen passen
-  for (const n of kistenTiere(S)) { const v = tier(S, n) && !tier(S, n).archiv ? kistenplanVeraltet(S, n) : null; if (v) h += `<div class="hinweis zeile"><div class="platz"><b>Kistenplan ${esc(n)}:</b> ${esc(v)} – bitte neu berechnen oder zurücksetzen.</div><a class="btn" href="#/schlachttag/kisten?tier=${encodeURIComponent(n)}">Kisten & Ladeplan</a></div>`; }
+  const kpGesehen = new Set();
+  for (const n of kistenTiere(S)) { if (kpGesehen.has(n)) continue; abholGruppe(S, n).forEach(x => kpGesehen.add(x)); const v = tier(S, n) && !tier(S, n).archiv ? kistenplanVeraltet(S, n) : null; if (v) h += `<div class="hinweis zeile"><div class="platz"><b>Kistenplan ${esc(tierAnzeige(S, n))}:</b> ${esc(v)} – bitte neu berechnen oder zurücksetzen.</div><a class="btn" href="#/schlachttag/kisten?tier=${encodeURIComponent(n)}">Kisten & Ladeplan</a></div>`; }
   // Preislisten: kommende neue Bestellzettel / gerade gewechselte Preise
   const plAkt = preislisteAm(S, heute), plNeu = preislisten(S).find(p => p.ab > heute);
   if (plNeu) h += `<div class="hinweis zeile"><div class="platz"><b>Neue Preise ab ${fmtDate(plNeu.ab)}:</b> Die Bestellzettel mit den neuen Preisen sind fertig und können schon gedruckt werden.</div><a class="btn" href="#/vordrucke">Vordrucke</a></div>`;
@@ -227,7 +228,7 @@ function viewStart() {
     const summe = zo.reduce((s, o) => s + (has(o.endbetrag) ? num(o.endbetrag) : schaetzpreis(S, o)), 0);
     h += `<div class="karte zahlkarte"><h3 style="margin-top:0">Bezahlung offen <span class="marke rot">${zo.length}</span> <span class="klein">– zusammen ca. ${fmtEur(summe)}</span></h3>
       <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>Tier</th><th>abgeholt am</th><th class="r">Betrag</th><th></th></tr></thead><tbody>
-      ${zo.map(o => `<tr class="klick" data-act="zbest" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td class="fett">${esc(o.name)}</td><td>${o.tel ? `<a href="tel:${esc(o.tel)}" data-act="anrufen">${esc(o.tel)}</a>` : ''}</td><td>${esc(o.tier)}</td><td>${fmtDate(o.abgeholtAm)}</td>
+      ${zo.map(o => `<tr class="klick" data-act="zbest" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td class="fett">${esc(o.name)}</td><td>${o.tel ? `<a href="tel:${esc(o.tel)}" data-act="anrufen">${esc(o.tel)}</a>` : ''}</td><td>${esc(tierAnzeige(S, o.tier))}</td><td>${fmtDate(o.abgeholtAm)}</td>
         <td class="r">${has(o.endbetrag) ? fmtEur(o.endbetrag) : `<span class="klein">ca.</span> ${fmtEur(schaetzpreis(S, o))}`}</td><td class="r"><button class="btn klein haupt" data-act="zbezahlt" data-nr="${o.nr}">bezahlt ✓</button></td></tr>`).join('')}
       </tbody></table></div></div>`;
   }
@@ -604,7 +605,7 @@ function viewBestellungen() {
   const liste = () => {
     const q = F.q.trim().toLowerCase();
     let os = S.bestellungen.slice().sort((a, b) => b.nr - a.nr);
-    if (F.tier) os = os.filter(o => o.tier === F.tier);
+    if (F.tier) { const gl = (topfTier(S, F.tier) || {}).glieder || [F.tier]; os = os.filter(o => gl.includes(o.tier)); }
     if (F.status === 'zahlung') os = os.filter(zahlungOffen); else if (F.status) os = os.filter(o => (o.status || 'offen') === F.status);
     if (q) os = os.filter(o => String(o.nr) === q || (o.name || '').toLowerCase().includes(q) || (o.tel || '').includes(q));
     const checks = {}; [...new Set(os.map(o => o.tier))].forEach(t => Object.assign(checks, mengencheckTier(S, t)));
@@ -612,7 +613,7 @@ function viewBestellungen() {
       `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Eingang</th><th>Wunschtermin</th><th>Name</th><th>Tier</th><th class="r">Pakete</th><th>Bestellung</th><th class="r">Schätzpreis</th><th>Status</th><th>Mengencheck</th></tr></thead><tbody>` +
       os.map(o => {
         const ch = o.tier === 'Warteliste' ? 'Warteliste – noch kein Tier' : tier(S, o.tier) ? (checks[o.nr] || '') : 'Tier unbekannt';
-        return `<tr class="klick ${rotZeile(ch, o) ? 'rot' : ''}" data-act="oeffnen" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${o.wunsch ? fmtDate(o.wunsch) : ''}</td><td>${esc(o.name)}</td><td>${esc(o.tier)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein" style="max-width:380px">${esc(kurzText(o))}</td><td class="r">${fmtEur(schaetzpreis(S, o))}</td><td>${statusMarke(o.status)}${zahlMarke(o)}${o.lagerOrt ? `<div class="klein">${esc(lagerText(o))}</div>` : ''}</td><td>${checkMarke(ch, o)}</td></tr>`;
+        return `<tr class="klick ${rotZeile(ch, o) ? 'rot' : ''}" data-act="oeffnen" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${o.wunsch ? fmtDate(o.wunsch) : ''}</td><td>${esc(o.name)}</td><td>${esc(tierAnzeige(S, o.tier))}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein" style="max-width:380px">${esc(kurzText(o))}</td><td class="r">${fmtEur(schaetzpreis(S, o))}</td><td>${statusMarke(o.status)}${zahlMarke(o)}${o.lagerOrt ? `<div class="klein">${esc(lagerText(o))}</div>` : ''}</td><td>${checkMarke(ch, o)}</td></tr>`;
       }).join('') + '</tbody></table></div>';
     $('#anzahl').textContent = `${os.length} Bestellung${os.length === 1 ? '' : 'en'}`;
   };
@@ -739,7 +740,7 @@ function viewTier(name) {
   ui.ins.t = el => { const f = el.dataset.f; t[f] = el.type === 'checkbox' ? el.checked : f === 'sg' ? (el.value.trim() ? num(el.value) : null) : el.value; };
   ui.acts.archiv = async () => {
     if (!(num(t0.sg) > 0)) return dialog('Schlachtgewicht fehlt', '<p>Bitte zuerst das echte Schlachtgewicht eintragen und speichern – es wird für die Ausbeute-Statistik gebraucht.</p>');
-    if (S.kisten.some(k => k.tier === t0.name)) return dialog('Noch Kisten offen', '<p>Für dieses Tier sind noch Kisten eingetragen. Bitte unter Schlachttag → Kisten & Ladeplan „Tier abgeschlossen“ verwenden (Reste gehen dann an den Hofladen).</p>');
+    if (kistenRows(S, t0.name).length) return dialog('Noch Kisten offen', '<p>Für dieses Tier sind noch Kisten eingetragen. Bitte unter Schlachttag → Kisten & Ladeplan „Tier abgeschlossen“ verwenden (Reste gehen dann an den Hofladen).</p>');
     const offen = ordersOfTier(S, t0.name).filter(o => (o.status || 'offen') === 'offen');
     if (offen.length && !(await frage('Ins Archiv', `${offen.length} Bestellung(en) sind noch offen. Trotzdem ins Archiv?`, 'Ins Archiv', 'Abbrechen'))) return;
     archivStandFesthalten(S, t0); t0.archiv = todayISO(); speichern(); meldung(`${t0.name} ist im Archiv.`); render();

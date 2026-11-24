@@ -20,7 +20,7 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 | Hofladen | **Hofladen** |
 | – (neu) | **Bezahlung offen**: bei „abgeholt“ ankreuzbar (Bestellung oder Packliste) – die Übersicht listet alle, die noch zahlen müssen |
 | – (neu 2.1) | **Notiz zur Bestellung**: eigenes Feld in der Bestellung, erscheint gelb beim Kommissionieren und in der Packliste |
-| – (neu 2.1) | **Gemeinsame Abholung**: Tiere mit gleichem Abholtag bekommen einen gemeinsamen Metzgerauftrag und Ladeplan (Kistennummern über alle Tiere) |
+| – (neu 2.1) | **Gemeinsame Abholung**: Tiere mit gleichem Abholtag bekommen einen gemeinsamen Metzgerauftrag und Ladeplan (seit 3.0 als ein Topf, siehe unten) |
 | – (neu 2.1) | **Offene Bestellungen neu verteilen** (Tiere/Bestellungen, auch automatisch nach neuem Tier): nur offene, Tiere ohne Kistenplan, mit Vorschau |
 | – (neu 2.1) | **Bewusst überbelegen**: in der Bestellung bei „reicht nicht“ – bleibt beim Tier, gelb markiert |
 | – (neu 2.1) | **Sonderfälle vom Metzger**: beim Kommissionieren mit Kistennummer (seit 2.9 auf mehrere Kisten verteilt) |
@@ -31,6 +31,7 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 | – (2.7) | **Wunschtermin-Regel** (Neu verteilen und automatische Tier-Wahl in der Bestellung): nur Tiere höchstens 5 Tage vor dem Wunschtermin (im Verteilen-Dialog änderbar), sonst Warteliste |
 | – (2.8) | Nach Stück bestellt: Anzeige „40 Rouladen (ca. 8 kg)“; **Neu verteilen** mit Häkchen je Bestellung – abgewählte bleiben, wo sie sind |
 | – (2.9) | **Sonderfälle vom Metzger** (je Bestellung beschriftet) werden auf normale Kisten verteilt, die bei dieser Bestellung schon in Gebrauch sind und Platz haben; nur der Rest kommt in eigene Sonderfälle-Kisten mit **höchstens 30 kg**. Beim Kommissionieren steht die Kistennummer je Sonderfall |
+| – (3.0) | **Gemeinsame Abholung = ein Topf**: Tiere mit gleichem Abholtag laufen wie ein großes Tier – Mengencheck über die Summe aller Tiere, ein Metzgerauftrag mit Gesamtmengen, gemeinsame Kisten (gleiche Artikel zusammen), Kommissionieren in einer Reihenfolge über alle Bestellungen, Hack-Zettel/Innereien/Packliste gemeinsam. In der Bestellliste steht „Hanni + Hias“. Abschluss nur für alle Tiere zusammen; gewogene Kisten zählen für die Ausbeute anteilig nach Schlachtgewicht. Alte, nach Tieren getrennte Kistenpläne werden als „passt nicht mehr“ gemeldet → neu berechnen |
 | Preisliste, Ausbeute, Auto | **Einstellungen** |
 | Bestellformular A4/A5, Infozettel (PDF) | **Übersicht → Vordrucke drucken** (Preise automatisch aus der Preisliste; jede Preisliste = eigene Version der Zettel, frühere im Archiv) |
 | Mappe zurücksetzen | **Einstellungen → Daten & Sicherung** (ein „Neues Jahr“ gibt es nicht mehr – Bestellungen laufen über den Jahreswechsel einfach weiter) |
