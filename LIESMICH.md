@@ -1,6 +1,6 @@
 # Bestellsystem Bergwiesenhof – Tablet-App
 
-Version 1.9.5 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
+Version 1.9.6 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
 
 Die App ersetzt die Excel-Datei mit allen Makros. Sie läuft nach der Installation **komplett offline**.
 Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in die Cloud und für Updates.
@@ -19,7 +19,7 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 | Kommissionierung | **Kommissionieren** – „aus Kiste 3 → 2,0 kg Braten“, antippen wenn erledigt |
 | Hofladen | **Hofladen** |
 | Preisliste, Ausbeute, Auto | **Einstellungen** |
-| Bestellformular A4/A5, Infozettel (PDF) | **Übersicht → Vordrucke drucken** (Preise automatisch aus der Preisliste) |
+| Bestellformular A4/A5, Infozettel (PDF) | **Übersicht → Vordrucke drucken** (Preise automatisch aus der Preisliste; jede Preisliste = eigene Version der Zettel, frühere im Archiv) |
 | Mappe zurücksetzen | **Einstellungen → Daten & Sicherung** (ein „Neues Jahr“ gibt es nicht mehr – Bestellungen laufen über den Jahreswechsel einfach weiter) |
 
 Preise, Ausbeute-Anteile, Stückgewichte, Beutelgrößen und Stellplätze sind aus `Bestellsystem_Bergwiesenhof.xlsm` übernommen.
@@ -52,6 +52,7 @@ die neuesten 30 Sicherungen bleiben, davor eine pro Tag für 90 Tage.
 Zusätzlich legt die App selbst eine Tageskopie der letzten 14 Tage auf dem Tablet an.
 
 **Wiederherstellen:** Sicherungsdatei aus Drive aufs Tablet laden → Einstellungen → „Sicherung einspielen“ (fragt nach dem Passwort, mit dem die Datei erstellt wurde).
+Sicherungen aus Versionen vor 1.9.0 werden nicht mehr angenommen.
 
 ## Datenschutz
 
@@ -67,5 +68,5 @@ Beim nächsten Öffnen im WLAN meldet die App „Neue Version“. Die Daten blei
 ## Dateien
 
 `index.html`, `app.css`, `app.js`, `views2.js` (Oberfläche) · `logic.js` (Rechenregeln aus Excel/VBA) ·
-`store.js` (Speicher, Sicherung, Excel-Export) · `docs.js` (Unterlagen als Bild/Druck) · `defaults.js` (Startwerte) ·
+`store.js` (Speicher, Sicherung, Excel-Export) · `docs.js` (Unterlagen als Bild/Druck) · `vordrucke.js` (Bestellformulare A4/A5, Infozettel, Archiv) · `defaults.js` (Startwerte) ·
 `sw.js`, `manifest.webmanifest`, Icons (Offline-Installation)

@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.9.5';
+const APP_VERSION = '1.9.6';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -163,6 +163,11 @@ function viewStart() {
   if (!sicherungPw) h += `<div class="hinweis zeile"><div class="platz"><b>Sicherungs-Passwort fehlt:</b> Sicherungen werden jetzt verschlüsselt. Bis ein Passwort festgelegt ist, wird nichts gesichert.</div><a class="btn haupt" href="#/einstellungen/daten">Passwort festlegen</a></div>`;
   const inaktiv = inaktiveKunden(S).length;
   if (inaktiv) h += `<div class="hinweis zeile"><div class="platz"><b>Datenschutz:</b> ${inaktiv} Kunde${inaktiv > 1 ? 'n haben' : ' hat'} seit über ${kundenFrist(S)} Jahren nicht bestellt und ${inaktiv > 1 ? 'sollten' : 'sollte'} anonymisiert werden.</div><a class="btn" href="#/einstellungen/daten">Ansehen</a></div>`;
+  // Preislisten: kommende neue Bestellzettel / gerade gewechselte Preise
+  const plAkt = preislisteAm(S, heute), plNeu = preislisten(S).find(p => p.ab > heute);
+  if (plNeu) h += `<div class="hinweis zeile"><div class="platz"><b>Neue Preise ab ${fmtDate(plNeu.ab)}:</b> Die Bestellzettel mit den neuen Preisen sind fertig und können schon gedruckt werden.</div><a class="btn" href="#/vordrucke">Vordrucke</a></div>`;
+  else if (plAkt && preislisten(S).length > 1 && plAkt.ab <= heute && plAkt.ab >= isoOf(new Date(Date.now() - 14 * 864e5)))
+    h += `<div class="hinweis zeile"><div class="platz"><b>Seit ${fmtDate(plAkt.ab)} gelten neue Preise:</b> Bitte die neuen Bestellzettel drucken – die alten liegen im Archiv unter Vordrucke.</div><a class="btn" href="#/vordrucke">Vordrucke</a></div>`;
   if (!ui.dauerhaft) h += `<div class="hinweis klein">Hinweis: Der dauerhafte Speicher ist noch nicht bestätigt. Bitte die App über „Zum Startbildschirm hinzufügen“ installieren – dann löscht Android die Daten nicht von selbst.</div>`;
   h += `<div class="zeile" style="margin-bottom:16px"><a class="btn haupt" href="#/neu" style="min-height:60px;font-size:19px;padding:0 28px">+ Neue Bestellung</a>
     <div class="kachel"><div class="gross">${offen}</div><div class="klein">offene Bestellungen</div></div>
@@ -232,6 +237,7 @@ function viewBestellung(nr, q, vorlage) {
     <button class="btn" data-act="teilen">Teilen …</button><button class="btn rot" data-act="loeschen">Löschen</button>` : ''}
     ${ui.letzteNr && !nr ? `<a class="btn klein" href="#/bestellung/${ui.letzteNr}">Zuletzt: Nr. ${ui.letzteNr} öffnen</a>` : ''}</div>
   <div id="fehler"></div>
+  <div id="mcheck"></div>
   <div class="spalten2">
     <div>
       <div class="karte"><h3 style="margin-top:0">Kunde</h3>
@@ -305,6 +311,17 @@ function viewBestellung(nr, q, vorlage) {
       ti = `${o.tier ? '' : 'Vorschlag: '}<b>${esc(t.name)}</b> – Abholung ${t.abhol ? fmtDate(t.abhol) : 'offen'} · nach dieser Bestellung noch <b class="${frei < 0 ? 'warn' : ''}">${fmtNum(frei)}</b> Pakete frei, ${inf.anzahl} Bestellungen`; }
     else if (tn === 'Warteliste') ti = '<span class="knapp">Kein passendes Tier – Bestellung kommt auf die Warteliste.</span>';
     $('#tierinfo').innerHTML = ti;
+    // Mengencheck live: wie viel fehlt bei diesem Tier (auch vor dem Speichern)
+    const fd = t && !t.archiv ? fehlDetail(S, Object.assign({}, o, { tier: t.name })) : null;
+    ui.fehlDetail = fd;
+    if (fd && fd.ok && ti) $('#tierinfo').innerHTML = ti + ' · Mengencheck <span class="ok">ok</span>';
+    $('#mcheck').innerHTML = !fd || fd.ok ? '' : `<div class="fehlerbox mcheck"><b>Mengencheck ${esc(fd.tier)}: reicht nicht</b>
+      ${fd.zeilen.length ? `<table class="tab mcheck-tab"><thead><tr><th>Artikel</th><th class="r">bestellt</th><th class="r">verfügbar</th><th class="r">fehlt</th></tr></thead><tbody>${fd.zeilen.map(z => {
+        const stk = (n, z2) => z.stkBestellt !== undefined ? ` <span class="klein">(${fmtNum(n)} ${esc(z.stkText)})</span>` : z.btlBestellt !== undefined ? ` <span class="klein">(${fmtNum(n)} Btl)</span>` : '';
+        const nB = z.stkBestellt !== undefined ? z.stkBestellt : z.btlBestellt, nV = z.stkVerf !== undefined ? z.stkVerf : z.btlVerf;
+        return `<tr><td class="fett">${esc(z.art)}</td><td class="r">${fmtNum(z.bestelltKg, 2)} kg${stk(nB)}</td><td class="r">ca. ${fmtNum(z.verfuegbarKg, 2)} kg${stk(nV)}</td><td class="r warn">${fehlKgText(z.fehltKg)}${nB !== undefined ? ` <span class="klein">(${fmtNum(nB - nV)} ${z.stkBestellt !== undefined ? 'Stk' : 'Btl'})</span>` : ''}</td></tr>`; }).join('')}</tbody></table>` : ''}
+      ${fd.sonst.length ? `<p style="margin:6px 0">${fd.sonst.map(esc).join('<br>')}</p>` : ''}
+      ${fd.zeilen.length ? `<div class="zeile" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn" data-act="kuerzen">Auf verfügbare Menge kürzen</button>${nr ? '<button class="btn" data-act="teilen">Rest aufs nächste Tier (Teilen …)</button>' : ''}<span class="klein platz">Ist der Kunde mit weniger einverstanden, kürzen und speichern – sonst den Rest aufs nächste Tier verschieben.</span></div>` : ''}</div>`;
     // Kunde
     const k = S.kunden.find(x => sameText(x.name, o.name));
     const lb = !o.nr && o.name ? letzteBestellungVon(o.name) : null;
@@ -393,6 +410,21 @@ function viewBestellung(nr, q, vorlage) {
     S.bestellungen = S.bestellungen.filter(x => x.nr !== nr); speichern(); ui.formDirty = false; meldung(`Bestellung Nr. ${nr} gelöscht.`); gehe('#/bestellungen');
   };
   ui.acts.speichern = () => bestellungSpeichern(o);
+  // Auf die verfügbare Menge kürzen (nur im Formular – erst „Speichern“ übernimmt es)
+  ui.acts.kuerzen = () => {
+    const fd = ui.fehlDetail; if (!fd || !fd.zeilen.length) return;
+    const txt = [];
+    for (const z of fd.zeilen) {
+      const p = o.pos[z.art]; if (!p) continue;
+      if (z.neu > 0) { p[z.feld] = z.neu; if (z.feld === 'anzahl') p.menge = null; }
+      else delete o.pos[z.art];
+      const i = S.artikel.findIndex(a => a.name === z.art), tr = $(`.art-tab tbody tr[data-i="${i}"]`);
+      if (tr) { const pp = o.pos[z.art] || {}; for (const f of ['anzahl', 'menge']) { const el = $(`[data-f=${f}]`, tr); if (el) el.value = has(pp[f]) && num(pp[f]) > 0 ? fmtIn(pp[f], 3) : ''; } }
+      txt.push(`${z.art} ${z.neu > 0 ? 'auf ' + fmtNum(z.neu, 1) + (z.feld === 'anzahl' ? ' Stück' : z.btlBestellt !== undefined ? ' Btl' : ' kg') : 'entfernt'}`);
+    }
+    ui.formDirty = true; aktualisieren();
+    meldung('Gekürzt: ' + txt.join(', ') + ' – bitte speichern.');
+  };
   ui.acts.lager = async () => {
     if (ui.formDirty) return meldung('Bitte die Änderungen zuerst speichern.', true);
     const echt = S.bestellungen.find(x => x.nr === nr);

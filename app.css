@@ -310,3 +310,6 @@ details.karte summary { cursor: pointer; }
 .kdv { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 16px; color: var(--text); }
 .kdv:last-child { border-bottom: none; }
 .kdv.aktiv, .kdv:active { background: var(--gruen-h); }
+/* 1.9.6: Mengencheck in der Bestellung */
+.mcheck .mcheck-tab { width: auto; min-width: 520px; margin-top: 8px; }
+.mcheck .mcheck-tab th, .mcheck .mcheck-tab td { padding: 6px 14px; position: static; }

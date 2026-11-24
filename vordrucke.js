@@ -14,16 +14,32 @@ const VD_TEXTE = [
   ['vdMotto', 'Leitsatz (Infozettel)', 'Extensiv aus Überzeugung'],
   ['kistePfand', 'Pfand je Kiste (€)', 10]
 ];
-// Preisliste für die Vordrucke: wählbar (aktuelle oder kommende), Standard = heute gültige
+// Preisliste für die Vordrucke: wählbar (aktuelle, kommende oder aus dem Archiv), Standard = heute gültige.
+// Jede Preisliste ist eine Version der Bestellzettel. Wird sie abgelöst, hält vdArchivieren() Texte, Genusspaket-Angaben
+// und Artikel (Einheit, Beutel, „am Stück“) an ihr fest (pl.vd) – so lässt sich der alte Zettel unverändert wieder aufrufen.
 let vdAb = null;
 const vdPl = () => { const l = preislisten(S); return l.find(p => p.ab === vdAb) || preislisteAm(S, todayISO()); };
-const vdT = f => { if (f === 'preiseAb') { const p = vdPl(); return p ? fmtDate(p.ab) : (S.settings.preiseAb || ''); } const st = S.settings; const d = VD_TEXTE.find(x => x[0] === f); return has(st[f]) && st[f] !== '' ? st[f] : (d ? d[2] : ''); };
+const vdStand = () => ({
+  texte: Object.fromEntries(VD_TEXTE.map(([f, , d]) => [f, has(S.settings[f]) && S.settings[f] !== '' ? S.settings[f] : d])),
+  paketVon: S.settings.paketVon, paketBis: S.settings.paketBis, nenner: S.settings.nenner,
+  artikel: S.artikel.map(a => ({ name: a.name, einheit: a.einheit, beutelG: num(a.beutelG), amStueck: !!a.amStueck })), am: todayISO()
+});
+function vdArchivieren() {
+  const akt = preislisteAm(S, todayISO());
+  let neu = 0;
+  for (const p of preislisten(S)) if (akt && p.ab < akt.ab && !p.vd) { p.vd = vdStand(); neu++; }
+  return neu;
+}
+const vdArchiv = () => { const akt = preislisteAm(S, todayISO()); return akt ? preislisten(S).filter(p => p.ab < akt.ab) : []; };
+const vdArtListe = () => { const pl = vdPl(); return pl && pl.vd ? pl.vd.artikel : S.artikel; };
+const vdBis = p => { const n = preislisten(S).find(x => x.ab > p.ab); if (!n) return ''; const d = new Date(n.ab + 'T12:00:00'); d.setDate(d.getDate() - 1); return isoOf(d); };
+const vdT = f => { if (f === 'preiseAb') { const p = vdPl(); return p ? fmtDate(p.ab) : (S.settings.preiseAb || ''); } const v = vdPl(); const st = v && v.vd ? v.vd.texte : S.settings; const d = VD_TEXTE.find(x => x[0] === f); return has(st[f]) && st[f] !== '' ? st[f] : (d ? d[2] : ''); };
 const vdEur = x => fmtNum(num(x), 2, 2) + ' €';
 const vdUnd = l => l.length < 2 ? l.join('') : l.slice(0, -1).join(', ') + ' und ' + l[l.length - 1];
 
 function vdArtikel() {
   const pl = vdPl();
-  return S.artikel.filter(a => artPreis(S, a, pl) > 0).map(a => {
+  return vdArtListe().filter(a => artPreis(S, a, pl) > 0).map(a => {
     const btl = num(a.beutelG) > 0;
     let hint = '';
     if (btl) hint = `Beutel à ${num(a.beutelG)} g`;
@@ -33,8 +49,8 @@ function vdArtikel() {
   });
 }
 function vdPaket() {
-  const st = S.settings;
   const pl = vdPl();
+  const st = pl && pl.vd ? pl.vd : S.settings;
   return { preis: vdEur(paketPreisKg(S, pl)), anteil: `1/${num(st.nenner) || 16} eines Tieres`, kg: `ca. ${fmtNum(st.paketVon)}–${fmtNum(st.paketBis)} kg`, vak: vdEur(vakPreisPaket(S, pl)).replace(',00', ''), };
 }
 const VD_BOX = '<span class="vd-box"></span>';
@@ -87,9 +103,9 @@ function vdBlattA5() { const h = vdBestellA5(); return `<div class="vd-blatt-a5"
 // ---------- Infozettel ----------
 function vdInfo() {
   const p = vdPaket();
-  const sk = S.artikel.find(a => a.name === SK), fk = S.artikel.find(a => a.name === FK);
+  const sk = vdArtListe().find(a => a.name === SK), fk = vdArtListe().find(a => a.name === FK);
   const nm = { 'Gulasch geschnitten': 'Gulasch', Beinscheiben: 'Beinscheiben (als ganze Wade)', Ochsenschwanz: 'Ochsenschwanz (ganz)' };
-  const amSt = S.artikel.filter(a => a.amStueck && artPreis(S, a, vdPl()) > 0).map(a => nm[a.name] || a.name);
+  const amSt = vdArtListe().filter(a => a.amStueck && artPreis(S, a, vdPl()) > 0).map(a => nm[a.name] || a.name);
   const pk = ['Steak', 'Rostbraten', 'Rouladen', 'Braten / Gulasch', 'Hackfleisch', 'Sied-/Suppenfleisch', 'Beinscheibe', 'Suppenknochen (SK)', 'Soßenknochen (FK)'];
   const abs = (n, t, inner) => `<div class="vd-abs"><div class="vd-balken">${n} · ${t}</div>${inner}</div>`;
   return `<div class="vd vd-a4 vd-info">
@@ -123,15 +139,21 @@ function vdDrucken(k) {
 // ---------- Seite ----------
 function viewVordrucke() {
   titel('Vordrucke');
-  const pl = vdPl(), heute = todayISO(), liste = preislisten(S).filter(p => p === preislisteAm(S, heute) || p.ab > heute);
-  const ohne = S.artikel.filter(a => !(artPreis(S, a, pl) > 0)).map(a => a.name);
+  if (vdArchivieren()) speichern();
+  const pl = vdPl(), heute = todayISO(), akt = preislisteAm(S, heute), liste = preislisten(S).filter(p => p === akt || p.ab > heute), archiv = vdArchiv().reverse();
+  const imArchiv = !!pl && archiv.includes(pl);
+  const ohne = vdArtListe().filter(a => !(artPreis(S, a, pl) > 0)).map(a => a.name);
+  const knopf = p => `<button class="btn ${p === pl ? 'haupt' : ''}" data-act="vdpl" data-ab="${p.ab}">Preise ab ${fmtDate(p.ab)}${p === akt ? ' (gilt jetzt)' : p.ab > heute ? ' (kommt)' : vdBis(p) ? ' – bis ' + fmtDate(vdBis(p)) : ''}</button>`;
   inhalt().innerHTML = `<h1>Vordrucke</h1>
-   ${liste.length > 1 ? `<div class="karte zeile" style="gap:8px;flex-wrap:wrap"><b>Preise auf den Vordrucken:</b>${liste.map(p => `<button class="btn ${p === pl ? 'haupt' : ''}" data-act="vdpl" data-ab="${p.ab}">ab ${fmtDate(p.ab)}${p === preislisteAm(S, heute) ? ' (gilt jetzt)' : ' (kommt)'}</button>`).join('')}</div>` : ''}
+   <div class="karte"><div class="zeile" style="gap:8px;flex-wrap:wrap"><b>Version der Bestellzettel:</b>${liste.map(knopf).join('')}</div>
+    ${archiv.length ? `<div class="zeile" style="gap:8px;flex-wrap:wrap;margin-top:10px"><b>Archiv (frühere Bestellzettel):</b>${archiv.map(knopf).join('')}</div>` : ''}
+    <p class="klein" style="margin:8px 0 0">Jede Preisliste ist eine eigene Version der Bestellzettel. Kommt eine neue Preisliste (Einstellungen → Preisliste), sind die neuen Zettel sofort hier wählbar; ab dem Stichtag sind sie Standard und die alten wandern ins Archiv.</p></div>
+   ${imArchiv ? `<div class="hinweis"><b>Archiv:</b> Bestellzettel mit den Preisen ab ${fmtDate(pl.ab)}${vdBis(pl) ? ` (gültig bis ${fmtDate(vdBis(pl))})` : ''} – nicht mehr gültig, nur zum Nachschauen oder Nachdrucken.${pl.vd ? ` Texte und Artikel wie am ${fmtDate(pl.vd.am)} abgelegt.` : ''}</div>` : ''}
    <p class="klein">Preise, Genusspaket (Preis, kg, Vakuumieren je Paket), Beutelgrößen und „am Stück“ kommen automatisch aus Einstellungen → Preisliste. Artikel ohne Preis stehen nicht auf dem Formular${ohne.length ? ` (zurzeit: ${esc(ohne.join(', '))})` : ''}. Beim Drucken unter „Weitere Einstellungen“ Papier A4 und „Hintergrundgrafiken“ einschalten; Anzahl Kopien im Druckdialog wählen.</p>
    <div class="vd-raster">${VD_LISTE.map(([k, t, u, f]) => `<div class="karte"><div class="zeile"><div class="platz"><b>${t}</b><div class="klein">${u}</div></div><button class="btn haupt" data-act="vddruck" data-k="${k}">Drucken</button></div>
      <div class="vd-vorschau" data-act="vddruck" data-k="${k}"><div class="vd-skal">${f()}</div></div></div>`).join('')}</div>
-   <div class="karte"><h3 style="margin-top:0">Texte auf den Vordrucken</h3><div class="vd-formular">
-   ${VD_TEXTE.map(([f, t]) => `<label class="f">${t}<input class="feld${f === 'kistePfand' ? ' zahl' : ''}" ${f === 'kistePfand' ? 'inputmode="decimal"' : ''} data-ch="vdtext" data-f="${f}" value="${esc(f === 'kistePfand' ? fmtIn(num(vdT(f)), 2) : vdT(f))}"></label>`).join('')}</div></div>`;
+   ${imArchiv ? '' : `<div class="karte"><h3 style="margin-top:0">Texte auf den Vordrucken</h3><div class="vd-formular">
+   ${VD_TEXTE.map(([f, t]) => `<label class="f">${t}<input class="feld${f === 'kistePfand' ? ' zahl' : ''}" ${f === 'kistePfand' ? 'inputmode="decimal"' : ''} data-ch="vdtext" data-f="${f}" value="${esc(f === 'kistePfand' ? fmtIn(num(vdT(f)), 2) : vdT(f))}"></label>`).join('')}</div></div>`}`;
   ui.acts.vddruck = el => vdDrucken(el.dataset.k);
   ui.acts.vdpl = el => { vdAb = el.dataset.ab; render(); };
   ui.acts.vdtext = el => { S.settings[el.dataset.f] = el.dataset.f === 'kistePfand' ? num(el.value) : el.value.trim(); speichern(); meldung('Gespeichert.'); render(); };

@@ -179,9 +179,9 @@ const DEFAULTS = {
    "stueckG": 0,
    "amStueck": false,
    "beutelG": 800,
-   "anteil": 0.0357,
+   "anteil": 0.0238,
    "teile": "",
-   "anteilRind": 0.05
+   "anteilRind": 0.0333
   },
   {
    "name": "Soßenknochen (FK)",
@@ -191,9 +191,9 @@ const DEFAULTS = {
    "stueckG": 0,
    "amStueck": false,
    "beutelG": 1000,
-   "anteil": 0.0238,
+   "anteil": 0.0357,
    "teile": "",
-   "anteilRind": 0.0333
+   "anteilRind": 0.05
   },
   {
    "name": "Leber",
@@ -246,7 +246,7 @@ const DEFAULTS = {
   {
    "name": "Bäckle",
    "einheit": "Stk",
-   "preis": 0,
+   "preis": 15,
    "inPaket": false,
    "stueckG": 400,
    "amStueck": false,
@@ -273,7 +273,6 @@ const DEFAULTS = {
   "preisVakPaket": 20,
   "paketVon": 12,
   "paketBis": 14,
-  "preislisteTitel": "Preisliste (gültig ab 01.10.2026, inkl. 7 % MwSt.)",
   "sgBulle": 420,
   "sgRind": 300,
   "nenner": 16,
@@ -294,8 +293,6 @@ const DEFAULTS = {
    { "art": "Braten", "anzahl": 1, "g": 3000 }
   ],
   "tueteJeKg": 1,
-  "skKg": 15,
-  "fkKg": 10,
   "leberKg": 6,
   "nierenStk": 2,
   "herzStk": 1,

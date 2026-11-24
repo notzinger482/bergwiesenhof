@@ -586,7 +586,6 @@ function tabPreise(z) {
     <div class="zeile" style="margin-top:12px;gap:12px;align-items:flex-end"><label class="f" style="width:200px">Gültig ab<input class="feld" type="date" data-ch="plab" value="${pl.ab}"></label>
      ${liste.length > 1 && pl.ab > heute ? '<button class="btn rot" data-act="plweg">Diese Preisliste löschen</button>' : ''}
      <p class="klein platz" style="margin:0">Du bearbeitest unten die Preisliste <b>ab ${fmtDate(pl.ab)}</b>. Beispiel: neue Preise ab 01.01. – Tiere mit Abholung im Dezember rechnen weiter mit den alten Preisen, ab Januar mit den neuen. Eingetragene Endbeträge ändern sich nie.</p></div></div>
-   <div class="karte"><label class="f">Überschrift der Preisliste<input class="feld" data-ch="st" data-f="preislisteTitel" value="${esc(st.preislisteTitel || '')}"></label></div>
    <div class="karte"><h3 style="margin-top:0">Genusspaket <span class="klein">– Inhalt unter Einstellungen → Genusspaket, zurzeit ca. ${fmtNum(paketGewicht(S), 1)} kg</span></h3><div class="zeile">
     ${[['preisPaketKg', 'Preis je kg (€)', paketPreisKg(S, pl)], ['preisVakPaket', 'Vakuumieren je Paket (€)', vakPreisPaket(S, pl)]].map(([f, t, v]) => `<label class="f" style="width:180px">${t}<input class="feld zahl" inputmode="decimal" data-ch="plpaket" data-f="${f}" value="${fmtIn(v, 2)}"></label>`).join('')}</div></div>
    <div class="tabwrap"><table class="tab"><thead><tr><th>Artikel</th><th>bestellt in</th><th class="r">Preis (€/kg) ab ${fmtDate(pl.ab)}</th>${pl !== aktuell ? `<th class="r klein">gilt jetzt</th>` : ''}<th class="r">im Genusspaket</th><th class="c">„am Stück“ möglich</th></tr></thead><tbody>
@@ -616,7 +615,7 @@ function tabPreise(z) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(ab)) return meldung('Bitte ein Datum wählen.', true);
     if (liste.some(p => p.ab === ab)) return meldung(`Ab ${fmtDate(ab)} gibt es schon eine Preisliste.`, true);
     S.settings.preislisten.push({ ab, preise: Object.fromEntries(S.artikel.map(a => [a.name, artPreis(S, a, pl)])), preisPaketKg: paketPreisKg(S, pl), preisVakPaket: vakPreisPaket(S, pl) });
-    ui.plAb = ab; fertig(`Preisliste ab ${fmtDate(ab)} angelegt – jetzt die neuen Preise eintragen.`);
+    ui.plAb = ab; fertig(`Preisliste ab ${fmtDate(ab)} angelegt – jetzt die neuen Preise eintragen. Die passenden Bestellzettel stehen sofort unter Vordrucke bereit.`);
   };
   ui.acts.plweg = async () => {
     if (!(await frage('Preisliste löschen', `Die Preisliste ab ${fmtDate(pl.ab)} löschen? Bestellungen rechnen dann mit der vorherigen Preisliste.`, 'Löschen', 'Abbrechen', 'rot'))) return;
@@ -762,8 +761,11 @@ function tabHof(z) {
 async function start() {
   try {
     const roh = await idbGet('stand');
+    const altSchema = roh ? num((JSON.parse(roh) || {}).schema) : 0;
     S = roh ? standPruefen(JSON.parse(roh)) : leererStand();
-    if (!roh) await idbSet('stand', JSON.stringify(S));
+    // abgelöste Preislisten: Bestellzettel ins Archiv (Texte/Artikel festhalten)
+    const archiviert = vdArchivieren();
+    if (!roh || altSchema !== num(S.schema) || archiviert) await idbSet('stand', JSON.stringify(S));
     schnappschussAnlegen(S).catch(() => { });
   } catch (e) {
     document.body.innerHTML = `<div style="padding:30px"><h2>Daten konnten nicht geladen werden</h2><p>${esc(e.message)}</p></div>`; return;

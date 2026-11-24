@@ -594,9 +594,53 @@ function mengencheckTier(S, tierName) {
     waden += w;
     if (w > 0 && waden > maxW) f.push(`Wade am Stück (max. ${maxW} je Tier)`);
     if (bil.pakUeber[o.nr]) f.unshift('Genusspakete (' + bil.pakUeber[o.nr].join(', ') + ')');
-    out[o.nr] = f.length ? 'reicht nicht: ' + f.join(', ') : 'ok';
+    const fk = bil.fehlt[o.nr] || {};
+    out[o.nr] = f.length ? 'reicht nicht: ' + f.map(n => fk[n] > 0 ? `${n} −${fehlKgText(fk[n])}` : n).join(', ') : 'ok';
   }
   return out;
+}
+// Fehlmenge als Text: unter 1 kg auf 0,05 kg genau, sonst 0,1 kg
+const fehlKgText = kg => fmtNum(kg < 1 ? Math.max(0.05, Math.round(kg * 20) / 20) : Math.round(kg * 10) / 10, 2) + ' kg';
+// Fehlmengen einer Bestellung im Detail – auch für das offene Formular (o = Formular-Kopie, ersetzt die gespeicherte Fassung).
+// Je Artikel: bestellt / verfügbar / fehlt in kg, dazu Stück bzw. Beutel und der Wert, auf den man kürzen könnte.
+function fehlDetail(S, o) {
+  const t = o && o.tier && o.tier !== 'Warteliste' ? tier(S, o.tier) : null;
+  if (!t || t.archiv) return null;
+  const key = o.nr || -1;
+  const kopie = Object.assign({}, o, { nr: key, tier: t.name });
+  const alt = o.nr ? S.bestellungen.find(x => x.nr === o.nr) : null;
+  kopie.rang = alt && sameText(alt.tier, t.name) ? rangVon(alt) : 1e12; // neu oder Tier gewechselt → hinten anstellen
+  const ords = S.bestellungen.filter(x => x.name && sameText(x.tier, t.name) && x.nr !== o.nr).concat([kopie])
+    .sort((a, b) => rangVon(a) - rangVon(b) || a.nr - b.nr);
+  const bil = fleischBilanz(S, t, ords);
+  const f = bil.fehlt[key] || {};
+  const zeilen = [];
+  for (const r of teilZeilen(S, kopie)) {
+    const fe0 = f[r.key];
+    if (!(fe0 > 0.001)) continue;
+    const a = art(S, r.key), p = kopie.pos[r.key];
+    const q = qty(S, kopie, r.key), fe = Math.min(q, fe0), v = Math.max(0, q - fe);
+    const z = { art: r.key, bestelltKg: q, fehltKg: fe, verfuegbarKg: v, feld: r.feld };
+    if (r.feld === 'anzahl') {
+      const je = q / num(p.anzahl);
+      z.stkBestellt = num(p.anzahl); z.stkVerf = je > 0 ? Math.floor(v / je + 1e-9) : 0; z.neu = z.stkVerf;
+      z.stkText = num(p.g) > 0 ? `× ${fmtNum(p.g)} g` : 'Stück';
+    } else if (num(a.beutelG) > 0) {
+      const je = a.beutelG / 1000;
+      z.btlBestellt = num(p.menge); z.btlVerf = Math.floor(v / je + 1e-9); z.neu = z.btlVerf;
+    } else z.neu = Math.floor(v * 10 + 1e-9) / 10;
+    zeilen.push(z);
+  }
+  const sonst = [];
+  if (bil.pakUeber[key]) sonst.push('Genusspakete (' + bil.pakUeber[key].join(', ') + ')');
+  const maxW = has(S.settings.maxWaden) ? num(S.settings.maxWaden) : 4;
+  let waden = 0;
+  for (const x of ords) {
+    const pw = x.pos && x.pos[BEIN], w = istWade(art(S, BEIN), pw) ? num(pw.anzahl) : 0;
+    waden += w;
+    if (x === kopie && w > 0 && waden > maxW) sonst.push(`Wade am Stück (max. ${maxW} je Tier, davor schon ${waden - w})`);
+  }
+  return { tier: t.name, zeilen, sonst, ok: !zeilen.length && !sonst.length };
 }
 function mengencheck(S, o) {
   if (!o.name || !o.tier) return '';
@@ -1375,7 +1419,7 @@ function hofladenSummen(S, jahr) {
 function leererStand() {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   const S0 = {
-    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 8, gespeichert: null,
+    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 9, gespeichert: null,
     artikel: d.artikel, settings: d.settings, auto: d.auto, wege: d.wege,
     kunden: [], tiere: [], bestellungen: [], kisten: [], hofladen: [],
     metzgerManuell: {}, packplaene: {}, letzteSicherung: null
@@ -1391,70 +1435,24 @@ function standPruefen(x) {
   if (!x || typeof x !== 'object' || !Array.isArray(x.bestellungen) || !Array.isArray(x.artikel)) throw new Error('Keine gültige Sicherungsdatei des Bestellsystems.');
   const base = leererStand();
   const altSchema = num(x.schema);
+  if (!(altSchema >= 8)) throw new Error('Die Sicherung stammt aus einer Version vor 1.9.0 und kann nicht mehr eingespielt werden.');
   const hattePreislisten = !!(x.settings && Array.isArray(x.settings.preislisten) && x.settings.preislisten.length);
   for (const k of Object.keys(base)) if (x[k] === undefined) x[k] = base[k];
   x.settings = Object.assign({}, base.settings, x.settings);
-  if (!x.settings.hackPlatz) x.settings.hackPlatz = 'vorne rechts';
-  (x.auto || []).forEach(f => { if (f.spaeter === undefined) f.spaeter = /^hinten/i.test(f.name || ''); });
-  // Version 1.3: eigene Rind-Anteile, Standard-SG Rind 300 kg
-  (x.artikel || []).forEach(a => { if (a.anteilRind === undefined) a.anteilRind = num(a.anteil); });
-  // Version 1.5.2: Hesse wird immer Beinscheibe, nicht Gulasch
-  (x.artikel || []).forEach(a => { if (a.name === GULASCH && a.teile === 'Kamm/Hals, Hesse') a.teile = 'Kamm/Hals'; });
-  if (x.settings.rindWieBulle === undefined) x.settings.rindWieBulle = true;
-  if (!(altSchema >= 3)) { if (num(x.settings.sgRind) === 320) x.settings.sgRind = 300; x.schema = 3; }
-  // Version 1.6.2: Knochen je Tier als Anteil am Schlachtgewicht (bisher feste kg je Tier)
-  if (!(altSchema >= 4)) {
-    const r4 = v => Math.round(v * 10000) / 10000;
-    for (const [n, f] of [[SK, 'skKg'], [FK, 'fkKg']]) {
-      const a = (x.artikel || []).find(y => y.name === n);
-      const kg = num(x.settings[f]);
-      if (a && !(num(a.anteil) > 0) && kg > 0) { a.anteil = r4(kg / (num(x.settings.sgBulle) || 420)); a.anteilRind = r4(kg / (num(x.settings.sgRind) || 300)); }
-    }
-    x.schema = 4;
-  }
-  // Version 1.6.3: Bäckle als Innerei (wie Zunge), ca. 2 Stück je Tier
-  if (!(x.artikel || []).some(a => a.name === 'Bäckle')) {
-    const i = x.artikel.findIndex(a => a.name === 'Zunge');
-    const neu = { name: 'Bäckle', einheit: 'Stk', preis: 0, inPaket: false, stueckG: 0, amStueck: false, beutelG: 0, anteil: 0, teile: '', anteilRind: 0 };
-    x.artikel.splice(i >= 0 ? i + 1 : x.artikel.length, 0, neu);
-  }
-  if (!has(x.settings.baeckleStk)) x.settings.baeckleStk = 2;
-  // Version 1.6.5: Ausbeute nach Referenzliste (Rind ca. 300 kg), Bratenstücke, Einzelgewichte
-  if (!(altSchema >= 5)) {
-    const W = {"Hackfleisch": [0.1786, 0.175, ""], "Braten": [0.1917, 0.1933, "Hochrippe, Bug, falsches Filet, Semerrolle, Kugel, Unterschale, Bürgermeisterstück"], "Gulasch geschnitten": [0.075, 0.075, null], "Rostbraten": [0.0369, 0.0367, "Roastbeef (Zwischenrippe)"], "Filet": [0.0131, 0.0133, null], "Steak": [0.0274, 0.0267, "Hüfte (dicke Hüfte & Hüftfilet)"], "Rouladen": [0.0536, 0.0533, null], "Siedfleisch": [0.094, 0.095, null], "Beinscheiben": [0.0452, 0.045, null], "Tafelspitz": [0.0137, 0.0133, null]}, G = {"Rostbraten": 275, "Steak": 225, "Rouladen": 200, "Beinscheiben": 500, "Filet": 200};
-    (x.artikel || []).forEach(a => {
-      if (W[a.name]) { a.anteil = W[a.name][0]; a.anteilRind = W[a.name][1]; if (W[a.name][2] !== null) a.teile = W[a.name][2]; }
-      if (G[a.name]) a.stueckG = G[a.name];
-    });
-    x.settings.bratenTeile = [{"name": "Hochrippe", "stueck": 2, "kg": 3.5, "bug": false, "kgBulle": 4.875, "refMin": 0.02, "refMax": 0.026000000000000002, "kgMin": 3.0, "kgMax": 5.5}, {"name": "Bug (dickes Bugstück & Schaufelstück)", "stueck": 4, "kg": 4.0, "bug": true, "kgBulle": 5.625, "refMin": 0.048, "refMax": 0.057999999999999996, "kgMin": 3.5, "kgMax": 6.0}, {"name": "Falsches Filet (Buglende)", "stueck": 2, "kg": 1.75, "bug": false, "kgBulle": 2.5, "refMin": 0.01, "refMax": 0.013000000000000001, "kgMin": 1.5, "kgMax": 2.8}, {"name": "Semerrolle", "stueck": 2, "kg": 2.0, "bug": false, "kgBulle": 2.875, "refMin": 0.012, "refMax": 0.015, "kgMin": 1.8, "kgMax": 3.2}, {"name": "Kugel (Nuss)", "stueck": 4, "kg": 3.125, "bug": false, "kgBulle": 4.25, "refMin": 0.036000000000000004, "refMax": 0.045, "kgMin": 2.8, "kgMax": 4.8}, {"name": "Unterschale", "stueck": 2, "kg": 6.25, "bug": false, "kgBulle": 8.5, "refMin": 0.036000000000000004, "refMax": 0.045, "kgMin": 5.5, "kgMax": 9.5}, {"name": "Bürgermeisterstück", "stueck": 2, "kg": 1.25, "bug": false, "kgBulle": 1.75, "refMin": 0.006999999999999999, "refMax": 0.01, "kgMin": 1.0, "kgMax": 2.0}];
-    x.settings.rindWieBulle = false; // Rind und Bulle getrennt
-    const R = {"Filet": {"refMin": 0.012, "refMax": 0.015, "ganzeStuecke": 2, "stkMin": 1.8, "stkMax": 3.0}, "Rostbraten": {"refMin": 0.035, "refMax": 0.04, "ganzeStuecke": 0, "stkMin": 0.25, "stkMax": 0.32}, "Steak": {"refMin": 0.025, "refMax": 0.03, "ganzeStuecke": 0, "stkMin": 0.2, "stkMax": 0.26}, "Tafelspitz": {"refMin": 0.012, "refMax": 0.015, "ganzeStuecke": 2, "stkMin": 1.8, "stkMax": 3.2}, "Rouladen": {"refMin": 0.048, "refMax": 0.058, "ganzeStuecke": 0, "stkMin": 0.18, "stkMax": 0.23}, "Braten": {"refMin": 0.169, "refMax": 0.212, "ganzeStuecke": 0, "stkMin": null, "stkMax": null}, "Gulasch geschnitten": {"refMin": 0.068, "refMax": 0.082, "ganzeStuecke": 0, "stkMin": null, "stkMax": null}, "Beinscheiben": {"refMin": 0.04, "refMax": 0.05, "ganzeStuecke": 0, "stkMin": 0.45, "stkMax": 0.7}, "Siedfleisch": {"refMin": 0.085, "refMax": 0.105, "ganzeStuecke": 0, "stkMin": null, "stkMax": null}, "Hackfleisch": {"refMin": 0.16, "refMax": 0.2, "ganzeStuecke": 0, "stkMin": null, "stkMax": null}};
-    (x.artikel || []).forEach(a => { if (R[a.name]) Object.assign(a, R[a.name]); });
-    x.schema = 5;
-  }
-  // Version 1.7.0: Ochsenschwanz kann „am Stück“ (ganz) bestellt werden
-  if (!(altSchema >= 6)) {
-    const a = (x.artikel || []).find(y => y.name === 'Ochsenschwanz');
-    if (a) a.amStueck = true;
-    x.schema = 6;
-  }
-  // Version 1.8.1: Einzelartikel werden standardmäßig vakuumiert (kostenlos), 0,30 €/Tüte entfällt.
-  // Bestehende Bestellungen behalten ihre bisherige Wahl: fehlendes Häkchen = ausdrücklich nicht vakuumieren.
-  if (!(altSchema >= 7)) {
-    (x.bestellungen || []).forEach(o => Object.values(o.pos || {}).forEach(p => { if (p && p.vak !== true) p.vak = false; }));
-    x.schema = 7;
-  }
-  // Version 1.9.0 (Datenschutz): Straße und PLZ/Ort werden nicht mehr gespeichert
-  if (!(altSchema >= 8)) {
-    (x.kunden || []).forEach(k => { delete k.strasse; delete k.ort; });
-    x.schema = 8;
-  }
   // letzte Bestellung und Anlagedatum je Kunde (für die Löschfrist; bleibt auch erhalten, wenn Bestellungen gelöscht werden)
   (x.kunden || []).forEach(k => {
     k.letzte = (x.bestellungen || []).filter(o => sameText(o.name, k.name)).reduce((m, o) => (o.eingang || '') > m ? o.eingang : m, k.letzte || '');
     if (!k.angelegt) k.angelegt = k.letzte || todayISO();
   });
-  delete x.settings.preisTuete;
+  // Version 1.9.6: Sicherungen vor 1.9.0 werden nicht mehr umgebaut (alte Umbauschritte entfernt)
+  ['preislisteTitel', 'skKg', 'fkKg', 'preisTuete'].forEach(f => delete x.settings[f]);
+  if (!(altSchema >= 9)) {
+    // Bäckle bekommt einen Preis (15 €/kg) in der aktuellen und allen kommenden Preislisten, falls dort noch 0 €/kg
+    const heute = todayISO(), akt = Array.isArray(x.settings.preislisten) && x.settings.preislisten.length ? preislisteAm(x, heute) : null;
+    (x.settings.preislisten || []).forEach(p => { if ((p === akt || p.ab > heute) && p.preise && !(num(p.preise['Bäckle']) > 0)) p.preise['Bäckle'] = 15; });
+    const bk = (x.artikel || []).find(a => a.name === 'Bäckle'); if (bk && !(num(bk.preis) > 0)) bk.preis = 15;
+    x.schema = 9;
+  }
   // Version 1.9.5: Preislisten mit „gültig ab“ – bisherige Preise werden die erste Preisliste
   if (!hattePreislisten) {
     const ab = parseDate(x.settings.preiseAb) || '2000-01-01';
@@ -1464,9 +1462,6 @@ function standPruefen(x) {
   (x.bestellungen || []).forEach(o => { if (!has(o.preisFest) && o.name && preisBleibtFest(x, o)) preisFestsetzen(x, o); });
   // Version 1.9.3: Archiv ist Archiv – Stand archivierter Tiere einmalig festhalten (falls noch nicht geschehen)
   (x.tiere || []).forEach(t => { if (t.archiv && !t.archivStand) archivStandFesthalten(x, t); });
-  // Version 1.6.4: Innereien nach Stück werden in €/kg berechnet → geschätztes Stückgewicht
-  const stkG = { Nieren: 700, Herz: 2500, Zunge: 1500, 'Bäckle': 400, Ochsenschwanz: 2000 };
-  (x.artikel || []).forEach(a => { if (a.einheit === 'Stk' && !(num(a.stueckG) > 0) && stkG[a.name]) a.stueckG = stkG[a.name]; });
   return x;
 }
 
@@ -1474,7 +1469,7 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
+  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
