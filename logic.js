@@ -1349,7 +1349,7 @@ function packplanGruppe(S, namen) {
     kisten.filter(k => k.platzIdx === i).sort((a, b) => a.ebeneNr - b.ebeneNr)
       .forEach(k => einladen.push(`${einladen.length + 1}. Kiste ${k.nr} (${k.text}) → ${k.platz}, ${k.ebeneNr === 1 ? 'unten' : k.ebeneNr + '. Ebene'}`));
   }
-  return { tier: teile.map(r => r.t.name).join(' + '), tiere: teile.map(r => r.t.name), gruppe, kisteKg, hackKisteKg, erstellt: new Date().toISOString(), kisten, felder, einladen, cap, warn };
+  return { tier: teile.map(r => r.t.name).join(' + '), tiere: teile.map(r => r.t.name), gruppe, kisteKg, hackKisteKg, fp: Object.fromEntries(teile.map(r => [r.t.name, bestellFingerabdruck(S, r.t.name)])), erstellt: new Date().toISOString(), kisten, felder, einladen, cap, warn };
 }
 function selSort(arr, less) {
   const a = arr.slice();
@@ -1372,6 +1372,28 @@ function kistenRows(S, tierName) {
   return S.kisten.filter(k => k.tier === tierName).map((k, i) => ({ k, i })).sort((a, b) => a.k.nr - b.k.nr || a.i - b.i).map(x => x.k);
 }
 const SONDERKISTE = 'Sonderfälle (beschriftet)';
+// Fingerabdruck der Bestellungen eines Tiers (für „Plan veraltet?“): Reihenfolge, Pakete, Positionen, Sonderwünsche
+function bestellFingerabdruck(S, tierName) {
+  const txt = JSON.stringify(ordersOfTier(S, tierName).map(o => [o.nr, num(o.pakete), num(o.pakVak), o.pos || {}, o.sonder || []]));
+  let h = 5381; for (let i = 0; i < txt.length; i++) h = ((h * 33) ^ txt.charCodeAt(i)) >>> 0;
+  return h.toString(36) + ':' + txt.length;
+}
+// Ist der Kistenplan eines Tiers (bzw. seiner Abholgruppe) noch aktuell? → null = ok, sonst Grund
+function kistenplanVeraltet(S, tierName) {
+  if (!S.kisten.some(k => k.tier === tierName)) return null;
+  const pp = S.packplaene && S.packplaene[tierName];
+  const namen = pp && pp.tiere ? pp.tiere : [tierName];
+  if (namen.every(n => !ordersOfTier(S, n).length)) return 'keine Bestellungen mehr';
+  const g = abholGruppe(S, tierName);
+  if (g.length > 1 && g.some(n => !namen.includes(n))) return 'gemeinsame Abholung hat sich geändert';
+  if (pp && pp.fp) for (const n of namen) if (pp.fp[n] !== bestellFingerabdruck(S, n)) return 'Bestellungen haben sich geändert';
+  return null;
+}
+function kistenZuruecksetzen(S, namen) {
+  S.kisten = S.kisten.filter(k => !namen.includes(k.tier));
+  for (const n of namen) delete S.packplaene[n];
+}
+const kistenGewogenAnzahl = (S, namen) => S.kisten.filter(k => namen.includes(k.tier) && kisteGewogen(k)).length;
 const kistenTiere = S => [...new Set(S.kisten.map(k => k.tier))];
 function kistenSumme(S, tierName, artName) { return S.kisten.filter(k => k.tier === tierName && k.art === artName).reduce((s, k) => s + num(k.kg), 0); }
 // Menge je Genusspaket (feste Zusammensetzung aus den Einstellungen)
@@ -1654,7 +1676,7 @@ if (typeof module !== 'undefined') module.exports = {
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
-  mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, kistenCalc, tierAbschliessen,
+  mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
 };

@@ -222,7 +222,10 @@ function tabKisten(tn, ziel) {
   const gewogen = calc.filter(c => istGewogen(c.k)).length;
   const andere = kistenTiere(S).filter(x => !gruppe.includes(x));
   const ohnePlan = isG ? gruppe.filter(n => !calc.some(c => c.tier === n)) : [];
-  const gruppeHinweis = isG ? `<div class="hinweis"><b>Gemeinsame Abholung ${fmtDate(t.abhol)}:</b> ${gruppe.map(esc).join(' + ')} – ein Ladeplan, Kistennummern laufen über alle Tiere.${calc.length && ohnePlan.length ? ` <span class="warn">Für ${ohnePlan.map(esc).join(', ')} gibt es noch keine Kisten – bitte „Plan neu berechnen“.</span>` : ''}</div>` : '';
+  const veraltet = calc.length ? kistenplanVeraltet(S, tn) : null;
+  const planNamen = (pp && pp.tiere) || (isG ? gruppe : [tn]);
+  const veraltetHinweis = veraltet ? `<div class="fehlerbox zeile" style="gap:10px;flex-wrap:wrap"><div class="platz"><b>Kistenplan passt nicht mehr:</b> ${esc(veraltet)}. Bitte neu berechnen – oder zurücksetzen, wenn das Tier noch nicht beim Metzger war.</div><button class="btn braun" data-act="planen">Plan neu berechnen</button><button class="btn rot" data-act="kreset">Kisten zurücksetzen</button></div>` : '';
+  const gruppeHinweis = veraltetHinweis + (isG ? `<div class="hinweis"><b>Gemeinsame Abholung ${fmtDate(t.abhol)}:</b> ${gruppe.map(esc).join(' + ')} – ein Ladeplan, Kistennummern laufen über alle Tiere.${calc.length && ohnePlan.length ? ` <span class="warn">Für ${ohnePlan.map(esc).join(', ')} gibt es noch keine Kisten – bitte „Plan neu berechnen“.</span>` : ''}</div>` : '');
   if (!calc.length) {
     ziel.innerHTML = gruppeHinweis + `<div class="karte" style="max-width:820px"><h3 style="margin-top:0">Noch kein Plan für ${esc(isG ? gruppe.join(' + ') : tn)}</h3>
       <p>„Plan erstellen“ rechnet aus, welche Stücke in welche Metzgerkiste kommen (max. ${fmtNum(S.settings.kisteMax)} kg; gemischt nur Rostbraten + Steak bzw. Filet + Braten + Tafelspitz), wo jede Kiste im Auto steht und in welcher Reihenfolge beim Metzger eingeladen wird. Hackfleisch steht immer auf „${esc(S.settings.hackPlatz || 'vorne rechts')}“.</p>
@@ -235,6 +238,7 @@ function tabKisten(tn, ziel) {
         <button class="btn haupt" data-act="teilenPlan">Ladeplan teilen (Metzger)</button>
         <button class="btn" data-act="teilenKisten">Kistenliste teilen</button>
         <button class="btn" data-act="drucken">Drucken</button>
+        <button class="btn rot" data-act="kreset">Kisten zurücksetzen</button>
         <span class="platz"></span>
         <span class="marke ${gewogen === calc.length ? 'gruen' : gewogen ? 'gelb' : ''}" style="align-self:center;font-size:14px;padding:6px 12px">${gewogen} von ${calc.length} gewogen</span></div>
       ${pp && pp.warn.length ? pp.warn.map(w => `<div class="hinweis" style="padding:6px 12px;margin-bottom:8px">${esc(w)}</div>`).join('') : ''}
@@ -264,6 +268,12 @@ function tabKisten(tn, ziel) {
     (neu.tiere || [tn]).forEach(n => { S.packplaene[n] = neu; }); packplanUebernehmen(S, neu); speichern(); render();
     meldung(`Plan erstellt: ${neu.kisten.length} Kisten${neu.gruppe ? ' für ' + neu.tier : ''}.`);
     if (neu.warn.length) dialog('Hinweis zum Plan', neu.warn.map(w => `<p class="warn">${esc(w)}</p>`).join(''));
+  };
+  ui.acts.kreset = async () => {
+    const namen = [...new Set(calc.map(c => c.tier || c.k.tier).concat(planNamen))].filter(n => S.kisten.some(k => k.tier === n));
+    const gw = kistenGewogenAnzahl(S, namen);
+    if (!(await frage('Kisten zurücksetzen', `Alle ${calc.length} Kistenzeilen von <b>${namen.map(esc).join(' + ')}</b> löschen? Danach gibt es keinen Ladeplan mehr; die Bestellungen bleiben unverändert und lassen sich wieder neu verteilen.${gw ? `<br><b class="warn">${gw} Kisten sind schon gewogen – diese Gewichte gehen verloren.</b>` : ''}`, 'Zurücksetzen', 'Abbrechen', 'rot'))) return;
+    kistenZuruecksetzen(S, namen); speichern(); meldung(`Kisten von ${namen.join(' + ')} zurückgesetzt.`); render();
   };
   const find = id => S.kisten.find(k => k.id === +id);
   ui.acts.kf = el => {

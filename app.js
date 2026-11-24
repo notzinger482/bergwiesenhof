@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '2.3';
+const APP_VERSION = '2.4';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -134,7 +134,13 @@ async function neuVerteilenDialog(nurWennWechsel) {
     ${plan.wechsel.map(z => `<tr><td class="r fett">${z.nr}</td><td>${esc(z.name)}</td><td>${fmtDate(z.eingang)}</td><td>${esc(z.von)}</td><td>→</td><td class="fett">${esc(z.nach)}</td><td>${reicht(z.check)}</td></tr>`).join('')}
     </tbody></table></div>` : '<p class="ok"><b>Alles passt – keine Bestellung muss das Tier wechseln.</b></p>'}
     ${bleibtNicht.length ? `<p class="warn">Weiter „reicht nicht“ (kein Tier passt, bleibt wo sie war): ${bleibtNicht.map(z => 'Nr. ' + z.nr + ' ' + esc(z.name)).join(', ')}</p>` : ''}`;
-  const k = await dialog('Offene Bestellungen neu verteilen', html, plan.wechsel.length ? [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: `${plan.wechsel.length} übernehmen`, cls: 'haupt' }] : [{ k: 'x', t: 'Schließen', cls: 'haupt' }]);
+  // Tiere mit Kistenplan, aber noch nichts gewogen (noch nicht beim Metzger): Plan kann zurückgesetzt werden, dann werden sie mitverteilt
+  const ungewogen = plan.festTiere.filter(n => !kistenGewogenAnzahl(S, [n]));
+  const knoepfe = [{ k: 'x', t: plan.wechsel.length ? 'Abbrechen' : 'Schließen' }];
+  if (ungewogen.length) knoepfe.push({ k: 'reset', t: `Kistenplan ${ungewogen.join(', ')} zurücksetzen und mitverteilen`, cls: 'rot' });
+  if (plan.wechsel.length) knoepfe.push({ k: 'ok', t: `${plan.wechsel.length} übernehmen`, cls: 'haupt' });
+  const k = await dialog('Offene Bestellungen neu verteilen', html + (ungewogen.length ? `<p class="klein">${ungewogen.map(esc).join(', ')}: Kistenplan vorhanden, aber noch nichts gewogen – kann zurückgesetzt werden, dann werden diese Tiere mitverteilt.</p>` : ''), knoepfe);
+  if (k === 'reset') { kistenZuruecksetzen(S, ungewogen); speichern(); meldung(`Kistenplan von ${ungewogen.join(', ')} zurückgesetzt.`); return neuVerteilenDialog(false); }
   if (k !== 'ok') return false;
   neuVerteilenUebernehmen(S, plan); speichern();
   meldung(`${plan.wechsel.length} Bestellung(en) neu zugeordnet.`); render();
@@ -189,6 +195,8 @@ function viewStart() {
   if (!sicherungPw) h += `<div class="hinweis zeile"><div class="platz"><b>Sicherungs-Passwort fehlt:</b> Sicherungen werden jetzt verschlüsselt. Bis ein Passwort festgelegt ist, wird nichts gesichert.</div><a class="btn haupt" href="#/einstellungen/daten">Passwort festlegen</a></div>`;
   const inaktiv = inaktiveKunden(S).length;
   if (inaktiv) h += `<div class="hinweis zeile"><div class="platz"><b>Datenschutz:</b> ${inaktiv} Kunde${inaktiv > 1 ? 'n haben' : ' hat'} seit über ${kundenFrist(S)} Jahren nicht bestellt und ${inaktiv > 1 ? 'sollten' : 'sollte'} anonymisiert werden.</div><a class="btn" href="#/einstellungen/daten">Ansehen</a></div>`;
+  // Kistenpläne, die nicht mehr zu den Bestellungen passen
+  for (const n of kistenTiere(S)) { const v = tier(S, n) && !tier(S, n).archiv ? kistenplanVeraltet(S, n) : null; if (v) h += `<div class="hinweis zeile"><div class="platz"><b>Kistenplan ${esc(n)}:</b> ${esc(v)} – bitte neu berechnen oder zurücksetzen.</div><a class="btn" href="#/schlachttag/kisten?tier=${encodeURIComponent(n)}">Kisten & Ladeplan</a></div>`; }
   // Preislisten: kommende neue Bestellzettel / gerade gewechselte Preise
   const plAkt = preislisteAm(S, heute), plNeu = preislisten(S).find(p => p.ab > heute);
   if (plNeu) h += `<div class="hinweis zeile"><div class="platz"><b>Neue Preise ab ${fmtDate(plNeu.ab)}:</b> Die Bestellzettel mit den neuen Preisen sind fertig und können schon gedruckt werden.</div><a class="btn" href="#/vordrucke">Vordrucke</a></div>`;
