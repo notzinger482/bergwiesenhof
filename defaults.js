@@ -307,6 +307,7 @@ const DEFAULTS = {
   "lagerMaxArtikel": 3,
   "lagerMaxKg": 5,
   "lagerFaecher": 6,
+  "verteilenMaxTage": 5,
   "lagerKisten": 29,
   "preiseAb": "01.10.2026",
   "vdName": "Bernd & Claudia Huber",

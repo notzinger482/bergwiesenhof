@@ -692,6 +692,8 @@ function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
     if (t.archiv) return false;
     if (!t.abhol || t.abhol < heute) return false;
     if (wunschISO && t.abhol > wunschISO) return false;
+    // wie beim Neu-Verteilen: höchstens … Tage vor dem Wunschtermin, sonst Warteliste
+    if (wunschISO && tageZwischen(t.abhol, wunschISO) > (has(S.settings.verteilenMaxTage) && num(S.settings.verteilenMaxTage) >= 0 ? num(S.settings.verteilenMaxTage) : 5)) return false;
     if (pk > 0) {
       const bestellt = S.bestellungen.filter(o => o.tier === t.name && o.name && o.nr !== ohneNr).reduce((s, o) => s + num(o.pakete), 0);
       if (maxPakete(S, t) - bestellt < pk) return false;
@@ -719,8 +721,10 @@ function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
 // (bzw. mit Wunschtermin das letzte davor), bei dem die ganze Bestellung reicht und keine andere kippt.
 // Fest bleiben: gepackte/abgeholte Bestellungen, Tiere mit Kistenplan, bewusst überbelegte Bestellungen.
 // Passt eine Bestellung nirgends, bleibt sie, wo sie war. Ergebnis nur als Vorschlag (S bleibt unverändert).
+const tageZwischen = (von, bis) => Math.round((new Date(bis + 'T12:00:00') - new Date(von + 'T12:00:00')) / 864e5);
 function neuVerteilenPlan(S) {
   const heute = todayISO();
+  const maxTage = has(S.settings.verteilenMaxTage) && num(S.settings.verteilenMaxTage) >= 0 ? num(S.settings.verteilenMaxTage) : 5;
   const T = JSON.parse(JSON.stringify(S));
   // fest sind nur Tiere, deren Kisten schon gewogen werden (beim Metzger abgeholt); ein bloßer Kistenplan wird danach neu berechnet
   const mitKisten = new Set((T.kisten || []).filter(k => kisteGewogen(k)).map(k => k.tier));
@@ -737,6 +741,7 @@ function neuVerteilenPlan(S) {
     const pk = num(o.pakete);
     const kand = ziele.filter(t => {
       if (o.wunsch && t.abhol > o.wunsch) return false;
+      if (o.wunsch && tageZwischen(t.abhol, o.wunsch) > maxTage) return false; // höchstens … Tage vor dem Wunschtermin
       if (pk > 0) {
         const bestellt = T.bestellungen.filter(x => x.tier === t.name && x.name).reduce((s, x) => s + num(x.pakete), 0);
         if (maxPakete(T, t) - bestellt < pk) return false;
@@ -750,7 +755,8 @@ function neuVerteilenPlan(S) {
       const nach = mengencheckTier(T, t.name);
       if (nach[o.nr] === 'ok' && !Object.keys(nach).some(nr => +nr !== o.nr && vor[nr] === 'ok' && nach[nr] !== 'ok')) { ziel = t.name; break; }
     }
-    if (!ziel) { o.tier = vorher.get(o.nr).tier; o.rang = nextRang(T); }
+    // kein Tier im Zeitfenster vor dem Wunschtermin → Warteliste; sonst (passt nirgends ganz) bleibt sie, wo sie war
+    if (!ziel) { o.tier = o.wunsch && !kand.length ? 'Warteliste' : vorher.get(o.nr).tier; o.rang = nextRang(T); }
   }
   const zeilen = bew.map(o => {
     const v = vorher.get(o.nr);
@@ -761,7 +767,7 @@ function neuVerteilenPlan(S) {
   // Kistenpläne (ungewogen), die durch das Verteilen nicht mehr stimmen
   const betroffen = new Set(wechsel.flatMap(z => [z.von, z.nach]));
   const planNeu = [...mitPlan].filter(n => tier(S, n) && !tier(S, n).archiv && (betroffen.has(n) || kistenplanVeraltet(S, n)));
-  return { zeilen, wechsel, festTiere: [...mitKisten].filter(n => tier(S, n) && !tier(S, n).archiv), planNeu };
+  return { zeilen, wechsel, maxTage, festTiere: [...mitKisten].filter(n => tier(S, n) && !tier(S, n).archiv), planNeu };
 }
 // nach dem Verteilen: betroffene ungewogene Kistenpläne neu berechnen (bzw. zurücksetzen, wenn das Tier keine Bestellungen mehr hat)
 function kistenplaeneAktualisieren(S, namen) {

@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '2.6';
+const APP_VERSION = '2.7';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -135,7 +135,14 @@ async function neuVerteilenDialog(nurWennWechsel) {
     </tbody></table></div>` : '<p class="ok"><b>Alles passt – keine Bestellung muss das Tier wechseln.</b></p>'}
     ${bleibtNicht.length ? `<p class="warn">Weiter „reicht nicht“ (kein Tier passt, bleibt wo sie war): ${bleibtNicht.map(z => 'Nr. ' + z.nr + ' ' + esc(z.name)).join(', ')}</p>` : ''}`;
   const planHtml = plan.planNeu.length ? `<p class="klein">Kistenplan wird danach automatisch neu berechnet: <b>${plan.planNeu.map(esc).join(', ')}</b> (noch nichts gewogen).</p>` : '';
-  const k = await dialog('Offene Bestellungen neu verteilen', html + planHtml, plan.wechsel.length ? [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: `${plan.wechsel.length} übernehmen`, cls: 'haupt' }] : [{ k: 'x', t: 'Schließen', cls: 'haupt' }]);
+  const tageHtml = `<div class="zeile" style="gap:8px;align-items:center;margin:4px 0 8px"><span class="klein">Mit Wunschtermin höchstens</span><input id="vtTage" class="feld zahl" inputmode="numeric" style="width:70px" value="${plan.maxTage}"><span class="klein">Tage vor dem Wunschtermin – sonst Warteliste</span></div>`;
+  const kn = [{ k: 'x', t: plan.wechsel.length ? 'Abbrechen' : 'Schließen' }, { k: 'tage', t: 'Tage übernehmen & neu prüfen' }];
+  if (plan.wechsel.length) kn.push({ k: 'ok', t: `${plan.wechsel.length} übernehmen`, cls: 'haupt' });
+  const { k, werte } = await dialogFelder('Offene Bestellungen neu verteilen', tageHtml + html + planHtml, kn);
+  if (k === 'tage' || (k === 'ok' && werte.vtTage !== undefined && num(werte.vtTage) !== plan.maxTage)) {
+    S.settings.verteilenMaxTage = Math.max(0, Math.round(num(werte.vtTage))); speichern();
+    return neuVerteilenDialog(false);
+  }
   if (k !== 'ok') return false;
   neuVerteilenUebernehmen(S, plan);
   const kp = plan.planNeu.length ? kistenplaeneAktualisieren(S, plan.planNeu) : { neu: [], weg: [] };
@@ -301,7 +308,7 @@ function viewBestellung(nr, q, vorlage) {
       </div>
       <div class="karte"><h3 style="margin-top:0">Tier & Termin</h3>
         <div class="formraster">
-          <label class="f">Wunschtermin (leer = nächstes Tier)<input class="feld" type="date" data-in="kopf" data-f="wunsch" value="${esc(o.wunsch)}"></label>
+          <label class="f">Wunschtermin <span class="klein">(leer = nächstes Tier; sonst Tier höchstens ${has(S.settings.verteilenMaxTage) ? num(S.settings.verteilenMaxTage) : 5} Tage davor)</span><input class="feld" type="date" data-in="kopf" data-f="wunsch" value="${esc(o.wunsch)}"></label>
           <label class="f">Tier<select class="feld" id="tierwahl" data-in="kopf" data-f="tier"></select></label>
           <div class="ganz klein" id="tierinfo"></div>
           <label class="f ganz">Notiz intern<input class="feld" data-in="kopf" data-f="notiz" value="${esc(o.notiz)}" placeholder="nur Bestellbezogenes – keine Gesundheitsangaben"></label>
