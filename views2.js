@@ -181,6 +181,15 @@ function docMetzgerGruppe(mas) {
 // =====================================================================
 // Ochsenschwanz: Stückzahl im Feld kg (Zuteilung nach Stück), Gewicht getrennt im Feld gew
 const istGewogen = k => k.art === OCHS ? has(k.gew) : !!k.gewogen || (has(k.plan) && has(k.kg) && Math.abs(num(k.kg) - num(k.plan)) > 0.001);
+// Stellplatz-Auswahl (seit 3.0.4): je Feld im Auto „oben“ und „n. v. u.“ – gleiche Schreibweise wie der Ladeplan
+function stellplatzOptionen(aktuell) {
+  const werte = [];
+  for (const f of S.auto) { const h = Math.max(1, Math.round(num(f.hoehe)) || 4); werte.push(`${f.name}, oben`); for (let e = h - 1; e >= 1; e--) werte.push(`${f.name}, ${e}. v. u.`); }
+  const a = String(aktuell || '');
+  let h = opt('', '– kein Platz –', !a);
+  if (a && !werte.some(w => sameText(w, a))) h += opt(a, a, true); // alter/eigener Eintrag bleibt sichtbar
+  return h + werte.map(w => opt(w, w, sameText(w, a))).join('');
+}
 // Draufsicht aus der aktuellen Kistenliste (Stellplatz-Text „hinten links, oben“ / „Mitte rechts, 2. v. u.“)
 function felderAusKisten(tn) {
   const namen = Array.isArray(tn) ? tn : [tn];
@@ -253,10 +262,10 @@ function tabKisten(tn, ziel) {
           <div class="tabwrap" style="border:none"><table class="tab ktab"><thead><tr><th class="r">Kiste</th><th>Inhalt</th><th class="r">Plan</th><th class="r">gewogen kg</th><th>Stellplatz</th><th class="r">Rest</th><th></th></tr></thead><tbody>
           ${calc.map(c => { const gw = istGewogen(c.k); return `<tr data-id="${c.k.id}" class="${gw ? 'gw' : ''}">
             <td style="width:58px"><input class="feld zahl" inputmode="numeric" data-ch="kf" data-f="nr" value="${c.k.nr}">${zeigTier ? `<div class="klein fett" style="text-align:center">${esc(c.tier)}</div>` : ''}</td>
-            <td><select class="feld" data-ch="kf" data-f="art">${kistenArtOpt(c.k.art)}</select>${c.teile ? `<div class="klein teile">${esc(c.teile)}</div>` : ''}</td>
+            <td><select class="feld" style="max-width:205px" data-ch="kf" data-f="art">${kistenArtOpt(c.k.art)}</select>${c.teile ? `<div class="klein teile">${esc(c.teile)}</div>` : ''}</td>
             <td class="r klein">${has(c.k.plan) ? (c.k.art === OCHS ? fmtNum(c.k.plan, 0) + ' Stk' : fmtNum(c.k.plan, 1)) : ''}</td>
             <td style="width:96px">${c.k.art === OCHS ? `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="gew" value="${has(c.k.gew) ? fmtIn(c.k.gew, 2) : ''}" placeholder="kg" title="Ochsenschwanz gewogen (kg)"><div class="klein">Stück: <input class="feld zahl klein" style="width:44px;padding:2px 4px;min-height:0" inputmode="numeric" data-ch="kf" data-f="kg" value="${fmtIn(c.k.kg, 0)}" title="Anzahl Ochsenschwänze"></div>` : `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="kg" value="${gw ? fmtIn(c.k.kg, 2) : ''}" placeholder="${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}">`}</td>
-            <td style="width:150px"><input class="feld klein" data-ch="kf" data-f="platz" value="${esc(c.k.platz || '')}"></td>
+            <td style="width:172px"><select class="feld klein" style="min-width:168px;padding-left:6px;padding-right:2px" data-ch="kf" data-f="platz">${stellplatzOptionen(c.k.platz)}</select></td>
             <td class="r fett">${c.k.art === OCHS ? fmtNum(c.rest, 0) + ' Stk' : fmtNum(c.rest, 1)}</td>
             <td style="width:44px"><button class="btn klein rot" data-act="kweg" data-id="${c.k.id}">✕</button></td></tr>`; }).join('')}
           </tbody></table></div>

@@ -35,6 +35,7 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 | – (3.0.1) | Tier-Karten auf der Übersicht: grüner Balken zeigt jetzt **verkauft %** (Fleisch + Knochen, wie Mengenprüfung), bei gemeinsamer Abholung für alle Tiere zusammen; darunter weiter Genusspakete |
 | – (3.0.2) | Metzgerauftrag ohne den Satz „Mehr Hackfleisch als üblich: zuerst Bug auflösen …“ – der Metzger entscheidet anhand der Sonderfälle, was durch den Wolf geht |
 | – (3.0.3) | **Hack-Kisten**: jede Kiste auf 20 kg; eine weitere Hack-Kiste wird nur angefangen, wenn der Rest nicht mehr auf die vollen Kisten passt (höchstens 25 kg je Kiste) – bei 4 vollen Kisten also erst ab mehr als 20 kg Rest. Sonst wird der Rest gleichmäßig auf die vollen Kisten verteilt. Bei überladenen Kisten (gemeinsame Abholung) gilt ebenfalls +5 kg, höchstens 30 kg. Metzgerauftrag zeigt dieselbe Aufteilung |
+| – (3.0.4) | **Stellplatz** in Kisten & Ladeplan per Auswahlliste statt Handeingabe (je Feld im Auto: oben, 3./2./1. v. u.; „kein Platz“) |
 | Preisliste, Ausbeute, Auto | **Einstellungen** |
 | Bestellformular A4/A5, Infozettel (PDF) | **Übersicht → Vordrucke drucken** (Preise automatisch aus der Preisliste; jede Preisliste = eigene Version der Zettel, frühere im Archiv) |
 | Mappe zurücksetzen | **Einstellungen → Daten & Sicherung** (ein „Neues Jahr“ gibt es nicht mehr – Bestellungen laufen über den Jahreswechsel einfach weiter) |

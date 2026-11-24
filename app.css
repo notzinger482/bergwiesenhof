@@ -205,7 +205,7 @@ textarea.feld { min-height: 70px; }
 .ktab .feld { min-height: 40px; padding: 4px 8px; font-size: 16px; }
 .ktab .feld.klein { font-size: 13px; }
 .ktab tr.gw td { background: #f1f8e8; }
-.ktab .teile { max-width: 260px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+.ktab .teile { max-width: 205px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
 details.karte summary { cursor: pointer; }
 
 /* ===== Vordrucke (Bestellformular A4/A5, Infozettel) ===== */
