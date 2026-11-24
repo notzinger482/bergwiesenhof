@@ -290,7 +290,11 @@ function tabPackliste(tn, ziel) {
   ui.acts.status = async el => {
     const o = best(el); const f = ['offen', 'gepackt', 'abgeholt']; const neu = f[(f.indexOf(o.status || 'offen') + 1) % 3];
     if (neu === 'gepackt') { if (!(await lagerDialog(o))) return; }
-    else { o.status = neu; if (neu === 'offen') { o.lagerOrt = ''; o.lagerPlatz = ''; o.gepacktAm = null; } speichern(); }
+    else {
+      o.status = neu; if (neu === 'offen') { o.lagerOrt = ''; o.lagerPlatz = ''; o.gepacktAm = null; }
+      if (neu === 'abgeholt') preisFestsetzen(S, o); else if (!preisBleibtFest(S, o)) delete o.preisFest;
+      speichern();
+    }
     render();
   };
   ui.acts.teilen = async () => { const d = docPackliste(packliste(S, tn)); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
@@ -566,18 +570,58 @@ async function tabDaten(z) {
 }
 function tabPreise(z) {
   const st = S.settings;
-  z.innerHTML = `<div class="hinweis klein">Die Preise gelten auch für die Vordrucke (Bestellformular A4/A5, Infozettel): <a href="#/vordrucke">Vordrucke ansehen und drucken</a></div><div class="karte"><label class="f">Überschrift der Preisliste<input class="feld" data-ch="st" data-f="preislisteTitel" value="${esc(st.preislisteTitel || '')}"></label></div>
+  const heute = todayISO();
+  const liste = preislisten(S);
+  const aktuell = preislisteAm(S, heute);
+  let pl = liste.find(p => p.ab === ui.plAb) || aktuell;
+  ui.plAb = pl.ab;
+  // echtes Objekt in den Einstellungen (preislisten() liefert eine sortierte Kopie der Liste, die Objekte sind dieselben)
+  const status = p => p === aktuell ? '<span class="marke gruen">gilt jetzt</span>' : p.ab > heute ? '<span class="marke gelb">kommt</span>' : '<span class="marke">früher</span>';
+  const offen = S.bestellungen.filter(o => o.name && (o.status || 'offen') !== 'abgeholt' && !(tier(S, o.tier) || {}).archiv);
+  const anzahlFuer = p => offen.filter(o => preislisteAm(S, preisDatum(S, o)) === p).length;
+  z.innerHTML = `<div class="hinweis klein">Die Preise gelten auch für die Vordrucke (Bestellformular A4/A5, Infozettel): <a href="#/vordrucke">Vordrucke ansehen und drucken</a></div>
+   <div class="karte"><h3 style="margin-top:0">Preislisten <span class="klein">– maßgeblich ist der <b>Abholtermin</b> des Tiers (Warteliste: Wunschtermin, sonst heute)</span></h3>
+    <div class="zeile" style="flex-wrap:wrap;gap:8px">${liste.map(p => `<button class="btn ${p === pl ? 'haupt' : ''}" data-act="plwahl" data-ab="${p.ab}">ab ${fmtDate(p.ab)} ${status(p)}<br><span class="klein">${anzahlFuer(p)} offene Bestellungen</span></button>`).join('')}
+     <button class="btn" data-act="plneu">+ Neue Preisliste ab …</button></div>
+    <div class="zeile" style="margin-top:12px;gap:12px;align-items:flex-end"><label class="f" style="width:200px">Gültig ab<input class="feld" type="date" data-ch="plab" value="${pl.ab}"></label>
+     ${liste.length > 1 && pl.ab > heute ? '<button class="btn rot" data-act="plweg">Diese Preisliste löschen</button>' : ''}
+     <p class="klein platz" style="margin:0">Du bearbeitest unten die Preisliste <b>ab ${fmtDate(pl.ab)}</b>. Beispiel: neue Preise ab 01.01. – Tiere mit Abholung im Dezember rechnen weiter mit den alten Preisen, ab Januar mit den neuen. Eingetragene Endbeträge ändern sich nie.</p></div></div>
+   <div class="karte"><label class="f">Überschrift der Preisliste<input class="feld" data-ch="st" data-f="preislisteTitel" value="${esc(st.preislisteTitel || '')}"></label></div>
    <div class="karte"><h3 style="margin-top:0">Genusspaket <span class="klein">– Inhalt unter Einstellungen → Genusspaket, zurzeit ca. ${fmtNum(paketGewicht(S), 1)} kg</span></h3><div class="zeile">
-    ${[['preisPaketKg', 'Preis je kg (€)'], ['preisVakPaket', 'Vakuumieren je Paket (€)']].map(([f, t]) => `<label class="f" style="width:180px">${t}<input class="feld zahl" inputmode="decimal" data-ch="st" data-f="${f}" value="${fmtIn(st[f], 2)}"></label>`).join('')}</div></div>
-   <div class="tabwrap"><table class="tab"><thead><tr><th>Artikel</th><th>bestellt in</th><th class="r">Preis (€/kg)</th><th class="r">im Genusspaket</th><th class="c">„am Stück“ möglich</th></tr></thead><tbody>
+    ${[['preisPaketKg', 'Preis je kg (€)', paketPreisKg(S, pl)], ['preisVakPaket', 'Vakuumieren je Paket (€)', vakPreisPaket(S, pl)]].map(([f, t, v]) => `<label class="f" style="width:180px">${t}<input class="feld zahl" inputmode="decimal" data-ch="plpaket" data-f="${f}" value="${fmtIn(v, 2)}"></label>`).join('')}</div></div>
+   <div class="tabwrap"><table class="tab"><thead><tr><th>Artikel</th><th>bestellt in</th><th class="r">Preis (€/kg) ab ${fmtDate(pl.ab)}</th>${pl !== aktuell ? `<th class="r klein">gilt jetzt</th>` : ''}<th class="r">im Genusspaket</th><th class="c">„am Stück“ möglich</th></tr></thead><tbody>
    ${S.artikel.map((a, i) => `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td><td>${esc(a.einheit)}</td>
-     <td style="width:110px"><input class="feld zahl" inputmode="decimal" data-ch="art" data-f="preis" value="${fmtIn(a.preis, 2)}"></td>
+     <td style="width:110px"><input class="feld zahl" inputmode="decimal" data-ch="plpreis" value="${fmtIn(artPreis(S, a, pl), 2)}"></td>
+     ${pl !== aktuell ? `<td class="r klein">${fmtNum(artPreis(S, a, aktuell), 2, 2)}</td>` : ''}
      <td class="r klein">${paketListe(S).filter(p => p.art === a.name).map(p => `${fmtNum(p.anzahl)} × ${fmtNum(paketG(S, p))} g`).join(' + ')}</td>
      <td class="c"><label class="check"><input type="checkbox" data-ch="art" data-f="amStueck"${a.amStueck ? ' checked' : ''}></label></td>
 </tr>`).join('')}
-   </tbody></table></div><p class="klein">Alle Preise in €/kg – auch bei Innereien, die nach Stück bestellt werden (Schätzpreis = Anzahl × Stückgewicht × €/kg). „im Genusspaket“ wird unter Einstellungen → Genusspaket festgelegt. Stück- und Beutelgewichte: unter „Ausbeute & Kisten“. Preisänderungen gelten sofort auch für die Schätzpreise bestehender Bestellungen.</p>`;
+   </tbody></table></div><p class="klein">Alle Preise in €/kg – auch bei Innereien, die nach Stück bestellt werden (Schätzpreis = Anzahl × Stückgewicht × €/kg). „im Genusspaket“ wird unter Einstellungen → Genusspaket festgelegt. Stück- und Beutelgewichte: unter „Ausbeute & Kisten“. Preisänderungen wirken sofort auf die Schätzpreise aller Bestellungen, deren Abholtermin in diese Preisliste fällt.</p>`;
+  const fertig = (txt = 'Gespeichert.') => { preiseAbgleichen(S); speichern(); meldung(txt); render(); };
+  ui.acts.plwahl = el => { ui.plAb = el.dataset.ab; render(); };
   ui.acts.st = el => { S.settings[el.dataset.f] = el.type === 'text' && !el.classList.contains('zahl') ? el.value : num(el.value); speichern(); meldung('Gespeichert.'); };
   ui.acts.art = el => { const a = S.artikel[+el.closest('tr').dataset.i]; a[el.dataset.f] = el.type === 'checkbox' ? el.checked : num(el.value); speichern(); meldung('Gespeichert.'); };
+  ui.acts.plpreis = el => { const a = S.artikel[+el.closest('tr').dataset.i]; pl.preise = pl.preise || {}; pl.preise[a.name] = r2(num(el.value)); fertig(); };
+  ui.acts.plpaket = el => { pl[el.dataset.f] = r2(num(el.value)); fertig(); };
+  ui.acts.plab = el => {
+    const neu = el.value;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(neu)) { el.value = pl.ab; return meldung('Bitte ein Datum wählen.', true); }
+    if (liste.some(p => p !== pl && p.ab === neu)) { el.value = pl.ab; return meldung(`Ab ${fmtDate(neu)} gibt es schon eine Preisliste.`, true); }
+    pl.ab = neu; ui.plAb = neu; fertig(`Preisliste gilt jetzt ab ${fmtDate(neu)}.`);
+  };
+  ui.acts.plneu = async () => {
+    const { k, werte } = await dialogFelder('Neue Preisliste', `<p>Ab wann gelten die neuen Preise? Maßgeblich ist der Abholtermin des Tiers. Die Preise werden von der Preisliste ab ${fmtDate(pl.ab)} übernommen und können dann geändert werden.</p><label class="f">Gültig ab<input class="feld" type="date" id="plneuab" value="${String(+heute.slice(0, 4) + 1)}-01-01"></label>`, [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Anlegen', cls: 'haupt' }]);
+    if (k !== 'ok') return;
+    const ab = String(werte.plneuab || '');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(ab)) return meldung('Bitte ein Datum wählen.', true);
+    if (liste.some(p => p.ab === ab)) return meldung(`Ab ${fmtDate(ab)} gibt es schon eine Preisliste.`, true);
+    S.settings.preislisten.push({ ab, preise: Object.fromEntries(S.artikel.map(a => [a.name, artPreis(S, a, pl)])), preisPaketKg: paketPreisKg(S, pl), preisVakPaket: vakPreisPaket(S, pl) });
+    ui.plAb = ab; fertig(`Preisliste ab ${fmtDate(ab)} angelegt – jetzt die neuen Preise eintragen.`);
+  };
+  ui.acts.plweg = async () => {
+    if (!(await frage('Preisliste löschen', `Die Preisliste ab ${fmtDate(pl.ab)} löschen? Bestellungen rechnen dann mit der vorherigen Preisliste.`, 'Löschen', 'Abbrechen', 'rot'))) return;
+    S.settings.preislisten = S.settings.preislisten.filter(p => p !== pl); ui.plAb = null; fertig('Preisliste gelöscht.');
+  };
 }
 function tabAusbeute(z) {
   const st = S.settings;

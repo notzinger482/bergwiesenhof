@@ -216,7 +216,10 @@ function excelExport(S) {
   const H = { name: 'Hofladen', cols: [{ h: 'Datum', typ: 'date' }, { h: 'Tier' }, { h: 'Kiste', typ: 'num' }, { h: 'Artikel', w: 20 }, { h: 'Rest', typ: 'num' }, { h: 'Einheit' }], rows: S.hofladen.map(h => [h.datum, h.tier, h.kiste, h.art, n(h.rest), h.einheit]) };
   const P = { name: 'Preisliste', cols: [{ h: 'Artikel', w: 20 }, { h: 'bestellt in' }, { h: 'Preis', typ: 'eur' }, { h: 'im Genusspaket' }, { h: 'Stückgewicht (g)', typ: 'num' }, { h: 'am Stück möglich' }, { h: 'fester Beutel (g)', typ: 'num' }, { h: 'Anteil Bulle', typ: 'num' }, { h: 'Anteil Rind', typ: 'num' }, { h: 'Teilstücke', w: 50 }],
     rows: S.artikel.map(a => [a.name, a.einheit, n(a.preis), paketListe(S).filter(p => p.art === a.name).map(p => `${p.anzahl} × ${paketG(S, p)} g`).join(' + ') || 'nein', n(a.stueckG) || '', a.amStueck ? 'ja' : 'nein', n(a.beutelG) || '', n(a.anteil) || '', anteilVon(S, a, 'Rind') || '', a.teile]) };
-  return xlsx([B, SW, PO, K, T, AU, KI, H, P]);
+  const PLs = preislisten(S);
+  const PL = { name: 'Preislisten', cols: [{ h: 'Artikel', w: 22 }, ...PLs.map(p => ({ h: 'ab ' + fmtDate(p.ab), typ: 'eur', w: 13 }))],
+    rows: S.artikel.map(a => [a.name, ...PLs.map(p => artPreis(S, a, p))]).concat([['Genusspaket je kg', ...PLs.map(p => paketPreisKg(S, p))], ['Vakuumieren je Paket', ...PLs.map(p => vakPreisPaket(S, p))]]) };
+  return xlsx([B, SW, PO, K, T, AU, KI, H, P, PL]);
 }
 
 // ---------- Automatische Sicherung in Google Drive (über eigenes Google-Skript) ----------

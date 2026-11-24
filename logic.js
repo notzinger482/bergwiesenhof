@@ -266,12 +266,48 @@ function tuetenAuto(S, o) {
   return t;
 }
 const tueten = (S, o) => has(o.tuetenManuell) ? num(o.tuetenManuell) : tuetenAuto(S, o);
-// Schätzpreis wie Spalte AC
+// ---------- Preislisten mit „gültig ab“ ----------
+// settings.preislisten = [{ ab: 'JJJJ-MM-TT', preise: { Artikel: €/kg }, preisPaketKg, preisVakPaket }]
+// Maßgeblich für eine Bestellung ist der Abholtermin ihres Tiers (die Kasse rechnet ab dem Stichtag mit den neuen Preisen).
+// artikel.preis und settings.preisPaketKg/preisVakPaket zeigen immer die heute gültige Preisliste (preiseAbgleichen).
+const preislisten = S => (Array.isArray(S.settings.preislisten) ? S.settings.preislisten.filter(p => p && /^\d{4}-\d{2}-\d{2}$/.test(p.ab)) : []).slice().sort((a, b) => a.ab.localeCompare(b.ab));
+function preislisteAm(S, iso) {
+  const l = preislisten(S);
+  if (!l.length) return null;
+  let r = l[0];
+  for (const p of l) if (p.ab <= (iso || todayISO())) r = p;
+  return r;
+}
+// Stichtag einer Bestellung: Abholtermin des Tiers; Warteliste/ohne Termin: Wunschtermin, sonst heute
+function preisDatum(S, o) {
+  const t = o && o.tier && o.tier !== 'Warteliste' ? tier(S, o.tier) : null;
+  if (t && t.abhol) return t.abhol;
+  if (o && o.wunsch) return o.wunsch;
+  return todayISO();
+}
+const artPreis = (S, a, pl) => pl && pl.preise && has(pl.preise[a.name]) ? num(pl.preise[a.name]) : num(a.preis);
+const paketPreisKg = (S, pl) => pl && has(pl.preisPaketKg) ? num(pl.preisPaketKg) : num(S.settings.preisPaketKg);
+const vakPreisPaket = (S, pl) => pl && has(pl.preisVakPaket) ? num(pl.preisVakPaket) : num(S.settings.preisVakPaket);
+function preiseAbgleichen(S, heute = todayISO()) {
+  const pl = preislisteAm(S, heute);
+  if (!pl) return;
+  for (const a of S.artikel) if (pl.preise && has(pl.preise[a.name])) a.preis = num(pl.preise[a.name]);
+  if (has(pl.preisPaketKg)) S.settings.preisPaketKg = num(pl.preisPaketKg);
+  if (has(pl.preisVakPaket)) S.settings.preisVakPaket = num(pl.preisVakPaket);
+  S.settings.preiseAb = fmtDate(pl.ab);
+}
+function preislisteAus(S, ab) { return { ab, preise: Object.fromEntries(S.artikel.map(a => [a.name, num(a.preis)])), preisPaketKg: num(S.settings.preisPaketKg), preisVakPaket: num(S.settings.preisVakPaket) }; }
+// Abgeholte Bestellungen und Bestellungen archivierter Tiere behalten ihren Schätzpreis (o.preisFest) –
+// spätere Preisänderungen verfälschen weder Archiv noch Statistik
+function preisFestsetzen(S, o) { delete o.preisFest; o.preisFest = schaetzpreis(S, o); return o.preisFest; }
+const preisBleibtFest = (S, o) => (o.status || 'offen') === 'abgeholt' || !!(tier(S, o.tier) || {}).archiv;
+// Schätzpreis wie Spalte AC – mit der Preisliste, die am Abholtermin gilt
 function schaetzpreis(S, o) {
-  const st = S.settings;
-  let p = num(o.pakete) * paketGewicht(S) * num(st.preisPaketKg) + num(o.pakVak) * num(st.preisVakPaket);
+  if (has(o.preisFest)) return num(o.preisFest);
+  const pl = preislisteAm(S, preisDatum(S, o));
+  let p = num(o.pakete) * paketGewicht(S) * paketPreisKg(S, pl) + num(o.pakVak) * vakPreisPaket(S, pl);
   // alle Preise in €/kg; Stück-Artikel (Nieren, Herz, Zunge, Bäckle, Ochsenschwanz): Anzahl × Stückgewicht × €/kg
-  for (const a of S.artikel) p += kgVon(S, o, a) * num(a.preis);
+  for (const a of S.artikel) p += kgVon(S, o, a) * artPreis(S, a, pl);
   return r2(p);
 }
 // Bestelltext wie Spalte AJ
@@ -532,6 +568,7 @@ function archivStandFesthalten(S, t) {
   const a0 = t.archiv, s0 = t.archivStand;
   t.archiv = null; t.archivStand = null;
   try {
+    for (const o of ordersOfTier(S, t.name)) if (!has(o.preisFest)) preisFestsetzen(S, o);
     t.archivStand = { checks: mengencheckTier(S, t.name), maxPak: maxPakete(S, t), paketKg: r2(paketGewicht(S)), sg: sgRechnung(S, t),
       plan: Object.fromEntries(ausbeuteArtikel(S).map(a => [a.name, r2(yieldArt(S, t, a.name))])) };
   } catch (e) { t.archivStand = s0 || null; }
@@ -1337,12 +1374,14 @@ function hofladenSummen(S, jahr) {
 // ---------- Datenstand ----------
 function leererStand() {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
-  return {
+  const S0 = {
     app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 8, gespeichert: null,
     artikel: d.artikel, settings: d.settings, auto: d.auto, wege: d.wege,
     kunden: [], tiere: [], bestellungen: [], kisten: [], hofladen: [],
     metzgerManuell: {}, packplaene: {}, letzteSicherung: null
   };
+  S0.settings.preislisten = [preislisteAus(S0, parseDate(S0.settings.preiseAb) || '2000-01-01')];
+  return S0;
 }
 function bewegungsdatenLeeren(S, mitKunden) {
   S.bestellungen = []; S.tiere = []; S.kisten = []; S.hofladen = []; S.metzgerManuell = {}; S.packplaene = {};
@@ -1352,6 +1391,7 @@ function standPruefen(x) {
   if (!x || typeof x !== 'object' || !Array.isArray(x.bestellungen) || !Array.isArray(x.artikel)) throw new Error('Keine gültige Sicherungsdatei des Bestellsystems.');
   const base = leererStand();
   const altSchema = num(x.schema);
+  const hattePreislisten = !!(x.settings && Array.isArray(x.settings.preislisten) && x.settings.preislisten.length);
   for (const k of Object.keys(base)) if (x[k] === undefined) x[k] = base[k];
   x.settings = Object.assign({}, base.settings, x.settings);
   if (!x.settings.hackPlatz) x.settings.hackPlatz = 'vorne rechts';
@@ -1415,6 +1455,13 @@ function standPruefen(x) {
     if (!k.angelegt) k.angelegt = k.letzte || todayISO();
   });
   delete x.settings.preisTuete;
+  // Version 1.9.5: Preislisten mit „gültig ab“ – bisherige Preise werden die erste Preisliste
+  if (!hattePreislisten) {
+    const ab = parseDate(x.settings.preiseAb) || '2000-01-01';
+    x.settings.preislisten = [preislisteAus(x, ab)];
+  }
+  preiseAbgleichen(x);
+  (x.bestellungen || []).forEach(o => { if (!has(o.preisFest) && o.name && preisBleibtFest(x, o)) preisFestsetzen(x, o); });
   // Version 1.9.3: Archiv ist Archiv – Stand archivierter Tiere einmalig festhalten (falls noch nicht geschehen)
   (x.tiere || []).forEach(t => { if (t.archiv && !t.archivStand) archivStandFesthalten(x, t); });
   // Version 1.6.4: Innereien nach Stück werden in €/kg berechnet → geschätztes Stückgewicht
@@ -1430,5 +1477,5 @@ if (typeof module !== 'undefined') module.exports = {
   tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
-  HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
+  HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
 };

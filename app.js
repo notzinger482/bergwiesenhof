@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.9.4';
+const APP_VERSION = '1.9.5';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -252,10 +252,10 @@ function viewBestellung(nr, q, vorlage) {
           <label class="f ganz">Notiz intern<input class="feld" data-in="kopf" data-f="notiz" value="${esc(o.notiz)}" placeholder="nur Bestellbezogenes – keine Gesundheitsangaben"></label>
         </div>
       </div>
-      <div class="karte"><h3 style="margin-top:0">Genusspakete <span class="klein">(ca. ${fmtNum(paketGewicht(S), 1)} kg, ${fmtEur(st.preisPaketKg)}/kg)</span></h3><div class="klein" style="margin:-4px 0 8px">${esc(paketListe(S).map(p => (num(p.anzahl) > 1 ? fmtNum(p.anzahl) + ' ' : fmtNum(num(p.anzahl) * paketG(S, p) / 1000, 2) + ' kg ') + p.art).join(' · '))}</div>
+      <div class="karte"><h3 style="margin-top:0">Genusspakete <span class="klein">(ca. ${fmtNum(paketGewicht(S), 1)} kg, ${fmtEur(paketPreisKg(S, preislisteAm(S, preisDatum(S, o))))}/kg)</span></h3><div class="klein" style="margin:-4px 0 8px">${esc(paketListe(S).map(p => (num(p.anzahl) > 1 ? fmtNum(p.anzahl) + ' ' : fmtNum(num(p.anzahl) * paketG(S, p) / 1000, 2) + ' kg ') + p.art).join(' · '))}</div>
         <div class="zeile">
           <div><div class="klein fett">Anzahl</div><div class="stepper"><button data-act="step" data-f="pakete" data-d="-1">−</button><input class="feld zahl" inputmode="numeric" data-in="kopf" data-f="pakete" value="${num(o.pakete) || ''}"><button data-act="step" data-f="pakete" data-d="1">+</button></div></div>
-          <div><div class="klein fett">davon vakuumiert (${fmtEur(st.preisVakPaket)})</div><div class="stepper"><button data-act="step" data-f="pakVak" data-d="-1">−</button><input class="feld zahl" inputmode="numeric" data-in="kopf" data-f="pakVak" value="${num(o.pakVak) || ''}"><button data-act="step" data-f="pakVak" data-d="1">+</button></div></div>
+          <div><div class="klein fett">davon vakuumiert (${fmtEur(vakPreisPaket(S, preislisteAm(S, preisDatum(S, o))))})</div><div class="stepper"><button data-act="step" data-f="pakVak" data-d="-1">−</button><input class="feld zahl" inputmode="numeric" data-in="kopf" data-f="pakVak" value="${num(o.pakVak) || ''}"><button data-act="step" data-f="pakVak" data-d="1">+</button></div></div>
         </div>
       </div>
       <div class="karte"><h3 style="margin-top:0">Sonderwünsche <span class="klein">– macht der Metzger separat</span></h3>
@@ -462,6 +462,8 @@ async function bestellungSpeichern(o) {
     if (S.bestellungen[i].tier !== o.tier) o.rang = nextRang(S);
     S.bestellungen[i] = o;
   }
+  // Schätzpreis abgeholter/archivierter Bestellungen festhalten (bei Änderung neu berechnet), sonst mit der Preisliste am Abholtermin
+  if (preisBleibtFest(S, o)) preisFestsetzen(S, o); else delete o.preisFest;
   const kundeNeu = kundePflegen(S, o.name, o.tel, o.mail, o.eingang);
   speichern();
   ui.formDirty = false; ui.letzteNr = o.nr;
@@ -627,7 +629,7 @@ function viewTier(name) {
   };
   ui.acts.zurueck = async () => {
     if (!(await frage('Aus dem Archiv holen', `${esc(t0.name)} wieder zu den aktiven Tieren nehmen? Es zählt dann nicht mehr für die Ausbeute-Statistik.`, 'Zurückholen', 'Abbrechen'))) return;
-    t0.archiv = null; delete t0.archivStand; speichern(); meldung(`${t0.name} ist wieder aktiv.`); render();
+    t0.archiv = null; delete t0.archivStand; ordersOfTier(S, t0.name).forEach(o => { if (!preisBleibtFest(S, o)) delete o.preisFest; }); speichern(); meldung(`${t0.name} ist wieder aktiv.`); render();
   };
   ui.acts.erfWeg = async el => { if (!(await frage('Gewogenes Teil löschen', 'Diesen Eintrag löschen?', 'Löschen', 'Abbrechen', 'rot'))) return; t0.erfassung.splice(+el.dataset.i, 1); speichern(); render(); };
   ui.acts.best = el => gehe('#/bestellung/' + el.dataset.nr);
