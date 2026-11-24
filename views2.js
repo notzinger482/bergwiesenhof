@@ -365,9 +365,10 @@ function tabKisten(tn, ziel) {
   const andere = kistenTiere(S).filter(x => !gruppe.includes(x));
   const ohnePlan = isG && !topf ? gruppe.filter(n => !calc.some(c => c.tier === n)) : [];
   const veraltet = calc.length ? kistenplanVeraltet(S, tn) : null;
+  const gesperrt = calc.length > 0 && kommissionierBegonnen(S, isG ? gruppe : [tn]);
   const planNamen = (pp && pp.tiere) || (isG ? gruppe : [tn]);
   const veraltetHinweis = veraltet ? `<div class="fehlerbox zeile" style="gap:10px;flex-wrap:wrap"><div class="platz"><b>Kistenplan passt nicht mehr:</b> ${esc(veraltet)}. Bitte neu berechnen – oder zurücksetzen, wenn das Tier noch nicht beim Metzger war.</div><button class="btn braun" data-act="planen">Plan neu berechnen</button><button class="btn rot" data-act="kreset">Kisten zurücksetzen</button></div>` : '';
-  const gruppeHinweis = veraltetHinweis + (isG ? `<div class="hinweis"><b>Gemeinsame Abholung ${fmtDate(t.abhol)}:</b> ${gruppe.map(esc).join(' + ')} laufen als ein Topf – gemeinsame Kisten, Mengencheck über alle Tiere, kommissioniert wird über alle Bestellungen.${calc.length && ohnePlan.length ? ` <span class="warn">Für ${ohnePlan.map(esc).join(', ')} gibt es noch keine Kisten – bitte „Plan neu berechnen“.</span>` : ''}</div>` : '');
+  const gruppeHinweis = veraltetHinweis + (gesperrt ? `<div class="hinweis"><b>Kommissionieren läuft – Kistenplan gesperrt.</b> „Plan neu berechnen“ und „Kisten zurücksetzen“ gehen nicht mehr, weil die Kisten schon im Haus sind und gewogen wird. Einzelne Zeilen (gewogene kg, Stellplatz) lassen sich weiter ändern.</div>` : '') + (isG ? `<div class="hinweis"><b>Gemeinsame Abholung ${fmtDate(t.abhol)}:</b> ${gruppe.map(esc).join(' + ')} laufen als ein Topf – gemeinsame Kisten, Mengencheck über alle Tiere, kommissioniert wird über alle Bestellungen.${calc.length && ohnePlan.length ? ` <span class="warn">Für ${ohnePlan.map(esc).join(', ')} gibt es noch keine Kisten – bitte „Plan neu berechnen“.</span>` : ''}</div>` : '');
   if (!calc.length) {
     ziel.innerHTML = gruppeHinweis + `<div class="karte" style="max-width:820px"><h3 style="margin-top:0">Noch kein Plan für ${esc(isG ? gruppe.join(' + ') : tn)}</h3>
       <p>„Plan erstellen“ rechnet aus, welche Stücke in welche Metzgerkiste kommen (max. ${fmtNum(S.settings.kisteMax)} kg; gemischt nur Rostbraten + Steak bzw. Filet + Braten + Tafelspitz), wo jede Kiste im Auto steht und in welcher Reihenfolge beim Metzger eingeladen wird. Hackfleisch steht immer auf „${esc(S.settings.hackPlatz || 'vorne rechts')}“.</p>
@@ -376,11 +377,11 @@ function tabKisten(tn, ziel) {
       <div class="knopfleiste"><button class="btn braun" data-act="planen" style="min-height:56px;font-size:18px">Plan erstellen</button></div></div>`;
   } else {
     ziel.innerHTML = gruppeHinweis + `<div class="knopfleiste" style="margin-bottom:10px">
-        <button class="btn braun" data-act="planen">Plan neu berechnen</button>
+        <button class="btn braun" data-act="planen" ${gesperrt ? 'disabled title="gesperrt – Kommissionieren läuft"' : ''}>Plan neu berechnen</button>
         <button class="btn haupt" data-act="teilenPlan">Ladeplan teilen (Metzger)</button>
         <button class="btn" data-act="teilenKisten">Kistenliste teilen</button>
         <button class="btn" data-act="drucken">Drucken</button>
-        <button class="btn rot" data-act="kreset">Kisten zurücksetzen</button>
+        <button class="btn rot" data-act="kreset" ${gesperrt ? 'disabled title="gesperrt – Kommissionieren läuft"' : ''}>Kisten zurücksetzen</button>
         <span class="platz"></span>
         <span class="marke ${gewogen === calc.length ? 'gruen' : gewogen ? 'gelb' : ''}" style="align-self:center;font-size:14px;padding:6px 12px">${gewogen} von ${calc.length} gewogen</span></div>
       ${pp && pp.warn.length ? pp.warn.map(w => `<div class="hinweis" style="padding:6px 12px;margin-bottom:8px">${esc(w)}</div>`).join('') : ''}
@@ -404,6 +405,7 @@ function tabKisten(tn, ziel) {
       <p class="klein">Grün = gewogen. Leeres Feld bei „gewogen“ = es wird mit dem Planwert gerechnet. „Rest“ = was nach allen Bestellungen in der Kiste übrig bleibt.</p>`;
   }
   ui.acts.planen = async () => {
+    if (gesperrt) return meldung('Kistenplan gesperrt – Kommissionieren läuft.', true);
     const neu = packplan(S, tn);
     if (neu.fehler) return meldung(neu.fehler, true);
     if (gewogen && !(await frage('Plan neu berechnen', `<b>${gewogen} Kistenzeilen sind schon gewogen.</b> Beim Neuberechnen werden alle Kisten von ${esc(neu.tier)} durch den neuen Plan ersetzt und die gewogenen kg gehen verloren.`, 'Trotzdem neu berechnen', 'Abbrechen', 'rot'))) return;
@@ -412,6 +414,7 @@ function tabKisten(tn, ziel) {
     if (neu.warn.length) dialog('Hinweis zum Plan', neu.warn.map(w => `<p class="warn">${esc(w)}</p>`).join(''));
   };
   ui.acts.kreset = async () => {
+    if (gesperrt) return meldung('Kistenplan gesperrt – Kommissionieren läuft.', true);
     const namen = [...new Set(calc.map(c => c.tier || c.k.tier).concat(planNamen))].filter(n => S.kisten.some(k => k.tier === n));
     const gw = kistenGewogenAnzahl(S, namen);
     if (!(await frage('Kisten zurücksetzen', `Alle ${calc.length} Kistenzeilen von <b>${namen.map(esc).join(' + ')}</b> löschen? Danach gibt es keinen Ladeplan mehr; die Bestellungen bleiben unverändert und lassen sich wieder neu verteilen.${gw ? `<br><b class="warn">${gw} Kisten sind schon gewogen – diese Gewichte gehen verloren.</b>` : ''}`, 'Zurücksetzen', 'Abbrechen', 'rot'))) return;

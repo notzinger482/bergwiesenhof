@@ -816,6 +816,7 @@ function neuVerteilenPlan(S, fest) {
   const T = JSON.parse(JSON.stringify(S));
   // fest sind nur Tiere, deren Kisten schon gewogen werden (beim Metzger abgeholt); ein bloßer Kistenplan wird danach neu berechnet
   const mitKisten = new Set((T.kisten || []).filter(k => kisteGewogen(k)).flatMap(keyNamen));
+  for (const t of T.tiere || []) if (!t.archiv && kistenRows(T, t.name).length && kommissionierBegonnen(T, [t.name])) mitKisten.add(t.name); // Kommissionieren läuft → fest
   const mitPlan = new Set((T.kisten || []).flatMap(keyNamen).filter(n => !mitKisten.has(n)));
   const freiesTier = t => !!t && !t.archiv && !mitKisten.has(t.name);
   const beweglich = o => o.name && (o.status || 'offen') === 'offen' && !o.ueberbelegt && !(fest && fest.has(o.nr)) &&
@@ -864,12 +865,12 @@ function kistenplaeneAktualisieren(S, namen) {
   // alle betroffenen Tiere samt ihrer alten und neuen Abholgruppe einsammeln (nur ungewogene)
   const alle = new Set();
   for (const n of namen) { abholGruppe(S, n).forEach(x => alle.add(x)); (((S.packplaene || {})[n] || {}).tiere || []).forEach(x => alle.add(x)); alle.add(n); }
-  const liste = [...alle].filter(x => tier(S, x) && !tier(S, x).archiv && !kistenGewogenAnzahl(S, [x]) && kistenRows(S, x).length || namen.includes(x));
+  const liste = [...alle].filter(x => tier(S, x) && !tier(S, x).archiv && !kistenGewogenAnzahl(S, [x]) && !kommissionierBegonnen(S, [x]) && kistenRows(S, x).length || namen.includes(x));
   const erledigt = new Set();
   for (const n of liste) {
     if (erledigt.has(n)) continue;
     const g = abholGruppe(S, n);
-    if (kistenGewogenAnzahl(S, g)) { g.forEach(x => erledigt.add(x)); continue; }
+    if (kistenGewogenAnzahl(S, g) || kommissionierBegonnen(S, g)) { g.forEach(x => erledigt.add(x)); continue; }
     g.forEach(x => erledigt.add(x));
     kistenZuruecksetzen(S, g);
     if (!g.some(x => ordersOfTier(S, x).length)) { weg.push(g.join(' + ')); continue; }
@@ -1658,6 +1659,7 @@ function bestellFingerabdruck(S, tierName) {
 function kistenplanVeraltet(S, tierName) {
   const rows = kistenRows(S, tierName);
   if (!rows.length) return null;
+  if (kommissionierBegonnen(S, [tierName])) return null; // Plan gesperrt – Kisten sind schon im Haus
   const pp = S.packplaene && S.packplaene[tierName];
   const namen = pp && pp.tiere ? pp.tiere : [...new Set(rows.flatMap(keyNamen))];
   if (namen.every(n => !ordersOfTier(S, n).length)) return 'keine Bestellungen mehr';
@@ -1674,6 +1676,13 @@ function kistenZuruecksetzen(S, namen) {
 }
 const kistenGewogenAnzahl = (S, namen) => { const nn = namen.flatMap(n => String(n).split(TOPF_SEP)); return S.kisten.filter(k => keyNamen(k).some(n => nn.includes(n)) && kisteGewogen(k)).length; };
 const kistenTiere = S => [...new Set(S.kisten.flatMap(keyNamen))];
+// seit 3.1.1 (Wunsch Nutzer): sobald kommissioniert wird (erste gewogene/abgehakte Zeile, gepackte Bestellung oder Hofladen-Päckchen),
+// ist der Kistenplan des Tiers bzw. Topfs gesperrt – kein Neuberechnen/Zurücksetzen, kein automatisches Umplanen
+function kommissionierBegonnen(S, namen) {
+  const nn = [...new Set(namen.flatMap(n => String(n).split(TOPF_SEP)).flatMap(n => tier(S, n) && !tier(S, n).archiv ? abholGruppe(S, n) : [n]))];
+  if (S.bestellungen.some(o => nn.includes(o.tier) && (Object.keys(o.komm || {}).length || o.status === 'gepackt' || o.status === 'abgeholt'))) return true;
+  return nn.some(n => ((tier(S, n) || {}).hofPacks || []).length > 0);
+}
 // Zu welchen Bestellungen gehören die Kisten eines Tiers? Gemeinsame Kisten (Topf) → alle Bestellungen des Topfs
 function kistenKontext(S, tierName) {
   const rows = kistenRows(S, tierName);
