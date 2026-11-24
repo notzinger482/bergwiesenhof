@@ -441,23 +441,45 @@ function tabAusbeute(z) {
   const feld = (f, t, dec = 0) => `<label class="f" style="width:250px">${t}<input class="feld zahl" inputmode="decimal" data-ch="st" data-f="${f}" value="${fmtNum(st[f], dec || 2)}"></label>`;
   z.innerHTML = `<div class="karte"><h3 style="margin-top:0">Ausbeute je Tier (Anteil am Schlachtgewicht)</h3>
    <label class="zeile" style="gap:10px;margin-bottom:10px"><input type="checkbox" data-ch="rindwie" style="width:24px;height:24px"${eigen ? '' : ' checked'}> <b>Rind: Werte vom Bullen übernehmen</b> <span class="klein">(Haken weg = eigene Prozente für Rinder eingeben)</span></label>
-   <div class="tabwrap"><table class="tab"><thead><tr><th>Bestellartikel</th><th class="r">Anteil Bulle (%)</th><th class="r">Anteil Rind (%)</th><th class="r">Bulle ${fmtNum(st.sgBulle)} kg</th><th class="r">Rind ${fmtNum(st.sgRind)} kg</th><th>Teilstücke für die Kistenfüllung</th></tr></thead><tbody>
+   <div class="tabwrap"><table class="tab"><thead><tr><th>Bestellartikel</th><th class="r">Anteil Bulle (%)</th><th class="r">Anteil Rind (%)</th><th class="r">Referenz</th><th class="r">Bulle ${fmtNum(st.sgBulle)} kg</th><th class="r">Rind ${fmtNum(st.sgRind)} kg</th><th>Teilstücke für die Kistenfüllung</th></tr></thead><tbody>
    ${S.artikel.map((a, i) => num(a.anteil) > 0 || num(a.anteilRind) > 0 || !istOrgan(a.name) && !a.beutelG ? `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td>
-     <td style="width:110px"><input class="feld zahl" inputmode="decimal" data-ch="anteil" data-f="anteil" value="${fmtNum(num(a.anteil) * 100, 2)}"></td>
-     <td style="width:110px"><input class="feld zahl${eigen ? '' : ' auto'}" inputmode="decimal" data-ch="anteil" data-f="anteilRind" value="${fmtNum(anteilVon(S, a, 'Rind') * 100, 2)}"${eigen ? '' : ' readonly'}></td>
+     <td style="width:110px"><input class="feld zahl${ausserhalb(num(a.anteil), a.refMin, a.refMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="anteil" data-f="anteil" value="${fmtNum(num(a.anteil) * 100, 2)}"></td>
+     <td style="width:110px"><input class="feld zahl${eigen ? '' : ' auto'}${ausserhalb(anteilVon(S, a, 'Rind'), a.refMin, a.refMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="anteil" data-f="anteilRind" value="${fmtNum(anteilVon(S, a, 'Rind') * 100, 2)}"${eigen ? '' : ' readonly'}></td>
+     <td class="r klein" style="white-space:nowrap">${refText(a.refMin, a.refMax)}</td>
      <td class="r">${fmtNum(num(a.anteil) * st.sgBulle, 1)} kg</td><td class="r">${fmtNum(anteilVon(S, a, 'Rind') * st.sgRind, 1)} kg</td><td><input class="feld" data-ch="teile" value="${esc(a.teile || '')}"></td></tr>` : '').join('')}
-   <tr><td class="fett">Summe</td><td class="r fett">${fmtNum(sB * 100, 1)} %</td><td class="r fett">${fmtNum(sR * 100, 1)} %</td><td colspan="3"></td></tr></tbody></table></div>
-   <p class="klein">Gilt für alle Tiere dieses Typs ohne eingetragenes Schlachtgewicht wie mit. Änderungen wirken sofort auf Mengenprüfung, Paketgewicht und Packplan.</p></div>
+   <tr><td class="fett">Summe</td><td class="r fett">${fmtNum(sB * 100, 1)} %</td><td class="r fett">${fmtNum(sR * 100, 1)} %</td><td colspan="4"></td></tr></tbody></table></div>
+   <p class="klein">Rot = außerhalb der Referenzspanne (Tippfehler?). Gilt für alle Tiere dieses Typs ohne eingetragenes Schlachtgewicht wie mit. Änderungen wirken sofort auf Mengenprüfung, Paketgewicht und Packplan.</p></div>
+   <div class="karte"><h3 style="margin-top:0">Braten – gewachsene Stücke <span class="klein">– für Kistenfüllung, Gewichte und den Bug-Anteil</span></h3>
+    <p class="klein">Werte für Rind und Bulle mit Standard-Schlachtgewicht. Für jedes Tier werden die Stücke auf dessen Braten-Ausbeute hochgerechnet (Rind ${fmtNum(st.sgRind)} kg: ${fmtNum(yieldArt(S, { typ: 'Rind', sg: null }, 'Braten'), 1)} kg, Bulle ${fmtNum(st.sgBulle)} kg: ${fmtNum(yieldArt(S, { typ: 'Bulle', sg: null }, 'Braten'), 1)} kg). Nur die angehakten Stücke (Bug) dürfen bei Bedarf ins Hack – das falsche Filet bleibt immer Braten.</p>
+    <div class="tabwrap" style="max-width:860px"><table class="tab"><thead><tr><th>Teilstück</th><th class="r">Stück</th><th class="r">kg je Stück<br>Rind</th><th class="r">kg je Stück<br>Bulle</th><th class="r">Referenz</th><th class="r">= kg Rind</th><th class="r">= kg Bulle</th><th class="c">darf bei Bedarf<br>ins Hack</th><th></th></tr></thead><tbody>
+    ${(st.bratenTeile || []).map((x, i) => `<tr data-i="${i}"><td><input class="feld" data-ch="bt" data-f="name" value="${esc(x.name)}"></td>
+      <td style="width:80px"><input class="feld zahl" inputmode="numeric" data-ch="bt" data-f="stueck" value="${fmtNum(x.stueck)}"></td>
+      <td style="width:96px"><input class="feld zahl${ausserhalb(num(x.kg), x.kgMin, x.kgMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="bt" data-f="kg" value="${fmtNum(x.kg, 3)}"></td>
+      <td style="width:96px"><input class="feld zahl${num(x.kgBulle) > 0 && ausserhalb(num(x.kgBulle), x.kgMin, x.kgMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="bt" data-f="kgBulle" value="${num(x.kgBulle) > 0 ? fmtNum(x.kgBulle, 3) : ''}" placeholder="wie Rind"></td>
+      <td class="r klein" style="white-space:nowrap">${refText(x.kgMin, x.kgMax, 1, 2, 'kg')}${has(x.refMin) ? '<br>' + refText(x.refMin, x.refMax, 100, 1) : ''}</td>
+      <td class="r">${fmtNum(num(x.stueck) * teilKg(x, 'Rind'), 2)}</td><td class="r">${fmtNum(num(x.stueck) * teilKg(x, 'Bulle'), 2)}</td>
+      <td class="c"><label class="check"><input type="checkbox" data-ch="bt" data-f="bug"${x.bug ? ' checked' : ''}></label></td>
+      <td style="width:50px"><button class="btn klein rot" data-act="btweg" data-i="${i}">✕</button></td></tr>`).join('')}
+    <tr><td class="fett">Summe</td><td></td><td></td><td></td><td></td><td class="r fett">${fmtNum(bratenTeileKg(S, 'Rind'), 2)} kg</td><td class="r fett">${fmtNum(bratenTeileKg(S, 'Bulle'), 2)} kg</td><td class="c klein">ins Hack möglich:<br>Rind ${fmtNum(bugAnteilVon(S, 'Rind') * 100, 0)} % · Bulle ${fmtNum(bugAnteilVon(S, 'Bulle') * 100, 0)} %</td><td></td></tr></tbody></table></div>
+    <div class="knopfleiste" style="margin-top:8px"><button class="btn klein" data-act="btneu">+ Teilstück</button></div></div>
+   <div class="karte"><h3 style="margin-top:0">Ganze Stücke für die Kisten</h3>
+    <p class="klein">Diese Artikel kommen als ganze Stücke vom Metzger und werden Stück für Stück auf die Kisten verteilt (z. B. „2 ganze Stücke Filet“). Rostbraten und Steak werden geschnitten – am Stück nur als Sonderwunsch. Rouladen, Steak, Rostbraten, Beinscheiben und die Knochen kommen sortenrein in je eine eigene Kiste (bis zur Ausnahme-Grenze, sonst geteilt). Immer genau eine eigene Kiste (sortenrein, bis ${fmtNum(num(st.kisteAusnahme) || 25)} kg): ${EINE_KISTE.join(', ')}. Mehrere Kisten gibt es nur bei Braten (nach Stücken), Siedfleisch, Gulasch, Beinscheiben und Hackfleisch. Gewicht je Stück = Ausbeute des Tiers ÷ Anzahl. 0 = nicht als ganzes Stück.</p>
+    <div class="tabwrap" style="max-width:760px"><table class="tab"><thead><tr><th>Artikel</th><th class="r">Anzahl je Tier</th><th class="r">kg je Stück Rind</th><th class="r">kg je Stück Bulle</th><th class="r">Referenz</th></tr></thead><tbody>
+    ${S.artikel.map((a, i) => ({ a, i })).filter(({ a }) => num(a.ganzeStuecke) > 0 || ['Filet', 'Tafelspitz'].includes(a.name)).map(({ a, i }) => { const n = num(a.ganzeStuecke);
+      const kR = n > 0 ? yieldArt(S, { typ: 'Rind', sg: null }, a.name) / n : 0, kB = n > 0 ? yieldArt(S, { typ: 'Bulle', sg: null }, a.name) / n : 0;
+      return `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td><td style="width:110px"><input class="feld zahl" inputmode="numeric" data-ch="ganz" value="${n || 0}"></td>
+      <td class="r${n > 0 && ausserhalb(kR, a.stkMin, a.stkMax) ? ' warn' : ''}">${n > 0 ? fmtNum(kR, 2) + ' kg' : '–'}</td><td class="r${n > 0 && ausserhalb(kB, a.stkMin, a.stkMax) ? ' warn' : ''}">${n > 0 ? fmtNum(kB, 2) + ' kg' : '–'}</td>
+      <td class="r klein">${refText(a.stkMin, a.stkMax, 1, 2, 'kg')}</td></tr>`; }).join('')}</tbody></table></div></div>
    <div class="karte"><h3 style="margin-top:0">Einzelgewichte <span class="klein">– Schätzwerte, bitte nachwiegen</span></h3>
     <div class="zeile oben" style="margin-bottom:8px">${feld('maxWaden', 'Waden am Stück höchstens je Tier')}<p class="klein" style="max-width:420px;margin:22px 0 0">Gewicht einer Wade = Beinscheiben-Ausbeute ÷ Anzahl Waden: Rind ${fmtNum(wadeKg(S, null), 1)} kg, Bulle ${fmtNum(yieldArt(S, { typ: 'Bulle', sg: null }, 'Beinscheiben') / (num(st.maxWaden) || 4), 1)} kg.</p></div>
     <p class="klein">Damit wird überall gerechnet: Bestellungen nach Stück (z. B. „Steak 3“ = 3 × Stückgewicht), Genusspaket, Beutelgrößen der Knochen. Leer = Artikel wird nur nach kg bestellt.</p>
     <div class="tabwrap" style="max-width:640px"><table class="tab"><tbody>${S.artikel.map((a, i) => ({ a, i })).filter(({ a }) => !istOrgan(a.name) || a.einheit === 'Stk').map(({ a, i }) => { const btl = num(a.beutelG) > 0; return `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td>
-      <td style="width:130px"><input class="feld zahl" inputmode="numeric" data-ch="eg" data-f="${btl ? 'beutelG' : 'stueckG'}" value="${btl ? fmtNum(a.beutelG) : num(a.stueckG) > 0 ? fmtNum(a.stueckG) : ''}" placeholder="–"></td>
-      <td class="klein" style="width:110px">g je ${btl ? 'Beutel' : 'Stück'}${a.einheit === 'Stk' ? ' (für Schätzpreis)' : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
+      <td style="width:130px"><input class="feld zahl${!btl && !(num(a.ganzeStuecke) > 0) && num(a.stueckG) > 0 && ausserhalb(num(a.stueckG) / 1000, a.stkMin, a.stkMax) ? ' fehlt' : ''}" title="${!(num(a.ganzeStuecke) > 0) ? refText(a.stkMin, a.stkMax, 1000, 0, 'g') : ''}" inputmode="numeric" data-ch="eg" data-f="${btl ? 'beutelG' : 'stueckG'}" value="${btl ? fmtNum(a.beutelG) : num(a.stueckG) > 0 ? fmtNum(a.stueckG) : ''}" placeholder="–"></td>
+      <td class="klein" style="width:110px">g je ${btl ? 'Beutel' : 'Stück'}${a.einheit === 'Stk' ? ' (für Schätzpreis)' : ''}</td><td class="klein r" style="width:110px">${!(num(a.ganzeStuecke) > 0) ? refText(a.stkMin, a.stkMax, 1000, 0, 'g') : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
    <div class="karte"><h3 style="margin-top:0">Einstellungen</h3><div class="zeile oben">
     ${feld('sgBulle', 'Standard-Schlachtgewicht Bulle (kg)')}${feld('sgRind', 'Standard-Schlachtgewicht Rind/Färse (kg)')}
     ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
-    <label class="f" style="width:250px">Bug-Anteil am Braten (%) – darf bei Bedarf ins Hack<input class="feld zahl" inputmode="decimal" data-ch="bug" value="${fmtNum((has(st.bugAnteilBraten) ? num(st.bugAnteilBraten) : 0.5) * 100, 1)}"></label>${feld('tueteJeKg', 'Vakuumieren ohne Portionsangabe: 1 Tüte je … kg')}
+    ${feld('tueteJeKg', 'Vakuumieren ohne Portionsangabe: 1 Tüte je … kg')}
 </div></div>
    <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">
     ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}</div></div>
@@ -469,7 +491,10 @@ function tabAusbeute(z) {
     if (f === 'beutelG' && !(v > 0)) { meldung('Beutelgröße muss größer 0 sein.', true); return render(); }
     a[f] = v > 0 ? v : 0; speichern(); meldung('Gespeichert.'); render();
   };
-  ui.acts.bug = el => { S.settings.bugAnteilBraten = Math.min(100, Math.max(0, num(el.value))) / 100; speichern(); render(); };
+  ui.acts.ganz = el => { S.artikel[+el.closest('tr').dataset.i].ganzeStuecke = Math.max(0, Math.round(num(el.value))); speichern(); render(); };
+  ui.acts.bt = el => { const x = S.settings.bratenTeile[+el.closest('tr').dataset.i], f = el.dataset.f; x[f] = f === 'name' ? el.value : f === 'bug' ? el.checked : f === 'kgBulle' && el.value.trim() === '' ? null : num(el.value); speichern(); render(); };
+  ui.acts.btweg = el => { S.settings.bratenTeile.splice(+el.dataset.i, 1); speichern(); render(); };
+  ui.acts.btneu = () => { if (!Array.isArray(S.settings.bratenTeile)) S.settings.bratenTeile = []; S.settings.bratenTeile.push({ name: 'neues Teilstück', stueck: 2, kg: 1, bug: false }); speichern(); render(); };
   ui.acts.anteil = el => { if (el.readOnly) return; S.artikel[+el.closest('tr').dataset.i][el.dataset.f] = num(el.value) / 100; speichern(); render(); };
   ui.acts.rindwie = el => {
     S.settings.rindWieBulle = el.checked;

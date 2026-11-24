@@ -9,9 +9,14 @@ const DEFAULTS = {
    "stueckG": 0,
    "amStueck": false,
    "beutelG": 0,
-   "anteil": 0.192,
+   "anteil": 0.1786,
    "teile": "",
-   "anteilRind": 0.192
+   "anteilRind": 0.175,
+   "refMin": 0.16,
+   "refMax": 0.2,
+   "ganzeStuecke": 0,
+   "stkMin": null,
+   "stkMax": null
   },
   {
    "name": "Braten",
@@ -21,9 +26,14 @@ const DEFAULTS = {
    "stueckG": 0,
    "amStueck": false,
    "beutelG": 0,
-   "anteil": 0.112,
-   "teile": "Keule: Unterschale mit Schwanzstück, Kugel/Nuss, Bürgermeisterstück | Schulter: dicker Bug, Schaufelstück, Mittelbug, falsches Filet, Bugdeckel",
-   "anteilRind": 0.112
+   "anteil": 0.1917,
+   "teile": "Hochrippe, Bug, falsches Filet, Semerrolle, Kugel, Unterschale, Bürgermeisterstück",
+   "anteilRind": 0.1933,
+   "refMin": 0.169,
+   "refMax": 0.212,
+   "ganzeStuecke": 0,
+   "stkMin": null,
+   "stkMax": null
   },
   {
    "name": "Gulasch geschnitten",
@@ -33,21 +43,31 @@ const DEFAULTS = {
    "stueckG": 0,
    "amStueck": true,
    "beutelG": 0,
-   "anteil": 0.064,
+   "anteil": 0.075,
    "teile": "Kamm/Hals",
-   "anteilRind": 0.064
+   "anteilRind": 0.075,
+   "refMin": 0.068,
+   "refMax": 0.082,
+   "ganzeStuecke": 0,
+   "stkMin": null,
+   "stkMax": null
   },
   {
    "name": "Rostbraten",
    "einheit": "kg",
    "preis": 30,
    "inPaket": true,
-   "stueckG": 250,
+   "stueckG": 275,
    "amStueck": true,
    "beutelG": 0,
-   "anteil": 0.053,
-   "teile": "Roastbeef, Hochrippe",
-   "anteilRind": 0.053
+   "anteil": 0.0369,
+   "teile": "Roastbeef (Zwischenrippe)",
+   "anteilRind": 0.0367,
+   "refMin": 0.035,
+   "refMax": 0.04,
+   "ganzeStuecke": 0,
+   "stkMin": 0.25,
+   "stkMax": 0.32
   },
   {
    "name": "Filet",
@@ -57,33 +77,48 @@ const DEFAULTS = {
    "stueckG": 200,
    "amStueck": false,
    "beutelG": 0,
-   "anteil": 0.0185,
+   "anteil": 0.0131,
    "teile": "Filet",
-   "anteilRind": 0.0185
+   "anteilRind": 0.0133,
+   "refMin": 0.012,
+   "refMax": 0.015,
+   "ganzeStuecke": 2,
+   "stkMin": 1.8,
+   "stkMax": 3.0
   },
   {
    "name": "Steak",
    "einheit": "kg",
    "preis": 28,
    "inPaket": true,
-   "stueckG": 250,
+   "stueckG": 225,
    "amStueck": true,
    "beutelG": 0,
-   "anteil": 0.043,
-   "teile": "Hüfte",
-   "anteilRind": 0.043
+   "anteil": 0.0274,
+   "teile": "Hüfte (dicke Hüfte & Hüftfilet)",
+   "anteilRind": 0.0267,
+   "refMin": 0.025,
+   "refMax": 0.03,
+   "ganzeStuecke": 0,
+   "stkMin": 0.2,
+   "stkMax": 0.26
   },
   {
    "name": "Rouladen",
    "einheit": "kg",
    "preis": 20,
    "inPaket": true,
-   "stueckG": 180,
+   "stueckG": 200,
    "amStueck": false,
    "beutelG": 0,
-   "anteil": 0.086,
+   "anteil": 0.0536,
    "teile": "Oberschale (reicht sie nicht: Unterschale anschneiden)",
-   "anteilRind": 0.086
+   "anteilRind": 0.0533,
+   "refMin": 0.048,
+   "refMax": 0.058,
+   "ganzeStuecke": 0,
+   "stkMin": 0.18,
+   "stkMax": 0.23
   },
   {
    "name": "Siedfleisch",
@@ -93,21 +128,31 @@ const DEFAULTS = {
    "stueckG": 0,
    "amStueck": false,
    "beutelG": 0,
-   "anteil": 0.098,
+   "anteil": 0.094,
    "teile": "Brust, Fehlrippe, Spannrippe",
-   "anteilRind": 0.098
+   "anteilRind": 0.095,
+   "refMin": 0.085,
+   "refMax": 0.105,
+   "ganzeStuecke": 0,
+   "stkMin": null,
+   "stkMax": null
   },
   {
    "name": "Beinscheiben",
    "einheit": "kg",
    "preis": 10,
    "inPaket": true,
-   "stueckG": 400,
+   "stueckG": 500,
    "amStueck": true,
    "beutelG": 0,
-   "anteil": 0.041,
+   "anteil": 0.0452,
    "teile": "Vorder- und Hinterhesse",
-   "anteilRind": 0.041
+   "anteilRind": 0.045,
+   "refMin": 0.04,
+   "refMax": 0.05,
+   "ganzeStuecke": 0,
+   "stkMin": 0.45,
+   "stkMax": 0.7
   },
   {
    "name": "Tafelspitz",
@@ -117,9 +162,14 @@ const DEFAULTS = {
    "stueckG": 0,
    "amStueck": false,
    "beutelG": 0,
-   "anteil": 0.014,
+   "anteil": 0.0137,
    "teile": "Tafelspitz",
-   "anteilRind": 0.014
+   "anteilRind": 0.0133,
+   "refMin": 0.012,
+   "refMax": 0.015,
+   "ganzeStuecke": 2,
+   "stkMin": 1.8,
+   "stkMax": 3.2
   },
   {
    "name": "Suppenknochen (SK)",
@@ -232,6 +282,7 @@ const DEFAULTS = {
   "kisteMax": 20,
   "kisteAusnahme": 25,
   "hackPaketG": 500,
+  "bratenTeile": [{"name": "Hochrippe", "stueck": 2, "kg": 3.5, "bug": false, "kgBulle": 4.875, "refMin": 0.02, "refMax": 0.026000000000000002, "kgMin": 3.0, "kgMax": 5.5}, {"name": "Bug (dickes Bugstück & Schaufelstück)", "stueck": 4, "kg": 4.0, "bug": true, "kgBulle": 5.625, "refMin": 0.048, "refMax": 0.057999999999999996, "kgMin": 3.5, "kgMax": 6.0}, {"name": "Falsches Filet (Buglende)", "stueck": 2, "kg": 1.75, "bug": false, "kgBulle": 2.5, "refMin": 0.01, "refMax": 0.013000000000000001, "kgMin": 1.5, "kgMax": 2.8}, {"name": "Semerrolle", "stueck": 2, "kg": 2.0, "bug": false, "kgBulle": 2.875, "refMin": 0.012, "refMax": 0.015, "kgMin": 1.8, "kgMax": 3.2}, {"name": "Kugel (Nuss)", "stueck": 4, "kg": 3.125, "bug": false, "kgBulle": 4.25, "refMin": 0.036000000000000004, "refMax": 0.045, "kgMin": 2.8, "kgMax": 4.8}, {"name": "Unterschale", "stueck": 2, "kg": 6.25, "bug": false, "kgBulle": 8.5, "refMin": 0.036000000000000004, "refMax": 0.045, "kgMin": 5.5, "kgMax": 9.5}, {"name": "Bürgermeisterstück", "stueck": 2, "kg": 1.25, "bug": false, "kgBulle": 1.75, "refMin": 0.006999999999999999, "refMax": 0.01, "kgMin": 1.0, "kgMax": 2.0}],
   "paket": [
    { "art": "Hackfleisch", "anzahl": 1, "g": 3000 },
    { "art": "Soßenknochen (FK)", "anzahl": 1, "g": 1000 },
@@ -256,7 +307,7 @@ const DEFAULTS = {
   "leberPortionG": 500,
   "hofZeile": "Bergwiesenhof Bempflingen · Bernd & Claudia Huber · Tel. 07123 / 31543",
   "hackPlatz": "vorne rechts",
-  "rindWieBulle": true,
+  "rindWieBulle": false,
   "lagerMaxArtikel": 3,
   "lagerMaxKg": 5
  },

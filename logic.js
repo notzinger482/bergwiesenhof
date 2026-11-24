@@ -88,6 +88,16 @@ function hackPaketText(S, pakete, pakVak) {
   if (v > 0) t.push(`${fmtNum(Math.round(v * kg * 1000 / hp))} × ${fmtNum(hp)} g vakuumiert`);
   return t.join(' + ');
 }
+// ---------- Braten: gewachsene Stücke (Einstellungen → Ausbeute & Kisten) ----------
+const bratenTeile = S => Array.isArray(S.settings.bratenTeile) ? S.settings.bratenTeile.filter(x => x && x.name && num(x.stueck) > 0 && num(x.kg) > 0) : [];
+// kg je Stück nach Tiertyp (Bulle: eigene Werte, sonst Rind-Werte)
+const teilKg = (x, typ) => typ === 'Bulle' && num(x.kgBulle) > 0 ? num(x.kgBulle) : num(x.kg);
+const bratenTeileKg = (S, typ) => bratenTeile(S).reduce((s, x) => s + num(x.stueck) * teilKg(x, typ), 0);
+// Schulter-Anteil (Bug, falsches Filet) am Braten – darf bei Bedarf ins Hack
+const bugAnteilVon = (S, typ) => { const g = bratenTeileKg(S, typ); return g > 0 ? bratenTeile(S).filter(x => x.bug).reduce((s, x) => s + num(x.stueck) * teilKg(x, typ), 0) / g : (has(S.settings.bugAnteilBraten) ? num(S.settings.bugAnteilBraten) : 0.5); };
+// Referenzspannen (Anteil am Schlachtgewicht, Stückgewicht) – nur zur Prüfung beim Eintragen
+const ausserhalb = (v, min, max) => has(min) && has(max) && num(max) > 0 && (v < num(min) - 1e-6 || v > num(max) + 1e-6);
+const refText = (min, max, f = 100, dec = 1, eh = '%') => has(min) && has(max) && num(max) > 0 ? `${fmtNum(num(min) * f, dec)}–${fmtNum(num(max) * f, dec)} ${eh}` : '';
 const rindEigene = S => S.settings.rindWieBulle === false;
 const anteilVon = (S, a, typ) => num(typ === 'Bulle' || !rindEigene(S) ? a.anteil : a.anteilRind);
 const ausbeuteArtikel = S => S.artikel.filter(a => num(a.anteil) > 0 || (rindEigene(S) && num(a.anteilRind) > 0));
@@ -369,7 +379,7 @@ function fleischBilanz(S, t, ords) {
   const hackMehr = Math.max(0, hack.bestellt - hack.ausbeute);
   gul.insHack = gul.einzeln <= 0.001 && hackMehr > 0.001 ? Math.min(hackMehr, Math.max(0, gul.ausbeute - gul.ausPak)) : 0;
   gul.vorgabe = Math.max(0, r1(gul.ausbeute - gul.insHack - gul.separat));
-  const bugAnteil = has(S.settings.bugAnteilBraten) ? num(S.settings.bugAnteilBraten) : 0.5;
+  const bugAnteil = bugAnteilVon(S, t.typ);
   braten.bugKg = braten.ausbeute * bugAnteil;
   hack.ausbeuteMitGulasch = hack.ausbeute + gul.insHack;
   // Töpfe nach Abzug der Paket-Anteile
@@ -557,8 +567,9 @@ function metzgerauftrag(S, tierName) {
 }
 
 // ---------- Packplan (Makro PackplanFuer) ----------
+// Diese Artikel kommen immer in genau eine eigene Kiste (sortenrein) – geht in der Praxis immer auf
+const EINE_KISTE = ['Rouladen', 'Steak', 'Rostbraten', 'Beinscheiben', 'Suppenknochen (SK)', 'Soßenknochen (FK)'];
 function mischGruppe(a) {
-  if (a === 'Rostbraten' || a === 'Steak') return 1;
   if (a === 'Filet' || a === 'Braten' || a === 'Tafelspitz') return 2;
   return 0;
 }
@@ -571,7 +582,7 @@ function kisteGruppe(items) {
   }
   return g === -1 ? 0 : g;
 }
-const kistenTxt = items => items.map(i => `${i.art} ~${Math.round(i.kg)} kg`).join(' + ');
+const kistenTxt = items => items.map(i => `${i.art}${i.info ? ' (' + i.info + ')' : ''} ~${Math.round(i.kg)} kg`).join(' + ');
 function packplan(S, tierName) {
   const t = tier(S, tierName);
   if (!t) return { fehler: 'Tier unbekannt' };
@@ -621,10 +632,48 @@ function packplan(S, tierName) {
   };
   // Teilkisten
   let P = [];
+  const warnVorab = [];
   A.forEach((a, i) => {
     if (a.isOrg || !(a.kg > 0.05)) return;
+    const artDef = art(S, a.art);
+    const ganze = artDef && num(artDef.ganzeStuecke) > 0 ? Math.round(num(artDef.ganzeStuecke)) : 0;
+    if ((a.art === BRATEN && bratenTeile(S).length) || ganze > 0) {
+      // gewachsene Stücke, auf das Tier hochgerechnet; Bug-Stücke, die ins Hack gehen, fallen weg
+      let stuecke = [];
+      if (a.art === BRATEN && bratenTeile(S).length) {
+        const yB = yieldArt(S, t, BRATEN), f = yB > 0 ? yB / bratenTeileKg(S, t.typ) : 1;
+        for (const x of bratenTeile(S)) for (let n = 0; n < num(x.stueck); n++) stuecke.push({ name: x.name, kg: teilKg(x, t.typ) * f, bug: !!x.bug });
+      } else {
+        // ganze Stücke (z. B. 2 Filets, 2 Roastbeef-Stränge, 2 Hüften, 2 Tafelspitze)
+        const y = yieldArt(S, t, a.art);
+        for (let n = 0; n < ganze; n++) stuecke.push({ name: a.art, kg: y / ganze, bug: false });
+      }
+      let insHack = ma.hack.ausBug;
+      for (const s of stuecke.filter(s => s.bug).sort((p, q) => q.kg - p.kg)) if (insHack > s.kg / 2) { s.weg = true; insHack -= s.kg; }
+      stuecke = stuecke.filter(s => !s.weg);
+      const ges = stuecke.reduce((s, x) => s + x.kg, 0), k = ges > 0 ? Math.min(1, a.kg / ges) : 1; // Sonderwünsche gehen ab
+      stuecke.forEach(s => { s.kg *= k; });
+      // Keule zuerst (wird zuerst gebraucht), große Stücke zuerst, je Kiste höchstens maxKg
+      stuecke.sort((p, q) => (p.bug - q.bug) || q.kg - p.kg);
+      const kisten = [];
+      for (const s of stuecke) {
+        let kk = kisten.find(c => c.w + s.kg <= maxKg + 0.001);
+        if (!kk) { kk = { w: 0, st: [] }; kisten.push(kk); }
+        kk.w += s.kg; kk.st.push(s);
+      }
+      let start = 0;
+      for (const c of kisten) {
+        const z = {}; c.st.forEach(s => { z[s.name] = (z[s.name] || 0) + 1; });
+        const info = Object.entries(z).map(([n, c]) => n === a.art ? (c > 1 ? `${c} ganze Stücke` : '1 ganzes Stück') : `${c}× ${n.replace(/ \(.*\)$/, '')}`).join(', ');
+        P.push({ art: a.art, w: c.w, need: ersteBestellung(i, start, start + c.w), info });
+        start += c.w;
+      }
+      return;
+    }
     let nT, stueck;
-    if (a.art === HACK) { stueck = hackKg; nT = Math.floor((a.kg - 0.001) / stueck) + 1; }
+    const ausnahme = num(st.kisteAusnahme) > 0 ? num(st.kisteAusnahme) : 25;
+    if (EINE_KISTE.includes(a.art)) { nT = a.kg <= ausnahme + 0.001 ? 1 : Math.ceil(a.kg / maxKg - 1e-9); stueck = a.kg / nT; }
+    else if (a.art === HACK) { stueck = hackKg; nT = Math.floor((a.kg - 0.001) / stueck) + 1; }
     else { nT = Math.floor((a.kg - 0.001) / maxKg) + 1; stueck = a.kg / nT; }
     for (let j = 1; j <= nT; j++) {
       let w = stueck, need = BIG;
@@ -635,6 +684,7 @@ function packplan(S, tierName) {
     }
   });
   if (specTier > 0) P.push({ art: 'Sonderfälle (beschriftet)', w: specTier, need: 0 });
+  for (const p of P) if (EINE_KISTE.includes(p.art) && p.w > maxKg + 0.05) warnVorab.push(`${p.art}: eine Kiste mit ca. ${fmtNum(p.w, 1)} kg (über ${fmtNum(maxKg)} kg, Ausnahme).`);
   if (!P.length) return { fehler: `Für ${t.name} gibt es noch keine Mengen.` };
   // stabil sortieren wie Auswahlsort: need aufsteigend, bei gleichem need schwerer zuerst
   P = selSort(P, (x, y) => x.need < y.need || (x.need === y.need && x.w > y.w));
@@ -650,11 +700,11 @@ function packplan(S, tierName) {
     if (k === -1) { C.push({ items: [], w: 0, need: p.need }); k = C.length - 1; }
     C[k].w += p.w;
     if (p.need < C[k].need) C[k].need = p.need;
-    C[k].items.push({ art: p.art, kg: r1(p.w) });
+    C[k].items.push({ art: p.art, kg: r1(p.w), info: p.info || '' });
   }
   // Stellplätze vorbereiten
   const auto = S.auto;
-  const warn = [];
+  const warn = warnVorab.slice();
   const nurHack = c => c.items.length > 0 && c.items.every(i => i.art === HACK);
   const hackIdx = auto.findIndex(f => sameText(f.name, st.hackPlatz || 'vorne rechts') && num(f.hoehe) > 0);
   const hatHack = C.some(nurHack);
@@ -662,7 +712,7 @@ function packplan(S, tierName) {
   const nFeld = auto.filter((f, i) => num(f.hoehe) > 0 && (i !== hackIdx || hatHack)).length;
   while (C.length < nFeld) {
     let aMax = -1, wMax = 0;
-    C.forEach((c, j) => { if (c.w > wMax && !c.items.some(i => i.art === 'Sonderfälle (beschriftet)' || i.art === HACK)) { wMax = c.w; aMax = j; } });
+    C.forEach((c, j) => { if (c.w > wMax && !c.items.some(i => i.art === 'Sonderfälle (beschriftet)' || i.art === HACK || EINE_KISTE.includes(i.art))) { wMax = c.w; aMax = j; } });
     if (aMax < 0 || wMax < 1) break;
     const c = C[aMax];
     let neu;
@@ -718,7 +768,7 @@ function packplan(S, tierName) {
     const f = hatPlatz ? auto[c.platz] : null;
     return {
       nr: i + 1, items: c.items, w: r1(c.w), text: kistenTxt(c.items),
-      teile: c.items.map(it => { const a = art(S, it.art); return a && a.teile && it.art !== HACK ? `${it.art}: ${a.teile}` : ''; }).filter(Boolean),
+      teile: c.items.map(it => { const a = art(S, it.art); return a && a.teile && it.art !== HACK && !it.info ? `${it.art}: ${a.teile}` : ''; }).filter(Boolean),
       platz: hatPlatz ? f.name : 'KEIN PLATZ',
       ebene: hatPlatz ? (c.ebene === cnt[c.platz] ? 'oben' : `${c.ebene}. von unten`) : '',
       platzKurz: hatPlatz ? `${f.name}, ${c.ebene === cnt[c.platz] ? 'oben' : c.ebene + '. v. u.'}` : 'KEIN PLATZ',
@@ -750,7 +800,7 @@ function packplanUebernehmen(S, pp) {
   let id = S.kisten.reduce((m, k) => Math.max(m, k.id || 0), 0);
   for (const k of pp.kisten) {
     if (k.nr > 29) break;
-    k.items.slice(0, 3).forEach(it => S.kisten.push({ id: ++id, tier: pp.tier, nr: k.nr, art: it.art, kg: it.kg, plan: it.kg, platz: k.platzKurz, gewogen: false }));
+    k.items.slice(0, 3).forEach(it => S.kisten.push({ id: ++id, tier: pp.tier, nr: k.nr, art: it.art, kg: it.kg, plan: it.kg, platz: k.platzKurz, gewogen: false, info: it.info || '' }));
   }
 }
 
@@ -776,7 +826,7 @@ function kistenCalc(S, tierName) {
     const bedarf = ords.reduce((s, o) => s + qty(S, o, k.art) - specSum(S, o, k.art), 0) + pak * anteil;
     const verplant = Math.max(0, Math.min(start + num(k.kg), bedarf) - start);
     const a = art(S, k.art);
-    return { k, start, anteil, bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: a && k.art !== HACK ? a.teile : '' };
+    return { k, start, anteil, bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: k.info ? k.info : a && k.art !== HACK ? a.teile : '' };
   });
 }
 // Tier abgeschlossen: Reste an Hofladen, Kisten leeren
@@ -826,6 +876,7 @@ function kommissionierung(S, nr) {
           const pz = num(o.pakete) > 0 ? paketListe(S).filter(x => x.art === c.k.art) : [];
           if (pz.length) verp += (verp ? ' · ' : '') + 'Paket: ' + pz.map(x => `${fmtNum(num(o.pakete) * num(x.anzahl))} × ${gText(paketG(S, x))}`).join(' + ');
         }
+        if (c.k.info) verp = `Kiste enthält: ${c.k.info}` + (verp ? ' · ' + verp : '');
         picks.push({ kiste: c.k.nr, menge: r1(m), einheit: c.einheit, art: c.k.art, verpacken: verp, platz: c.k.platz || '' });
       }
     }
@@ -947,7 +998,7 @@ function hofladenSummen(S, jahr) {
 function leererStand() {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   return {
-    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 4, gespeichert: null,
+    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 5, gespeichert: null,
     artikel: d.artikel, settings: d.settings, auto: d.auto, wege: d.wege,
     kunden: [], tiere: [], bestellungen: [], kisten: [], hofladen: [],
     metzgerManuell: {}, packplaene: {}, letzteSicherung: null
@@ -988,6 +1039,19 @@ function standPruefen(x) {
     x.artikel.splice(i >= 0 ? i + 1 : x.artikel.length, 0, neu);
   }
   if (!has(x.settings.baeckleStk)) x.settings.baeckleStk = 2;
+  // Version 1.6.5: Ausbeute nach Referenzliste (Rind ca. 300 kg), Bratenstücke, Einzelgewichte
+  if (!(altSchema >= 5)) {
+    const W = {"Hackfleisch": [0.1786, 0.175, ""], "Braten": [0.1917, 0.1933, "Hochrippe, Bug, falsches Filet, Semerrolle, Kugel, Unterschale, Bürgermeisterstück"], "Gulasch geschnitten": [0.075, 0.075, null], "Rostbraten": [0.0369, 0.0367, "Roastbeef (Zwischenrippe)"], "Filet": [0.0131, 0.0133, null], "Steak": [0.0274, 0.0267, "Hüfte (dicke Hüfte & Hüftfilet)"], "Rouladen": [0.0536, 0.0533, null], "Siedfleisch": [0.094, 0.095, null], "Beinscheiben": [0.0452, 0.045, null], "Tafelspitz": [0.0137, 0.0133, null]}, G = {"Rostbraten": 275, "Steak": 225, "Rouladen": 200, "Beinscheiben": 500, "Filet": 200};
+    (x.artikel || []).forEach(a => {
+      if (W[a.name]) { a.anteil = W[a.name][0]; a.anteilRind = W[a.name][1]; if (W[a.name][2] !== null) a.teile = W[a.name][2]; }
+      if (G[a.name]) a.stueckG = G[a.name];
+    });
+    x.settings.bratenTeile = [{"name": "Hochrippe", "stueck": 2, "kg": 3.5, "bug": false, "kgBulle": 4.875, "refMin": 0.02, "refMax": 0.026000000000000002, "kgMin": 3.0, "kgMax": 5.5}, {"name": "Bug (dickes Bugstück & Schaufelstück)", "stueck": 4, "kg": 4.0, "bug": true, "kgBulle": 5.625, "refMin": 0.048, "refMax": 0.057999999999999996, "kgMin": 3.5, "kgMax": 6.0}, {"name": "Falsches Filet (Buglende)", "stueck": 2, "kg": 1.75, "bug": false, "kgBulle": 2.5, "refMin": 0.01, "refMax": 0.013000000000000001, "kgMin": 1.5, "kgMax": 2.8}, {"name": "Semerrolle", "stueck": 2, "kg": 2.0, "bug": false, "kgBulle": 2.875, "refMin": 0.012, "refMax": 0.015, "kgMin": 1.8, "kgMax": 3.2}, {"name": "Kugel (Nuss)", "stueck": 4, "kg": 3.125, "bug": false, "kgBulle": 4.25, "refMin": 0.036000000000000004, "refMax": 0.045, "kgMin": 2.8, "kgMax": 4.8}, {"name": "Unterschale", "stueck": 2, "kg": 6.25, "bug": false, "kgBulle": 8.5, "refMin": 0.036000000000000004, "refMax": 0.045, "kgMin": 5.5, "kgMax": 9.5}, {"name": "Bürgermeisterstück", "stueck": 2, "kg": 1.25, "bug": false, "kgBulle": 1.75, "refMin": 0.006999999999999999, "refMax": 0.01, "kgMin": 1.0, "kgMax": 2.0}];
+    x.settings.rindWieBulle = false; // Rind und Bulle getrennt
+    const R = {"Filet": {"refMin": 0.012, "refMax": 0.015, "ganzeStuecke": 2, "stkMin": 1.8, "stkMax": 3.0}, "Rostbraten": {"refMin": 0.035, "refMax": 0.04, "ganzeStuecke": 0, "stkMin": 0.25, "stkMax": 0.32}, "Steak": {"refMin": 0.025, "refMax": 0.03, "ganzeStuecke": 0, "stkMin": 0.2, "stkMax": 0.26}, "Tafelspitz": {"refMin": 0.012, "refMax": 0.015, "ganzeStuecke": 2, "stkMin": 1.8, "stkMax": 3.2}, "Rouladen": {"refMin": 0.048, "refMax": 0.058, "ganzeStuecke": 0, "stkMin": 0.18, "stkMax": 0.23}, "Braten": {"refMin": 0.169, "refMax": 0.212, "ganzeStuecke": 0, "stkMin": null, "stkMax": null}, "Gulasch geschnitten": {"refMin": 0.068, "refMax": 0.082, "ganzeStuecke": 0, "stkMin": null, "stkMax": null}, "Beinscheiben": {"refMin": 0.04, "refMax": 0.05, "ganzeStuecke": 0, "stkMin": 0.45, "stkMax": 0.7}, "Siedfleisch": {"refMin": 0.085, "refMax": 0.105, "ganzeStuecke": 0, "stkMin": null, "stkMax": null}, "Hackfleisch": {"refMin": 0.16, "refMax": 0.2, "ganzeStuecke": 0, "stkMin": null, "stkMax": null}};
+    (x.artikel || []).forEach(a => { if (R[a.name]) Object.assign(a, R[a.name]); });
+    x.schema = 5;
+  }
   // Version 1.6.4: Innereien nach Stück werden in €/kg berechnet → geschätztes Stückgewicht
   const stkG = { Nieren: 700, Herz: 2500, Zunge: 1500, 'Bäckle': 400, Ochsenschwanz: 2000 };
   (x.artikel || []).forEach(a => { if (a.einheit === 'Stk' && !(num(a.stueckG) > 0) && stkG[a.name]) a.stueckG = stkG[a.name]; });
