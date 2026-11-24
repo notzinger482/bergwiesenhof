@@ -1180,16 +1180,19 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   hack.kisten = hTeile.length;
   hack.kistenText = hackKistenText(hTeile);
   const separat = [];
+  // Kistennummer je Sonderfall aus dem gespeicherten Kistenplan (seit 3.2.1, Wunsch Nutzer) – wie beim Kommissionieren
+  const skAlle = kistenKontext(S, tierName).rows.filter(k => k.art === SONDERKISTE), mitPlan = skAlle.length > 0;
   for (const o of ords) for (const s of sonderOf(S, o)) {
     const a = art(S, s.art);
-    separat.push({ nr: o.nr, name: o.name, art: s.art, menge: has(s.menge) ? (s.ca ? 'ca. ' + fmtNum(s.menge, 1) : fmtNum(s.menge, 3)) + ' ' + (a ? a.einheit : '') : '', hinweis: s.wunsch });
+    const sk = num(s.menge) > 0 && !istOrgan(s.art) ? skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null : null;
+    separat.push({ nr: o.nr, name: o.name, art: s.art, kiste: sk ? sk.nr : null, menge: has(s.menge) ? (s.ca ? 'ca. ' + fmtNum(s.menge, 1) : fmtNum(s.menge, 3)) + ' ' + (a ? a.einheit : '') : '', hinweis: s.wunsch });
   }
   const waden = ords.reduce((s, o) => { const p = o.pos && o.pos[BEIN]; return s + (istWade(art(S, BEIN), p) ? num(p.anzahl) : 0); }, 0);
   const ochsB = ords.reduce((s, o) => s + qty(S, o, OCHS), 0);
   // Ochsenschwanz: nur „am Stück“ bestellte bleiben ganz (Zeile im Metzgerauftrag), alle anderen schneidet der Metzger wie gewohnt
   const ochsGanzListe = ords.filter(o => qty(S, o, OCHS) > 0 && ochsGanz(S, o)).map(o => ({ nr: o.nr, name: o.name, stk: qty(S, o, OCHS) }));
   const ochs = { bestellt: ochsB, vorhanden: (has(S.settings.ochsStk) ? num(S.settings.ochsStk) : 1) * topfN(t), ganz: ochsGanzListe.reduce((s, x) => s + x.stk, 0), ganzListe: ochsGanzListe };
-  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, waden, ochs, bugMager: num(braten.bugMager), fettSied: num(hack.fettSied) };
+  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, mitPlan, waden, ochs, bugMager: num(braten.bugMager), fettSied: num(hack.fettSied) };
 }
 
 // ---------- Packplan (Makro PackplanFuer) ----------
@@ -1480,7 +1483,9 @@ function packplanKisten(S, tierName, f = 1) {
       let start = 0;
       for (const c of kisten) {
         const z = {}; c.st.forEach(s => { z[s.name] = (z[s.name] || 0) + 1; });
-        const info = Object.entries(z).map(([n, c]) => n === a.art ? (c > 1 ? `${c} ganze Stücke` : '1 ganzes Stück') : `${c}× ${n.replace(/ \(.*\)$/, '')}`).join(', ');
+        let info = Object.entries(z).map(([n, c]) => n === a.art ? (k < 0.995 ? `${c} Stück${c > 1 ? 'e' : ''}` : c > 1 ? `${c} ganze Stücke` : '1 ganzes Stück') : `${c}× ${n.replace(/ \(.*\)$/, '')}`).join(', ');
+        // Sonderfälle in kg werden von diesen Stücken abgeschnitten (seit 3.2.1) – sonst sähe es nach vollen Stücken aus
+        if (k < 0.995 && c.w > 0) info += ` – davon ca. ${fmtNum(c.w / k - c.w, 1)} kg als Sonderfall ab`;
         P.push({ art: a.art, w: c.w, need: ersteBestellung(i, start, start + c.w), info });
         start += c.w;
       }

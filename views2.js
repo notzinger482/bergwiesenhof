@@ -81,8 +81,10 @@ function docMetzger(ma) {
       .concat(ma.ochs.bestellt > ma.ochs.vorhanden ? [['Ochsenschwanz', `ACHTUNG: ${fmtNum(ma.ochs.bestellt)} Stück bestellt`, `aber nur ca. ${fmtNum(ma.ochs.vorhanden)}${t.glieder ? ' bei ' + t.name : ' je Tier'}`]] : []) }];
   if (ma.gulasch.insHack > 0.05) bl.push({ type: 'text', text: `Kein Gulasch bestellt: ca. ${fmtNum(ma.gulasch.insHack, 0)} kg Kamm/Hals ins Hackfleisch.` });
   bl.push({ type: 'text', text: (ma.waden > 0 ? 'Übrige Hesse als Beinscheiben. ' : 'Hesse wie immer als Beinscheiben. ') + 'Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
-    { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit der Bestell-Nr. beschriften' },
-    { type: 'table', head: ['Nr.', 'Artikel', 'Menge', 'Hinweis'], widths: [1.2, 3.6, 1.8, 5.8], align: ['r', '', 'r', ''], rows: ma.separat.map(s => [s.nr, s.art, s.menge, s.hinweis]), leer: '– keine –' });
+    { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit der Bestell-Nr. beschriften' + (ma.mitPlan ? ' und in die angegebene Kiste legen' : '') },
+    { type: 'table', head: ['Nr.', 'Artikel', 'Menge', 'Hinweis', 'Kiste'], widths: [1.2, 3.4, 1.8, 5.2, 1.2], align: ['r', '', 'r', '', 'r'],
+      rows: ma.separat.map(s => [s.nr, s.art, s.menge, s.hinweis, s.kiste ? String(s.kiste) : istOrgan(s.art) ? 'Innereien' : '–']), leer: '– keine –' });
+  if (ma.separat.length && !ma.mitPlan) bl.push({ type: 'text', text: 'Kistennummern stehen hier, sobald der Kistenplan berechnet ist (Kisten & Ladeplan).' });
   if (t.glieder) bl.unshift({ type: 'text', bold: true, text: `Gemeinsame Abholung: ${t.name} (zusammen ca. ${fmtNum(t.sg)} kg Schlachtgewicht) – Mengen für alle Tiere zusammen, die Stücke müssen nicht nach Tieren getrennt werden.` });
   return { title: `Auftrag Metzger – ${t.name}`, sub: [abholTxt(t)], blocks: bl, footer: fussZeile() };
 }
