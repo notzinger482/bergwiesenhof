@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.8.0';
+const APP_VERSION = '1.8.1';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -90,13 +90,13 @@ function render() {
   const seite = teile[0] || 'start';
   ui.acts = {}; ui.ins = {};
   if (seite !== 'neu' && seite !== 'bestellung') ui.formDirty = false;
-  const navKey = seite === 'bestellung' ? 'bestellungen' : seite === 'kunde' ? 'kunden' : seite === 'tier' || seite === 'archiv' ? 'tiere' : seite === 'warteliste' ? 'bestellungen' : seite;
+  const navKey = seite === 'bestellung' ? 'bestellungen' : seite === 'kunde' ? 'kunden' : seite === 'tier' || seite === 'archiv' ? 'tiere' : seite === 'warteliste' ? 'bestellungen' : seite === 'vordrucke' ? 'start' : seite;
   navRender(navKey);
   const V = {
     start: viewStart, neu: () => viewBestellung(null, q), bestellung: () => viewBestellung(+teile[1], q), bestellungen: viewBestellungen,
     kunden: viewKunden, kunde: () => viewKunde(teile[1]), tiere: viewTiere, archiv: viewArchiv, tier: () => viewTier(teile[1]),
     schlachttag: () => viewSchlachttag(teile[1] || 'menge', q), kommissionierung: () => viewKommissionierung(q),
-    hofladen: viewHofladen, warteliste: viewWarteliste, einstellungen: () => viewEinstellungen(teile[1] || 'daten')
+    hofladen: viewHofladen, warteliste: viewWarteliste, vordrucke: viewVordrucke, einstellungen: () => viewEinstellungen(teile[1] || 'daten')
   };
   try { (V[seite] || viewStart)(); }
   catch (e) { console.error(e); inhalt().innerHTML = `<div class="fehlerbox">Fehler beim Anzeigen: ${esc(e.message)}</div>`; }
@@ -155,7 +155,8 @@ function viewStart() {
   h += `<div class="zeile" style="margin-bottom:16px"><a class="btn haupt" href="#/neu" style="min-height:60px;font-size:19px;padding:0 28px">+ Neue Bestellung</a>
     <div class="kachel"><div class="gross">${offen}</div><div class="klein">offene Bestellungen</div></div>
     <div class="kachel"><div class="gross">${warte}</div><div class="klein">auf der Warteliste</div></div>
-    <div class="kachel"><div class="gross">${S.kunden.length}</div><div class="klein">Kunden</div></div></div>`;
+    <div class="kachel"><div class="gross">${S.kunden.length}</div><div class="klein">Kunden</div></div>
+    <a class="btn" href="#/vordrucke" style="min-height:60px">🖨 Vordrucke drucken</a></div>`;
   if (ui.letzteNr) h += `<p class="klein">Zuletzt gespeichert: <a href="#/bestellung/${ui.letzteNr}">Bestellung Nr. ${ui.letzteNr}</a></p>`;
   h += `<h2>Tiere</h2>`;
   if (!kommende.length) h += `<div class="karte">Noch keine Tiere angelegt. <a href="#/tier/neu">Tier anlegen</a></div>`;
@@ -208,7 +209,7 @@ function viewBestellung(nr, q, vorlage) {
       <td style="width:96px"><input class="feld zahl" inputmode="decimal" data-in="pos" data-f="menge" value="${has(p.menge) ? fmtIn(p.menge, 3) : ''}" placeholder="${eh === 'kg' ? 'kg' : eh}"></td>
       <td class="einh">${eh === 'Btl' ? `Btl<br><span class="klein">à ${a.beutelG} g</span>` : eh}</td>
       <td class="c">${a.amStueck ? `<label class="check"><input type="checkbox" data-in="pos" data-f="amStueck"${p.amStueck ? ' checked' : ''}></label>` : ''}</td>
-      <td class="c"><label class="check"><input type="checkbox" data-in="pos" data-f="vak"${p.vak ? ' checked' : ''}></label></td>
+      <td class="c"><label class="check"><input type="checkbox" data-in="pos" data-f="vak"${istVak(o.pos[a.name] || {}) ? ' checked' : ''}></label></td>
     </tr>`;
   }).join('');
   const sonderRows = () => (o.sonder.length ? o.sonder : []).map((s, i) => sonderZeile(s, i)).join('');
@@ -251,11 +252,11 @@ function viewBestellung(nr, q, vorlage) {
         <div id="sonderliste">${sonderRows()}</div>
         <button class="btn klein" data-act="sonderNeu">+ Sonderwunsch</button>
       </div>
-      <div class="karte"><label class="f">Vakuum-Tüten (leer = automatisch)<input class="feld zahl" inputmode="numeric" style="max-width:160px" data-in="kopf" data-f="tuetenManuell" value="${has(o.tuetenManuell) ? o.tuetenManuell : ''}" id="tuetenfeld"></label><div class="klein" id="tuetenauto"></div></div>
+      <div class="karte"><label class="f">Vakuum-Tüten zum Packen (leer = automatisch, kostenlos)<input class="feld zahl" inputmode="numeric" style="max-width:160px" data-in="kopf" data-f="tuetenManuell" value="${has(o.tuetenManuell) ? o.tuetenManuell : ''}" id="tuetenfeld"></label><div class="klein" id="tuetenauto"></div></div>
     </div>
     <div class="karte">
       <h3 style="margin-top:0">Einzelartikel</h3>
-      <div class="klein" style="margin-bottom:6px">Anzahl × g ergibt die Menge automatisch (z. B. 6 × 500 g). Nur Anzahl (z. B. 4 Rostbraten): kg werden über das Stückgewicht geschätzt.</div>
+      <div class="klein" style="margin-bottom:6px">Anzahl × g ergibt die Menge automatisch (z. B. 6 × 500 g). Nur Anzahl (z. B. 4 Rostbraten): kg werden über das Stückgewicht geschätzt. <b>Vakuumieren ist bei allen Einzelartikeln vorbelegt (kostenlos)</b> – Haken bei „vak.“ rausnehmen, wenn nicht vakuumiert werden soll.</div>
       <table class="tab art-tab"><thead><tr><th>Artikel</th><th class="r">Anzahl</th><th class="r">× g</th><th class="r">= Menge</th><th></th><th class="c">am Stück</th><th class="c">vak.</th></tr></thead><tbody>${artRows}</tbody></table>
       <div class="summenleiste"><div class="platz" id="summe"></div>
         <button class="btn" data-act="leeren">${nr ? 'Abbrechen' : 'Leeren'}</button>
@@ -315,10 +316,10 @@ function viewBestellung(nr, q, vorlage) {
   };
   ui.ins.pos = el => {
     const a = S.artikel[+el.closest('tr').dataset.i]; const f = el.dataset.f;
-    const p = o.pos[a.name] = o.pos[a.name] || {};
+    const p = o.pos[a.name] = o.pos[a.name] || { vak: true };
     if (el.type === 'checkbox') p[f] = el.checked;
     else p[f] = el.value.trim() === '' ? null : num(el.value);
-    if (!has(p.menge) && !has(p.anzahl) && !has(p.g) && !p.amStueck && !p.vak) delete o.pos[a.name];
+    if (!has(p.menge) && !has(p.anzahl) && !has(p.g) && !p.amStueck && p.vak !== false) delete o.pos[a.name];
     ui.formDirty = true; aktualisieren();
   };
   ui.acts.step = el => {
@@ -404,7 +405,7 @@ async function bestellungSpeichern(o) {
     const a = art(S, k);
     if (!a) { delete o.pos[k]; continue; }
     if (a.einheit !== 'Stk' && !a.beutelG && num(p.anzahl) > 0 && num(p.g) > 0) p.menge = null; // automatisch
-    if (!has(p.menge) && !has(p.anzahl) && !p.amStueck && !p.vak) delete o.pos[k];
+    if (!has(p.menge) && !has(p.anzahl) && !p.amStueck) delete o.pos[k];
   }
   o.pakete = num(o.pakete); o.pakVak = num(o.pakVak);
   if (!o.eingang) o.eingang = todayISO();

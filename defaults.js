@@ -271,7 +271,6 @@ const DEFAULTS = {
  "settings": {
   "preisPaketKg": 15,
   "preisVakPaket": 20,
-  "preisTuete": 0.3,
   "paketVon": 12,
   "paketBis": 14,
   "preislisteTitel": "Preisliste (gültig ab 01.10.2026, inkl. 7 % MwSt.)",
@@ -309,7 +308,18 @@ const DEFAULTS = {
   "hackPlatz": "vorne rechts",
   "rindWieBulle": false,
   "lagerMaxArtikel": 3,
-  "lagerMaxKg": 5
+  "lagerMaxKg": 5,
+  "preiseAb": "01.10.2026",
+  "vdName": "Bernd & Claudia Huber",
+  "vdAdresse": "Bergwiesenweg 10 · 72658 Bempflingen",
+  "vdTel": "07123 / 31543",
+  "vdMail": "huber-bempflingen@t-online.de",
+  "vdAbholung": "Freitag 9.00–11.30 und 15.00–18.00 Uhr · Samstag 9.00–11.30 Uhr",
+  "vdAbholungKurz": "Fr 9.00–11.30 + 15.00–18.00, Sa 9.00–11.30 Uhr",
+  "vdHoflaedle": "Wurst, Gemüse und viele regionale Produkte jederzeit im Hoflädle",
+  "vdHofladen": "Hofladen: Mittwoch 15.30–18.00 · Freitag 9.00–11.30 und 15.00–18.00 · Samstag 9.00–11.30 Uhr · Marktstand Neuffen: Samstag 8.00–12.00 Uhr",
+  "vdMotto": "Extensiv aus Überzeugung",
+  "kistePfand": 10
  },
  "auto": [
   {

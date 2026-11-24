@@ -226,15 +226,16 @@ function portionenOf(S, o) {
   return out;
 }
 const portionOf = (S, o, name) => portionenOf(S, o).find(p => p.art === name);
-// Vakuum-Artikel
-const vakArtikel = (S, o) => S.artikel.filter(a => { const p = o.pos && o.pos[a.name]; return p && p.vak && qty(S, o, a.name) > 0; }).map(a => a.name);
+// Vakuum-Artikel – seit 1.8.1 Standard: vakuumiert, außer ausdrücklich abgewählt (vak: false)
+const istVak = p => !!p && p.vak !== false;
+const vakArtikel = (S, o) => S.artikel.filter(a => { const p = o.pos && o.pos[a.name]; return istVak(p) && qty(S, o, a.name) > 0; }).map(a => a.name);
 // Vakuum-Tüten (leer = automatisch)
 function tuetenAuto(S, o) {
   let t = 0;
   const std = num(S.settings.tueteJeKg) > 0 ? num(S.settings.tueteJeKg) : 1;
   for (const a of S.artikel) {
     const p = o.pos && o.pos[a.name];
-    if (!p || !p.vak || !has(p.menge) && !has(p.anzahl)) continue;
+    if (!istVak(p) || !has(p.menge) && !has(p.anzahl)) continue;
     const q = qty(S, o, a.name);
     if (!(q > 0)) continue;
     if (a.beutelG > 0 || a.einheit === 'Stk') t += num(p.menge);
@@ -250,7 +251,6 @@ function schaetzpreis(S, o) {
   let p = num(o.pakete) * paketGewicht(S) * num(st.preisPaketKg) + num(o.pakVak) * num(st.preisVakPaket);
   // alle Preise in €/kg; Stück-Artikel (Nieren, Herz, Zunge, Bäckle, Ochsenschwanz): Anzahl × Stückgewicht × €/kg
   for (const a of S.artikel) p += kgVon(S, o, a) * num(a.preis);
-  p += tueten(S, o) * num(st.preisTuete);
   return r2(p);
 }
 // Bestelltext wie Spalte AJ
@@ -390,7 +390,7 @@ function bestellungTeilen(S, o, mengen, ziel) {
       continue;
     }
     const p = o.pos[r.key];
-    const np = neu.pos[r.key] = { menge: null, anzahl: null, g: p.g || null, amStueck: !!p.amStueck, vak: !!p.vak };
+    const np = neu.pos[r.key] = { menge: null, anzahl: null, g: p.g || null, amStueck: !!p.amStueck, vak: istVak(p) };
     if (r.feld === 'anzahl') { np.anzahl = m; p.anzahl = r3(num(p.anzahl) - m); if (!(p.anzahl > 0)) delete o.pos[r.key]; }
     else { np.menge = m; p.menge = r3(num(p.menge) - m); if (!(p.menge > 0)) delete o.pos[r.key]; }
   }
@@ -1207,7 +1207,7 @@ function hofladenSummen(S, jahr) {
 function leererStand() {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   return {
-    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 5, gespeichert: null,
+    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 7, gespeichert: null,
     artikel: d.artikel, settings: d.settings, auto: d.auto, wege: d.wege,
     kunden: [], tiere: [], bestellungen: [], kisten: [], hofladen: [],
     metzgerManuell: {}, packplaene: {}, letzteSicherung: null
@@ -1267,6 +1267,13 @@ function standPruefen(x) {
     if (a) a.amStueck = true;
     x.schema = 6;
   }
+  // Version 1.8.1: Einzelartikel werden standardmäßig vakuumiert (kostenlos), 0,30 €/Tüte entfällt.
+  // Bestehende Bestellungen behalten ihre bisherige Wahl: fehlendes Häkchen = ausdrücklich nicht vakuumieren.
+  if (!(altSchema >= 7)) {
+    (x.bestellungen || []).forEach(o => Object.values(o.pos || {}).forEach(p => { if (p && p.vak !== true) p.vak = false; }));
+    x.schema = 7;
+  }
+  delete x.settings.preisTuete;
   // Version 1.6.4: Innereien nach Stück werden in €/kg berechnet → geschätztes Stückgewicht
   const stkG = { Nieren: 700, Herz: 2500, Zunge: 1500, 'Bäckle': 400, Ochsenschwanz: 2000 };
   (x.artikel || []).forEach(a => { if (a.einheit === 'Stk' && !(num(a.stueckG) > 0) && stkG[a.name]) a.stueckG = stkG[a.name]; });
@@ -1275,7 +1282,7 @@ function standPruefen(x) {
 
 if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
-  art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel,
+  art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
