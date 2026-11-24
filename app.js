@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.0';
+const APP_VERSION = '3.0.1';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -250,11 +250,14 @@ function viewStart() {
 function tierKarte(t) {
   const i = tierInfo(S, t);
   const nen = i.maxPak || 1;
-  const pct = Math.min(100, i.pakete / nen * 100);
+  // Balken = verkauft (Fleisch + Knochen) wie in der Mengenprüfung; bei gemeinsamer Abholung für den ganzen Topf
+  const mp = mengenpruefung(S, t.name), q = mp && mp.summen && mp.summen.gesamt.quote !== null ? mp.summen.gesamt.quote : 0;
+  const pct = Math.min(100, q * 100), topf = mp && mp.tier && mp.tier.glieder ? mp.tier.name : '';
   return `<div class="karte tierkarte" data-act="tier" data-t="${esc(t.name)}">
     <div class="kopfz"><span class="name">${esc(t.name)}</span><span class="klein">${esc(t.typ || '')}</span></div>
     <div class="klein">Abholung: <b>${t.abhol ? fmtDate(t.abhol) : 'offen'}</b>${t.schlacht ? ' · Schlachtung ' + fmtDate(t.schlacht) : ''}</div>
-    <div class="balken ${i.frei < 0 ? 'ueber' : i.frei === 0 ? 'voll' : ''}"><div style="width:${pct}%"></div></div>
+    <div class="balken ${q > 1.0001 ? 'ueber' : q >= 0.9999 ? 'voll' : ''}"><div style="width:${pct}%"></div></div>
+    <div class="klein">verkauft: <b>${fmtNum(q * 100, 0)} %</b>${topf ? ` <span class="klein">(${esc(topf)} zusammen)</span>` : ''}</div>
     <div class="klein">Genusspakete: <b>${fmtNum(i.pakete)}</b> von ${nen} · frei ${fmtNum(i.frei)}</div>
     <div class="klein">${i.anzahl} Bestellungen${i.reichtNicht ? ` · <span class="warn">${i.reichtNicht} reicht nicht</span>` : ''}${i.ueberbelegt ? ` · <span class="klein">${i.ueberbelegt} bewusst überbelegt</span>` : ''}</div></div>`;
 }
