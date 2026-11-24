@@ -129,9 +129,9 @@ const DEFAULTS = {
    "stueckG": 0,
    "amStueck": false,
    "beutelG": 800,
-   "anteil": 0,
+   "anteil": 0.0357,
    "teile": "",
-   "anteilRind": 0
+   "anteilRind": 0.05
   },
   {
    "name": "Soßenknochen (FK)",
@@ -141,9 +141,9 @@ const DEFAULTS = {
    "stueckG": 0,
    "amStueck": false,
    "beutelG": 1000,
-   "anteil": 0,
+   "anteil": 0.0238,
    "teile": "",
-   "anteilRind": 0
+   "anteilRind": 0.0333
   },
   {
    "name": "Leber",

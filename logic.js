@@ -62,8 +62,12 @@ const einheitForm = a => a.beutelG > 0 ? 'Btl' : a.einheit; // wie im Eingabebla
 // Anteil am Schlachtgewicht: Bulle = a.anteil; Rind = a.anteilRind (oder Bulle-Werte, wenn „Werte übernehmen“)
 // ---------- Genusspaket: feste Zusammensetzung (Einstellungen → Genusspaket) ----------
 const paketListe = S => Array.isArray(S.settings.paket) ? S.settings.paket.filter(p => p && p.art) : [];
-const paketKgArt = (S, name) => paketListe(S).filter(p => p.art === name).reduce((s, p) => s + num(p.anzahl) * num(p.g) / 1000, 0);
-const paketGewicht = S => paketListe(S).reduce((s, p) => s + num(p.anzahl) * num(p.g) / 1000, 0);
+// Einzelgewicht eines Artikels (Stückgewicht bzw. Beutelgröße aus der Preisliste) – gilt auch im Genusspaket
+const einzelGewicht = (S, name) => { const a = art(S, name); return !a ? 0 : num(a.beutelG) > 0 ? num(a.beutelG) : num(a.stueckG) > 0 ? num(a.stueckG) : 0; };
+const paketG = (S, p) => einzelGewicht(S, p.art) || num(p.g);
+const gText = g => g >= 1000 ? fmtNum(g / 1000, 2) + ' kg' : fmtNum(g) + ' g';
+const paketKgArt = (S, name) => paketListe(S).filter(p => p.art === name).reduce((s, p) => s + num(p.anzahl) * paketG(S, p) / 1000, 0);
+const paketGewicht = S => paketListe(S).reduce((s, p) => s + num(p.anzahl) * paketG(S, p) / 1000, 0);
 const imPaket = (S, name) => paketKgArt(S, name) > 0;
 const paketStueck = (S, name) => paketListe(S).filter(p => p.art === name).reduce((s, p) => s + num(p.anzahl), 0);
 // Hack im Paket: offen = 1 Tüte, vakuumiert = Portionen à hackPaketG
@@ -568,8 +572,6 @@ function packplan(S, tierName) {
   }
   const A = S.artikel.map(a => {
     let yt = yieldArt(S, t, a.name);
-    if (a.name === SK) yt = num(st.skKg);
-    if (a.name === FK) yt = num(st.fkKg);
     const isOrg = istOrgan(a.name);
     const shr = paketKgArt(S, a.name); // je Genusspaket (feste Zusammensetzung)
     let kg = 0;
@@ -802,7 +804,7 @@ function kommissionierung(S, nr) {
         else {
           const po = portionOf(S, o, c.k.art); if (po) verp = (po.kg > 0 ? `einzeln ${fmtNum(po.kg, 2)} kg als ` : '') + po.text;
           const pz = num(o.pakete) > 0 ? paketListe(S).filter(x => x.art === c.k.art) : [];
-          if (pz.length) verp += (verp ? ' · ' : '') + 'Paket: ' + pz.map(x => `${fmtNum(num(o.pakete) * num(x.anzahl))} × ${num(x.g) >= 1000 ? fmtNum(num(x.g) / 1000, 2) + ' kg' : fmtNum(num(x.g)) + ' g'}`).join(' + ');
+          if (pz.length) verp += (verp ? ' · ' : '') + 'Paket: ' + pz.map(x => `${fmtNum(num(o.pakete) * num(x.anzahl))} × ${gText(paketG(S, x))}`).join(' + ');
         }
         picks.push({ kiste: c.k.nr, menge: r1(m), einheit: c.einheit, art: c.k.art, verpacken: verp, platz: c.k.platz || '' });
       }
@@ -925,7 +927,7 @@ function hofladenSummen(S, jahr) {
 function leererStand() {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   return {
-    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 3, gespeichert: null,
+    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 4, gespeichert: null,
     artikel: d.artikel, settings: d.settings, auto: d.auto, wege: d.wege,
     kunden: [], tiere: [], bestellungen: [], kisten: [], hofladen: [],
     metzgerManuell: {}, packplaene: {}, letzteSicherung: null
@@ -949,6 +951,16 @@ function standPruefen(x) {
   (x.artikel || []).forEach(a => { if (a.name === GULASCH && a.teile === 'Kamm/Hals, Hesse') a.teile = 'Kamm/Hals'; });
   if (x.settings.rindWieBulle === undefined) x.settings.rindWieBulle = true;
   if (!(altSchema >= 3)) { if (num(x.settings.sgRind) === 320) x.settings.sgRind = 300; x.schema = 3; }
+  // Version 1.6.2: Knochen je Tier als Anteil am Schlachtgewicht (bisher feste kg je Tier)
+  if (!(altSchema >= 4)) {
+    const r4 = v => Math.round(v * 10000) / 10000;
+    for (const [n, f] of [[SK, 'skKg'], [FK, 'fkKg']]) {
+      const a = (x.artikel || []).find(y => y.name === n);
+      const kg = num(x.settings[f]);
+      if (a && !(num(a.anteil) > 0) && kg > 0) { a.anteil = r4(kg / (num(x.settings.sgBulle) || 420)); a.anteilRind = r4(kg / (num(x.settings.sgRind) || 300)); }
+    }
+    x.schema = 4;
+  }
   return x;
 }
 
