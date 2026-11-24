@@ -266,13 +266,13 @@ function portionenOf(S, o) {
     const p = o.pos && o.pos[a.name];
     if (!p) continue;
     const pk = a.beutelG > 0 || a.einheit === 'Stk' ? null : packGilt(S, a, p);
-    if (pk) { out.push({ art: a.name, anzahl: pk.packungen, g: pk.teile.length === 1 && pk.teile[0].g ? pk.teile[0].g : null, text: pk.text, kg: pk.kg, pack: true }); continue; }
+    if (pk) { out.push({ art: a.name, anzahl: pk.packungen, g: pk.teile.length === 1 && pk.teile[0].g ? pk.teile[0].g : null, text: pk.text, kg: pk.kg, pack: true, stk: pk.teile.every(x => x.stk) ? pk.stk : 0 }); continue; }
     if (a.beutelG > 0 && num(p.menge) > 0) {
       out.push({ art: a.name, anzahl: num(p.menge), g: a.beutelG, text: `${fmtNum(p.menge)} × ${fmtNum(a.beutelG)} g`, kg: r3(num(p.menge) * a.beutelG / 1000) });
     } else if (a.einheit !== 'Stk' && num(p.anzahl) > 0) {
       const g = num(p.g);
       const kgG = g > 0 ? g : posStueckG(S, a, p, o);
-      out.push({ art: a.name, anzahl: num(p.anzahl), g: g || null, text: g > 0 ? `${fmtNum(p.anzahl)} × ${fmtNum(g)} g` : istWade(a, p) ? `${fmtNum(p.anzahl)} ${num(p.anzahl) > 1 ? 'Waden' : 'Wade'} am Stück` : `${fmtNum(p.anzahl)} Stück`, kg: kgG > 0 ? r3(num(p.anzahl) * kgG / 1000) : 0 });
+      out.push({ art: a.name, anzahl: num(p.anzahl), g: g || null, stk: !(g > 0) && !istWade(a, p) ? num(p.anzahl) : 0, text: g > 0 ? `${fmtNum(p.anzahl)} × ${fmtNum(g)} g` : istWade(a, p) ? `${fmtNum(p.anzahl)} ${num(p.anzahl) > 1 ? 'Waden' : 'Wade'} am Stück` : `${fmtNum(p.anzahl)} Stück`, kg: kgG > 0 ? r3(num(p.anzahl) * kgG / 1000) : 0 });
     }
   }
   return out;
@@ -352,7 +352,8 @@ function bestellText(S, o) {
     if (q > 0) {
       const po = portionOf(S, o, a.name);
       const ochsTxt = a.name === OCHS ? (o.pos[a.name] && o.pos[a.name].amStueck && a.amStueck ? ' (ganz)' : ' (geschnitten)') : '';
-      t.push(`${fmtNum(q, 3)} ${a.einheit === 'Stk' ? 'Stk' : 'kg'} ${a.name}${po ? ' (' + po.text + ')' : ''}${ochsTxt}`);
+      if (po && po.stk > 0) t.push(`${fmtNum(po.stk)} ${a.name} (${po.pack ? po.text + ', ' : ''}ca. ${fmtNum(q, 1)} kg)`); // nach Stück bestellt: Stückzahl vorne
+      else t.push(`${fmtNum(q, 3)} ${a.einheit === 'Stk' ? 'Stk' : 'kg'} ${a.name}${po ? ' (' + po.text + ')' : ''}${ochsTxt}`);
     }
   }
   const nv = nichtVak(S, o);
@@ -722,7 +723,7 @@ function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
 // Fest bleiben: gepackte/abgeholte Bestellungen, Tiere mit Kistenplan, bewusst überbelegte Bestellungen.
 // Passt eine Bestellung nirgends, bleibt sie, wo sie war. Ergebnis nur als Vorschlag (S bleibt unverändert).
 const tageZwischen = (von, bis) => Math.round((new Date(bis + 'T12:00:00') - new Date(von + 'T12:00:00')) / 864e5);
-function neuVerteilenPlan(S) {
+function neuVerteilenPlan(S, fest) {
   const heute = todayISO();
   const maxTage = has(S.settings.verteilenMaxTage) && num(S.settings.verteilenMaxTage) >= 0 ? num(S.settings.verteilenMaxTage) : 5;
   const T = JSON.parse(JSON.stringify(S));
@@ -730,7 +731,7 @@ function neuVerteilenPlan(S) {
   const mitKisten = new Set((T.kisten || []).filter(k => kisteGewogen(k)).map(k => k.tier));
   const mitPlan = new Set((T.kisten || []).map(k => k.tier).filter(n => !mitKisten.has(n)));
   const freiesTier = t => !!t && !t.archiv && !mitKisten.has(t.name);
-  const beweglich = o => o.name && (o.status || 'offen') === 'offen' && !o.ueberbelegt &&
+  const beweglich = o => o.name && (o.status || 'offen') === 'offen' && !o.ueberbelegt && !(fest && fest.has(o.nr)) &&
     (o.tier === 'Warteliste' || !o.tier || freiesTier(tier(T, o.tier)));
   const bew = T.bestellungen.filter(beweglich)
     .sort((a, b) => String(a.eingang || '').localeCompare(String(b.eingang || '')) || a.nr - b.nr);
@@ -1501,7 +1502,7 @@ function kommissionierung(S, nr) {
         if (c.k.art === HACK) verp = 'vom Hack-Tisch (fertig verpackt)';
         else if (c.k.art === OCHS) verp = ochsGanz(S, o) ? 'ganz – wiegen, Preis nach kg' : 'geschnitten – wiegen, Preis nach kg';
         else {
-          const po = portionOf(S, o, c.k.art); if (po) verp = (po.kg > 0 ? `einzeln ${fmtNum(po.kg, 2)} kg als ` : '') + po.text;
+          const po = portionOf(S, o, c.k.art); if (po) verp = po.stk > 0 ? `einzeln ${fmtNum(po.stk)} Stück${po.pack ? ' (' + po.text + ')' : ''}, ca. ${fmtNum(po.kg, 1)} kg` : (po.kg > 0 ? `einzeln ${fmtNum(po.kg, 2)} kg als ` : '') + po.text;
           const pz = num(o.pakete) > 0 ? paketListe(S).filter(x => x.art === c.k.art) : [];
           if (pz.length) verp += (verp ? ' · ' : '') + 'Paket: ' + pz.map(x => `${fmtNum(num(o.pakete) * num(x.anzahl))} × ${gText(paketG(S, x))}`).join(' + ');
         }

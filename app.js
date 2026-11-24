@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '2.7';
+const APP_VERSION = '2.8';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -122,32 +122,41 @@ document.addEventListener('input', e => { const el = e.target.closest('[data-in]
 document.addEventListener('change', e => { const el = e.target.closest('[data-ch]'); if (el && ui.acts[el.dataset.ch]) ui.acts[el.dataset.ch](el, e); });
 
 // ---------- Offene Bestellungen neu verteilen (Vorschau, dann übernehmen) ----------
-async function neuVerteilenDialog(nurWennWechsel) {
-  const plan = neuVerteilenPlan(S);
+// fest: Bestellungen, die abgewählt wurden (bleiben, wo sie sind – z. B. auf der Warteliste)
+async function neuVerteilenDialog(nurWennWechsel, fest = new Set(), hinweis = '') {
+  const plan = neuVerteilenPlan(S, fest);
   if (nurWennWechsel && !plan.wechsel.length) return false;
   const reicht = c => !c ? '' : c === 'ok' ? '<span class="ok">ok</span>' : `<span class="warn">${esc(c)}</span>`;
   const bleibtNicht = plan.zeilen.filter(z => sameText(z.von, z.nach) && z.check && z.check !== 'ok');
-  const html = `<p>Geprüft: <b>${plan.zeilen.length}</b> offene Bestellungen (alle Tiere ohne gewogene Kisten und Warteliste), in Reihenfolge des Eingangs.
+  const abgew = [...fest].map(nr => S.bestellungen.find(o => o.nr === nr)).filter(Boolean);
+  const zeile = (nr, an, name, eingang, von, nach, check) => `<tr><td class="c"><label class="check"><input type="checkbox" id="vt_${nr}"${an ? ' checked' : ''}></label></td><td class="r fett">${nr}</td><td>${esc(name)}</td><td>${fmtDate(eingang)}</td><td>${esc(von)}</td><td>→</td><td class="fett">${esc(nach)}</td><td>${check}</td></tr>`;
+  const html = `${hinweis ? `<div class="hinweis">${esc(hinweis)}</div>` : ''}<p>Geprüft: <b>${plan.zeilen.length}</b> offene Bestellungen (alle Tiere ohne gewogene Kisten und Warteliste), in Reihenfolge des Eingangs.
       ${plan.festTiere.length ? `<br><span class="klein">Fest (Kisten schon gewogen): ${plan.festTiere.map(esc).join(', ')} · gepackte und bewusst überbelegte Bestellungen bleiben, wo sie sind.</span>` : ''}</p>
-    ${plan.wechsel.length ? `<p><b>${plan.wechsel.length} Bestellung${plan.wechsel.length === 1 ? '' : 'en'} wechseln das Tier:</b></p>
-    <div class="tabwrap" style="max-height:50vh;overflow:auto"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Eingang</th><th>bisher</th><th></th><th>neu</th><th>Mengencheck</th></tr></thead><tbody>
-    ${plan.wechsel.map(z => `<tr><td class="r fett">${z.nr}</td><td>${esc(z.name)}</td><td>${fmtDate(z.eingang)}</td><td>${esc(z.von)}</td><td>→</td><td class="fett">${esc(z.nach)}</td><td>${reicht(z.check)}</td></tr>`).join('')}
+    ${plan.wechsel.length || abgew.length ? `<p><b>${plan.wechsel.length} Bestellung${plan.wechsel.length === 1 ? '' : 'en'} wechseln das Tier</b> <span class="klein">– Häkchen raus = bleibt, wo sie ist (z. B. auf der Warteliste)</span></p>
+    <div class="tabwrap" style="max-height:50vh;overflow:auto"><table class="tab"><thead><tr><th class="c">✓</th><th class="r">Nr.</th><th>Name</th><th>Eingang</th><th>bisher</th><th></th><th>neu</th><th>Mengencheck</th></tr></thead><tbody>
+    ${plan.wechsel.map(z => zeile(z.nr, true, z.name, z.eingang, z.von, z.nach, reicht(z.check))).join('')}
+    ${abgew.map(o => zeile(o.nr, false, o.name, o.eingang, o.tier || 'Warteliste', o.tier || 'Warteliste', '<span class="klein">abgewählt – bleibt</span>')).join('')}
     </tbody></table></div>` : '<p class="ok"><b>Alles passt – keine Bestellung muss das Tier wechseln.</b></p>'}
     ${bleibtNicht.length ? `<p class="warn">Weiter „reicht nicht“ (kein Tier passt, bleibt wo sie war): ${bleibtNicht.map(z => 'Nr. ' + z.nr + ' ' + esc(z.name)).join(', ')}</p>` : ''}`;
   const planHtml = plan.planNeu.length ? `<p class="klein">Kistenplan wird danach automatisch neu berechnet: <b>${plan.planNeu.map(esc).join(', ')}</b> (noch nichts gewogen).</p>` : '';
   const tageHtml = `<div class="zeile" style="gap:8px;align-items:center;margin:4px 0 8px"><span class="klein">Mit Wunschtermin höchstens</span><input id="vtTage" class="feld zahl" inputmode="numeric" style="width:70px" value="${plan.maxTage}"><span class="klein">Tage vor dem Wunschtermin – sonst Warteliste</span></div>`;
-  const kn = [{ k: 'x', t: plan.wechsel.length ? 'Abbrechen' : 'Schließen' }, { k: 'tage', t: 'Tage übernehmen & neu prüfen' }];
-  if (plan.wechsel.length) kn.push({ k: 'ok', t: `${plan.wechsel.length} übernehmen`, cls: 'haupt' });
+  const kn = [{ k: 'x', t: plan.wechsel.length ? 'Abbrechen' : 'Schließen' }, { k: 'tage', t: 'Neu prüfen' }];
+  if (plan.wechsel.length) kn.push({ k: 'ok', t: 'Angehakte übernehmen', cls: 'haupt' });
   const { k, werte } = await dialogFelder('Offene Bestellungen neu verteilen', tageHtml + html + planHtml, kn);
-  if (k === 'tage' || (k === 'ok' && werte.vtTage !== undefined && num(werte.vtTage) !== plan.maxTage)) {
-    S.settings.verteilenMaxTage = Math.max(0, Math.round(num(werte.vtTage))); speichern();
-    return neuVerteilenDialog(false);
-  }
-  if (k !== 'ok') return false;
+  if (k !== 'ok' && k !== 'tage') return false;
+  // Auswahl auswerten: abgewählte festhalten, wieder angehakte freigeben
+  const neuFest = new Set(fest);
+  plan.wechsel.forEach(z => { if (werte['vt_' + z.nr] === false) neuFest.add(z.nr); });
+  abgew.forEach(o => { if (werte['vt_' + o.nr] === true) neuFest.delete(o.nr); });
+  const tageNeu = werte.vtTage !== undefined && num(werte.vtTage) !== plan.maxTage;
+  if (tageNeu) { S.settings.verteilenMaxTage = Math.max(0, Math.round(num(werte.vtTage))); speichern(); }
+  const auswahlNeu = neuFest.size !== fest.size || [...neuFest].some(n => !fest.has(n));
+  // Ändert sich Auswahl oder Tage, wird neu gerechnet (die übrigen können dann andere Tiere bekommen) – bitte nochmal ansehen
+  if (k === 'tage' || tageNeu || auswahlNeu) return neuVerteilenDialog(false, neuFest, k === 'ok' ? 'Auswahl geändert – die Verteilung wurde neu berechnet. Bitte kurz prüfen und dann übernehmen.' : '');
   neuVerteilenUebernehmen(S, plan);
   const kp = plan.planNeu.length ? kistenplaeneAktualisieren(S, plan.planNeu) : { neu: [], weg: [] };
   speichern();
-  meldung(`${plan.wechsel.length} Bestellung(en) neu zugeordnet.` + (kp.neu.length ? ` Kistenplan neu: ${kp.neu.join(', ')}.` : '') + (kp.weg.length ? ` Kisten zurückgesetzt: ${kp.weg.join(', ')}.` : '')); render();
+  meldung(`${plan.wechsel.length} Bestellung(en) neu zugeordnet${fest.size ? `, ${fest.size} bleiben wie sie sind` : ''}.` + (kp.neu.length ? ` Kistenplan neu: ${kp.neu.join(', ')}.` : '') + (kp.weg.length ? ` Kisten zurückgesetzt: ${kp.weg.join(', ')}.` : '')); render();
   return true;
 }
 ui.globalActs = { neuverteilen: () => neuVerteilenDialog(false) };

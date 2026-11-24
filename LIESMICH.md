@@ -1,6 +1,6 @@
 # Bestellsystem Bergwiesenhof – Tablet-App
 
-Version 2.7 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
+Version 2.8 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
 
 Die App ersetzt die Excel-Datei mit allen Makros. Sie läuft nach der Installation **komplett offline**.
 Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in die Cloud und für Updates.
@@ -29,6 +29,7 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 | – (2.4) | **Kisten zurücksetzen** unter Kisten & Ladeplan; Hinweis, wenn der Kistenplan nicht mehr zu den Bestellungen passt; beim Neu-Verteilen können ungewogene Kistenpläne mit zurückgesetzt werden |
 | – (2.5) | **Neu verteilen** berücksichtigt die Kisten zuerst: fest sind nur Tiere mit gewogenen Kisten; ungewogene Kistenpläne der betroffenen Tiere werden danach automatisch neu berechnet bzw. zurückgesetzt |
 | – (2.7) | **Wunschtermin-Regel** (Neu verteilen und automatische Tier-Wahl in der Bestellung): nur Tiere höchstens 5 Tage vor dem Wunschtermin (im Verteilen-Dialog änderbar), sonst Warteliste |
+| – (2.8) | Nach Stück bestellt: Anzeige „40 Rouladen (ca. 8 kg)“; **Neu verteilen** mit Häkchen je Bestellung – abgewählte bleiben, wo sie sind |
 | Preisliste, Ausbeute, Auto | **Einstellungen** |
 | Bestellformular A4/A5, Infozettel (PDF) | **Übersicht → Vordrucke drucken** (Preise automatisch aus der Preisliste; jede Preisliste = eigene Version der Zettel, frühere im Archiv) |
 | Mappe zurücksetzen | **Einstellungen → Daten & Sicherung** (ein „Neues Jahr“ gibt es nicht mehr – Bestellungen laufen über den Jahreswechsel einfach weiter) |
