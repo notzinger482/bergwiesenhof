@@ -6,6 +6,8 @@
 const ORGANE = ['Leber', 'Nieren', 'Herz', 'Zunge', 'Bäckle'];
 // Ochsenschwanz: nach Stück bestellt, läuft aber über Metzgerauftrag und Kisten (gemeinsam mit den Beinscheiben)
 const OCHS = 'Ochsenschwanz';
+// Ochsenschwanz der Bestellung ganz lassen? (Häkchen „am Stück“)
+const ochsGanz = (S, o) => { const a = S.artikel.find(x => x.name === OCHS); const p = o.pos && o.pos[OCHS]; return !!(a && a.amStueck && p && p.amStueck); };
 const BEIN = 'Beinscheiben';
 const HACK = 'Hackfleisch';
 const GULASCH = 'Gulasch geschnitten';
@@ -130,7 +132,7 @@ function sonderOf(S, o) {
   const out = [];
   for (const a of S.artikel) {
     const p = o.pos && o.pos[a.name];
-    if (p && p.amStueck && a.amStueck) {
+    if (p && p.amStueck && a.amStueck && a.name !== OCHS) {
       const q = qty(S, o, a.name);
       let w = istWade(a, p) ? 'Wade am Stück' : 'am Stück';
       if (istWade(a, p)) { if (num(p.anzahl) > 0) w = `${fmtNum(p.anzahl)} ${num(p.anzahl) > 1 ? 'Waden' : 'Wade'} am Stück`; }
@@ -198,7 +200,8 @@ function bestellText(S, o) {
     const q = qty(S, o, a.name);
     if (q > 0) {
       const po = portionOf(S, o, a.name);
-      t.push(`${fmtNum(q, 3)} ${a.einheit === 'Stk' ? 'Stk' : 'kg'} ${a.name}${po ? ' (' + po.text + ')' : ''}`);
+      const ochsTxt = a.name === OCHS ? (o.pos[a.name] && o.pos[a.name].amStueck && a.amStueck ? ' (ganz)' : ' (geschnitten)') : '';
+      t.push(`${fmtNum(q, 3)} ${a.einheit === 'Stk' ? 'Stk' : 'kg'} ${a.name}${po ? ' (' + po.text + ')' : ''}${ochsTxt}`);
     }
   }
   const tu = tueten(S, o);
@@ -670,7 +673,9 @@ function metzgerauftrag(S, tierName) {
   }
   const waden = ords.reduce((s, o) => { const p = o.pos && o.pos[BEIN]; return s + (istWade(art(S, BEIN), p) ? num(p.anzahl) : 0); }, 0);
   const ochsB = ords.reduce((s, o) => s + qty(S, o, OCHS), 0);
-  const ochs = { bestellt: ochsB, vorhanden: has(S.settings.ochsStk) ? num(S.settings.ochsStk) : 1 };
+  // Ochsenschwanz: nur „am Stück“ bestellte bleiben ganz (Zeile im Metzgerauftrag), alle anderen schneidet der Metzger wie gewohnt
+  const ochsGanzListe = ords.filter(o => qty(S, o, OCHS) > 0 && ochsGanz(S, o)).map(o => ({ nr: o.nr, name: o.name, stk: qty(S, o, OCHS) }));
+  const ochs = { bestellt: ochsB, vorhanden: has(S.settings.ochsStk) ? num(S.settings.ochsStk) : 1, ganz: ochsGanzListe.reduce((s, x) => s + x.stk, 0), ganzListe: ochsGanzListe };
   return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, waden, ochs };
 }
 
@@ -690,7 +695,7 @@ function kisteGruppe(items) {
   }
   return g === -1 ? 0 : g;
 }
-const kistenTxt = items => items.map(i => i.art === OCHS ? `${OCHS} ${fmtNum(i.kg)} Stk` : `${i.art}${i.info ? ' (' + i.info + ')' : ''} ~${Math.round(i.kg)} kg`).join(' + ');
+const kistenTxt = items => items.map(i => i.art === OCHS ? `${OCHS} ${fmtNum(i.kg)} Stk${i.info ? ' (' + i.info + ')' : ''}` : `${i.art}${i.info ? ' (' + i.info + ')' : ''} ~${Math.round(i.kg)} kg`).join(' + ');
 function packplan(S, tierName) {
   const t = tier(S, tierName);
   if (!t) return { fehler: 'Tier unbekannt' };
@@ -822,7 +827,7 @@ function packplan(S, tierName) {
     ords.forEach((o, k) => { if (needO === BIG && qty(S, o, OCHS) > 0) needO = k + 1; });
     let c = C.find(c => c.items.some(i => i.art === BEIN));
     if (!c) { c = { items: [], w: 0, need: needO }; C.push(c); }
-    c.items.push({ art: OCHS, kg: ochsN, info: '' });
+    c.items.push({ art: OCHS, kg: ochsN, info: ma.ochs.ganz > 0 ? `${fmtNum(ma.ochs.ganz)} ganz` : '' });
     c.w += ochsN * kOchs;
     if (needO < c.need) c.need = needO;
     if (ma.ochs.bestellt > ma.ochs.vorhanden) warnVorab.push(`Ochsenschwanz: ${fmtNum(ma.ochs.bestellt)} Stk bestellt, aber nur ca. ${fmtNum(ma.ochs.vorhanden)} je Tier.`);
@@ -996,12 +1001,13 @@ function kommissionierung(S, nr) {
       if (m > 0.0001) {
         let verp = '';
         if (c.k.art === HACK) verp = 'vom Hack-Tisch (fertig verpackt)';
+        else if (c.k.art === OCHS) verp = ochsGanz(S, o) ? 'ganz – wiegen, Preis nach kg' : 'geschnitten – wiegen, Preis nach kg';
         else {
           const po = portionOf(S, o, c.k.art); if (po) verp = (po.kg > 0 ? `einzeln ${fmtNum(po.kg, 2)} kg als ` : '') + po.text;
           const pz = num(o.pakete) > 0 ? paketListe(S).filter(x => x.art === c.k.art) : [];
           if (pz.length) verp += (verp ? ' · ' : '') + 'Paket: ' + pz.map(x => `${fmtNum(num(o.pakete) * num(x.anzahl))} × ${gText(paketG(S, x))}`).join(' + ');
         }
-        if (c.k.info) verp = `Kiste enthält: ${c.k.info}` + (verp ? ' · ' + verp : '');
+        if (c.k.info && c.k.art !== OCHS) verp = `Kiste enthält: ${c.k.info}` + (verp ? ' · ' + verp : '');
         picks.push({ kiste: c.k.nr, menge: r2(m + 1e-9), roh: m, einheit: c.einheit, art: c.k.art, verpacken: verp, platz: c.k.platz || '' });
       }
     }
@@ -1187,6 +1193,12 @@ function standPruefen(x) {
     (x.artikel || []).forEach(a => { if (R[a.name]) Object.assign(a, R[a.name]); });
     x.schema = 5;
   }
+  // Version 1.7.0: Ochsenschwanz kann „am Stück“ (ganz) bestellt werden
+  if (!(altSchema >= 6)) {
+    const a = (x.artikel || []).find(y => y.name === 'Ochsenschwanz');
+    if (a) a.amStueck = true;
+    x.schema = 6;
+  }
   // Version 1.6.4: Innereien nach Stück werden in €/kg berechnet → geschätztes Stückgewicht
   const stkG = { Nieren: 700, Herz: 2500, Zunge: 1500, 'Bäckle': 400, Ochsenschwanz: 2000 };
   (x.artikel || []).forEach(a => { if (a.einheit === 'Stk' && !(num(a.stueckG) > 0) && stkG[a.name]) a.stueckG = stkG[a.name]; });
@@ -1200,5 +1212,5 @@ if (typeof module !== 'undefined') module.exports = {
   tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
-  HACK, GULASCH, ORGANE, OCHS, setDefaults: d => { global.DEFAULTS = d; }
+  HACK, GULASCH, ORGANE, OCHS, ochsGanz, setDefaults: d => { global.DEFAULTS = d; }
 };

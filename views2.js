@@ -63,7 +63,8 @@ function docMetzger(ma) {
   const bl = [{ type: 'h', text: 'Gesamtmengen' },
     { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.kistenText ? `(${ma.hack.kistenText})` : ''], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', '']]
       .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Namen siehe unten']] : [])
-      .concat(ma.ochs.bestellt > 0 || ma.ochs.vorhanden > 0 ? [['Ochsenschwanz', ma.ochs.bestellt > 0 ? `${fmtNum(ma.ochs.bestellt)} Stück bestellt` : 'nicht bestellt', `ganz lassen – kommt zu den Beinscheiben in die Kiste${ma.ochs.bestellt > ma.ochs.vorhanden ? ' · ACHTUNG: mehr bestellt als vorhanden' : ''}`]] : []) }];
+      .concat(ma.ochs.ganz > 0 ? [['Ochsenschwanz', `${fmtNum(ma.ochs.ganz)} Stück ganz lassen`, `kommt zu den Beinscheiben in die Kiste – ${ma.ochs.ganzListe.map(x => 'Nr. ' + x.nr + ' ' + x.name).join(', ')}`]] : [])
+      .concat(ma.ochs.bestellt > ma.ochs.vorhanden ? [['Ochsenschwanz', `ACHTUNG: ${fmtNum(ma.ochs.bestellt)} Stück bestellt`, `aber nur ca. ${fmtNum(ma.ochs.vorhanden)} je Tier`]] : []) }];
   if (ma.hack.ueberAusbeute) bl.push({ type: 'text', bold: true, text: 'Mehr Hackfleisch als üblich: zuerst Schulterstücke (Bug) auflösen, Keulenstücke als Braten behalten.' });
   if (ma.gulasch.insHack > 0.05) bl.push({ type: 'text', text: `Kein Gulasch bestellt: ca. ${fmtNum(ma.gulasch.insHack, 0)} kg Kamm/Hals ins Hackfleisch.` });
   bl.push({ type: 'text', text: (ma.waden > 0 ? 'Übrige Hesse als Beinscheiben. ' : 'Hesse wie immer als Beinscheiben. ') + 'Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
@@ -84,7 +85,7 @@ function docKisten(tn, calc) {
   const t = tier(S, tn);
   return { title: `Kisten – ${tn}`, sub: [t ? abholTxt(t) : ''],
     blocks: [{ type: 'table', head: ['Kiste', 'Inhalt', 'kg', 'Stellplatz', 'Bedarf ges.', 'verplant', 'Rest', 'Teilstücke'], widths: [1, 2.6, 1.1, 2.4, 1.4, 1.3, 1.1, 4], align: ['r', '', 'r', '', 'r', 'r', 'r', ''],
-      rows: calc.map(c => [c.k.nr, c.k.art, c.k.art === OCHS ? fmtNum(c.k.kg, 0) + ' Stk' : fmtNum(c.k.kg, 1), c.k.platz || '', fmtNum(c.bedarf, 1), fmtNum(c.verplant, 1), fmtNum(c.rest, 1), c.teile || '']) }], footer: fussZeile() };
+      rows: calc.map(c => c.k.art === OCHS ? [c.k.nr, c.k.art, fmtNum(c.k.kg, 0) + ' Stk' + (has(c.k.gew) ? ' · ' + fmtNum(c.k.gew, 2) + ' kg' : ''), c.k.platz || '', fmtNum(c.bedarf, 0) + ' Stk', fmtNum(c.verplant, 0) + ' Stk', fmtNum(c.rest, 0) + ' Stk', c.k.info ? c.k.info + ' (am Stück bestellt)' : 'wird geschnitten'] : [c.k.nr, c.k.art, fmtNum(c.k.kg, 1), c.k.platz || '', fmtNum(c.bedarf, 1), fmtNum(c.verplant, 1), fmtNum(c.rest, 1), c.teile || '']) }], footer: fussZeile() };
 }
 function docHack(hz) {
   return { title: `Hackfleisch-Zettel – ${hz.tier.name}`, sub: [abholTxt(hz.tier), `Summe einzeln ${fmtNum(hz.sumEinzeln, 2)} kg · aus Paketen ${fmtNum(hz.sumPak, 1)} kg`],
@@ -150,8 +151,8 @@ function tabMetzger(tn, ziel, zeige) {
 // =====================================================================
 //  Kisten & Ladeplan (Packplan und Kistenliste in einem)
 // =====================================================================
-// Ochsenschwanz zählt in Stück und wird nicht gewogen
-const istGewogen = k => k.art === OCHS || !!k.gewogen || (has(k.plan) && has(k.kg) && Math.abs(num(k.kg) - num(k.plan)) > 0.001);
+// Ochsenschwanz: Stückzahl im Feld kg (Zuteilung nach Stück), Gewicht getrennt im Feld gew
+const istGewogen = k => k.art === OCHS ? has(k.gew) : !!k.gewogen || (has(k.plan) && has(k.kg) && Math.abs(num(k.kg) - num(k.plan)) > 0.001);
 // Draufsicht aus der aktuellen Kistenliste (Stellplatz-Text „hinten links, oben“ / „Mitte rechts, 2. v. u.“)
 function felderAusKisten(tn) {
   const rows = kistenRows(S, tn);
@@ -160,7 +161,7 @@ function felderAusKisten(tn) {
     rows.filter(k => sameText(String(k.platz || '').split(',')[0], f.name)).forEach(k => {
       const e = /oben/.test(k.platz) ? 99 : num((/(\d+)\./.exec(k.platz) || [])[1]);
       const x = ks[k.nr] = ks[k.nr] || { nr: k.nr, ebene: e, teile: [], gewogen: true };
-      x.teile.push(k.art === OCHS ? `${k.art} ${fmtNum(k.kg, 0)} Stk` : `${k.art} ${fmtNum(k.kg, 1)}`); if (!istGewogen(k)) x.gewogen = false;
+      x.teile.push(k.art === OCHS ? `${k.art} ${fmtNum(k.kg, 0)} Stk${has(k.gew) ? ' ' + fmtNum(k.gew, 1) + ' kg' : ''}` : `${k.art} ${fmtNum(k.kg, 1)}`); if (!istGewogen(k)) x.gewogen = false;
     });
     const liste = Object.values(ks).sort((a, b) => b.ebene - a.ebene);
     return { name: f.name, belegt: liste.length, hoehe: num(f.hoehe), kisten: liste.map((k, i) => ({ nr: k.nr, text: k.teile.join(' + '), oben: i === 0, gewogen: k.gewogen })) };
@@ -211,10 +212,10 @@ function tabKisten(tn, ziel) {
           ${calc.map(c => { const gw = istGewogen(c.k); return `<tr data-id="${c.k.id}" class="${gw ? 'gw' : ''}">
             <td style="width:58px"><input class="feld zahl" inputmode="numeric" data-ch="kf" data-f="nr" value="${c.k.nr}"></td>
             <td><select class="feld" data-ch="kf" data-f="art">${kistenArtOpt(c.k.art)}</select>${c.teile ? `<div class="klein teile">${esc(c.teile)}</div>` : ''}</td>
-            <td class="r klein">${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}</td>
-            <td style="width:96px">${c.k.art === OCHS ? `<input class="feld zahl" inputmode="numeric" data-ch="kf" data-f="kg" value="${fmtIn(c.k.kg, 0)}" title="Anzahl Ochsenschwänze – nicht wiegen"><div class="klein">Stück, nicht wiegen</div>` : `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="kg" value="${gw ? fmtIn(c.k.kg, 2) : ''}" placeholder="${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}">`}</td>
+            <td class="r klein">${has(c.k.plan) ? (c.k.art === OCHS ? fmtNum(c.k.plan, 0) + ' Stk' : fmtNum(c.k.plan, 1)) : ''}</td>
+            <td style="width:96px">${c.k.art === OCHS ? `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="gew" value="${has(c.k.gew) ? fmtIn(c.k.gew, 2) : ''}" placeholder="kg" title="Ochsenschwanz gewogen (kg)"><div class="klein">Stück: <input class="feld zahl klein" style="width:44px;padding:2px 4px;min-height:0" inputmode="numeric" data-ch="kf" data-f="kg" value="${fmtIn(c.k.kg, 0)}" title="Anzahl Ochsenschwänze"></div>` : `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="kg" value="${gw ? fmtIn(c.k.kg, 2) : ''}" placeholder="${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}">`}</td>
             <td style="width:150px"><input class="feld klein" data-ch="kf" data-f="platz" value="${esc(c.k.platz || '')}"></td>
-            <td class="r fett">${fmtNum(c.rest, 1)}</td>
+            <td class="r fett">${c.k.art === OCHS ? fmtNum(c.rest, 0) + ' Stk' : fmtNum(c.rest, 1)}</td>
             <td style="width:44px"><button class="btn klein rot" data-act="kweg" data-id="${c.k.id}">✕</button></td></tr>`; }).join('')}
           </tbody></table></div>
           <div class="knopfleiste" style="padding:10px 12px"><button class="btn klein" data-act="kneu">+ Kistenzeile</button><span class="platz"></span><button class="btn braun klein" data-act="abschluss">Tier abgeschlossen → Reste an Hofladen</button></div>
@@ -234,6 +235,8 @@ function tabKisten(tn, ziel) {
   ui.acts.kf = el => {
     const k = find(el.closest('tr').dataset.id); const f = el.dataset.f;
     if (f === 'nr') { const n = Math.round(num(el.value)); if (n < 1 || n > 29) { meldung('Kistennummer 1 bis 29', true); render(); return; } k.nr = n; }
+    else if (f === 'gew') { k.gew = el.value.trim() === '' ? null : num(el.value); }
+    else if (f === 'kg' && k.art === OCHS) { k.kg = el.value.trim() === '' ? (has(k.plan) ? k.plan : 0) : Math.max(0, Math.round(num(el.value))); }
     else if (f === 'kg') { if (el.value.trim() === '') { k.kg = has(k.plan) ? k.plan : null; k.gewogen = false; } else { k.kg = num(el.value); k.gewogen = true; } }
     else k[f] = el.value;
     speichern(); render();
@@ -531,7 +534,7 @@ function tabAusbeute(z) {
     ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Innereien je Tier (werden vorab separat geholt)</h3><div class="zeile oben">
     ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('baeckleStk', 'Bäckle ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>
-   <div class="karte"><h3 style="margin-top:0">Ochsenschwanz</h3><div class="zeile oben">${feld('ochsStk', 'Ochsenschwanz je Tier (Stk)')}<p class="klein" style="max-width:420px;margin:22px 0 0">Kein Innereien-Artikel: steht im Metzgerauftrag, kommt ganz zu den Beinscheiben/Waden in die Kiste und wird beim Kommissionieren wie die übrigen Artikel zugeteilt.</p></div></div>`;
+   <div class="karte"><h3 style="margin-top:0">Ochsenschwanz</h3><div class="zeile oben">${feld('ochsStk', 'Ochsenschwanz je Tier (Stk)')}<p class="klein" style="max-width:420px;margin:22px 0 0">Kein Innereien-Artikel: kommt immer zu den Beinscheiben/Waden in die Kiste und wird gewogen. Mit Häkchen „am Stück“ bestellt → bleibt ganz (Zeile im Metzgerauftrag), sonst schneidet der Metzger ihn wie gewohnt. Verkauf immer als ganzer Schwanz an eine Bestellung, Preis nach kg; nicht bestellte gehen beim Abschluss an den Hofladen.</p></div></div>`;
   ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
   ui.acts.eg = el => {
     const a = S.artikel[+el.closest('tr').dataset.i], f = el.dataset.f, v = num(el.value);

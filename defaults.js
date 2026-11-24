@@ -261,7 +261,7 @@ const DEFAULTS = {
    "preis": 12,
    "inPaket": false,
    "stueckG": 2000,
-   "amStueck": false,
+   "amStueck": true,
    "beutelG": 0,
    "anteil": 0,
    "teile": "",
