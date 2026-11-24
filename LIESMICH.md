@@ -23,13 +23,14 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 | – (neu 2.1) | **Gemeinsame Abholung**: Tiere mit gleichem Abholtag bekommen einen gemeinsamen Metzgerauftrag und Ladeplan (Kistennummern über alle Tiere) |
 | – (neu 2.1) | **Offene Bestellungen neu verteilen** (Tiere/Bestellungen, auch automatisch nach neuem Tier): nur offene, Tiere ohne Kistenplan, mit Vorschau |
 | – (neu 2.1) | **Bewusst überbelegen**: in der Bestellung bei „reicht nicht“ – bleibt beim Tier, gelb markiert |
-| – (neu 2.1) | **Sonderfälle vom Metzger**: beim Kommissionieren mit Nummer der Sonderfälle-Kiste |
+| – (neu 2.1) | **Sonderfälle vom Metzger**: beim Kommissionieren mit Kistennummer (seit 2.9 auf mehrere Kisten verteilt) |
 | – (2.2) | Vakuum-Tüten werden nicht mehr gezählt; bei den Bestellungen steht nur noch, was **nicht** vakuumiert wird |
 | – (2.3) | **Packungen** frei je Artikel: z. B. `2x500+2x700`, `1500+1700`, `4+4 Stk` – Menge wird berechnet, beim Packen steht genau diese Aufteilung |
 | – (2.4) | **Kisten zurücksetzen** unter Kisten & Ladeplan; Hinweis, wenn der Kistenplan nicht mehr zu den Bestellungen passt; beim Neu-Verteilen können ungewogene Kistenpläne mit zurückgesetzt werden |
 | – (2.5) | **Neu verteilen** berücksichtigt die Kisten zuerst: fest sind nur Tiere mit gewogenen Kisten; ungewogene Kistenpläne der betroffenen Tiere werden danach automatisch neu berechnet bzw. zurückgesetzt |
 | – (2.7) | **Wunschtermin-Regel** (Neu verteilen und automatische Tier-Wahl in der Bestellung): nur Tiere höchstens 5 Tage vor dem Wunschtermin (im Verteilen-Dialog änderbar), sonst Warteliste |
 | – (2.8) | Nach Stück bestellt: Anzeige „40 Rouladen (ca. 8 kg)“; **Neu verteilen** mit Häkchen je Bestellung – abgewählte bleiben, wo sie sind |
+| – (2.9) | **Sonderfälle vom Metzger** (je Bestellung beschriftet) werden auf normale Kisten verteilt, die bei dieser Bestellung schon in Gebrauch sind und Platz haben; nur der Rest kommt in eigene Sonderfälle-Kisten mit **höchstens 30 kg**. Beim Kommissionieren steht die Kistennummer je Sonderfall |
 | Preisliste, Ausbeute, Auto | **Einstellungen** |
 | Bestellformular A4/A5, Infozettel (PDF) | **Übersicht → Vordrucke drucken** (Preise automatisch aus der Preisliste; jede Preisliste = eigene Version der Zettel, frühere im Archiv) |
 | Mappe zurücksetzen | **Einstellungen → Daten & Sicherung** (ein „Neues Jahr“ gibt es nicht mehr – Bestellungen laufen über den Jahreswechsel einfach weiter) |

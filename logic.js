@@ -1077,6 +1077,53 @@ function abholGruppe(S, tierName) {
   return g.sort((a, b) => String(a.schlacht || '').localeCompare(String(b.schlacht || '')) || S.tiere.indexOf(a) - S.tiere.indexOf(b)).map(x => x.name);
 }
 const PP_BIG = 100000;
+const SONDERKISTE = 'Sonderfälle (beschriftet)';
+const SONDER_MAX = 30; // Kiste mit Sonderfällen: höchstens 30 kg
+// Sonderfälle einer Bestellung als Teile (ganze Bestellung, wenn sie in eine Kiste passt, sonst je Artikel)
+function sonderTeile(S, ords) {
+  const T = [];
+  ords.forEach((o, k) => {
+    const L = sonderOf(S, o).filter(s => { const a = art(S, s.art); return a && a.einheit === 'kg' && num(s.menge) > 0 && !istOrgan(s.art); })
+      .map(s => ({ key: o.nr + '|' + s.art, nr: o.nr, kg: num(s.menge) }));
+    if (!L.length) return;
+    const sum = L.reduce((x, s) => x + s.kg, 0);
+    const gruppen = sum <= SONDER_MAX + 0.001 ? [L] : [];
+    if (!gruppen.length) for (const s of L.sort((a, b) => b.kg - a.kg)) {
+      let g = gruppen.find(g => g.reduce((x, y) => x + y.kg, 0) + s.kg <= SONDER_MAX + 0.001);
+      if (!g) { g = []; gruppen.push(g); }
+      g.push(s);
+    }
+    for (const g of gruppen) T.push({ need: k + 1, nr: o.nr, kg: g.reduce((x, y) => x + y.kg, 0), keys: g.map(s => s.key) });
+  });
+  return T;
+}
+function sonderItem(c) { let it = c.items.find(i => i.art === SONDERKISTE); if (!it) { it = { art: SONDERKISTE, kg: 0, info: '', sonder: [], nrn: [] }; c.items.push(it); } return it; }
+function sonderVerteilen(S, ords, C, maxKg, warn) {
+  const T = sonderTeile(S, ords);
+  const hatHack = c => c.items.some(i => i.art === HACK);
+  let eigene = 0;
+  for (const p of T) {
+    // 1) normale Kiste, die bei dieser Bestellung schon in Gebrauch ist (need ≤ Bestellung), mit Platz bis zur normalen Füllgrenze
+    let best = null;
+    for (const c of C) {
+      if (hatHack(c) || c.nurSonder || c.need > p.need) continue;
+      const neuItem = !c.items.some(i => i.art === SONDERKISTE);
+      if (neuItem && c.items.length >= 3) continue;
+      if (c.w + p.kg > maxKg + 0.001) continue;
+      if (!best || c.need > best.need || (c.need === best.need && c.w < best.w)) best = c; // die zuletzt geöffnete Kiste zuerst
+    }
+    // 2) sonst eine eigene Sonderfälle-Kiste mit Platz (bis 30 kg), 3) sonst eine neue
+    if (!best) best = C.find(c => c.nurSonder && c.w + p.kg <= SONDER_MAX + 0.001) || null;
+    if (!best) { best = { items: [], w: 0, need: p.need, nurSonder: true }; C.push(best); eigene++; }
+    const it = sonderItem(best);
+    it.kg = r1(it.kg + p.kg); it.sonder.push(...p.keys); if (!it.nrn.includes(p.nr)) it.nrn.push(p.nr);
+    it.info = 'Nr. ' + it.nrn.join(', ');
+    best.w += p.kg;
+    if (p.need < best.need) best.need = p.need;
+    if (p.kg > SONDER_MAX + 0.001) warn.push(`Sonderfall Nr. ${p.nr}: ein Stück mit ca. ${fmtNum(p.kg, 1)} kg – Kiste über ${SONDER_MAX} kg.`);
+  }
+  return eigene;
+}
 function packplan(S, tierName) { return packplanGruppe(S, abholGruppe(S, tierName)); }
 // Teil 1 je Tier: welche Stücke in welche Kiste (noch ohne Stellplatz)
 function packplanKisten(S, tierName, f = 1) {
@@ -1197,9 +1244,6 @@ function packplanKisten(S, tierName, f = 1) {
       P.push({ art: a.art, w, need });
     }
   });
-  // Sonderfälle-Kiste wird erst bei der ersten Bestellung mit Sonderwunsch gebraucht (nicht „von Anfang an“) –
-  // sonst belegt sie einen gut erreichbaren Platz hinten, den die Genusspaket-Kisten brauchen
-  if (specTier > 0) { const k1 = ords.findIndex(o => sonderOf(S, o).some(s => { const a = art(S, s.art); return a && a.einheit === 'kg' && num(s.menge) > 0; })); P.push({ art: 'Sonderfälle (beschriftet)', w: specTier, need: k1 >= 0 ? k1 + 1 : 0 }); }
   for (const p of P) if (EINE_KISTE.includes(p.art) && p.w > maxKg + 0.05) warnVorab.push(`${p.art}: eine Kiste mit ca. ${fmtNum(p.w, 1)} kg (über ${fmtNum(maxKg)} kg, Ausnahme).`);
   if (!P.length) return { fehler: `Für ${t.name} gibt es noch keine Mengen.` };
   // stabil sortieren wie Auswahlsort: need aufsteigend, bei gleichem need schwerer zuerst
@@ -1231,6 +1275,9 @@ function packplanKisten(S, tierName, f = 1) {
     if (needO < c.need) c.need = needO;
     if (ma.ochs.bestellt > ma.ochs.vorhanden) warnVorab.push(`Ochsenschwanz: ${fmtNum(ma.ochs.bestellt)} Stk bestellt, aber nur ca. ${fmtNum(ma.ochs.vorhanden)} je Tier.`);
   }
+  // Sonderfälle vom Metzger (je Bestellung beschriftet): auf die normalen Kisten verteilen, die zu dieser Bestellung
+  // schon gebraucht werden und noch Platz haben; nur der Rest kommt in eigene Sonderfälle-Kisten (höchstens 30 kg je Kiste)
+  if (specTier > 0) sonderVerteilen(S, ords, C, maxKg, warnVorab);
   C.forEach(c => { c.tier = t.name; c.ab = c.need === 0 ? 'von Anfang an' : c.need >= BIG ? 'Rest / Hofladen' : `ab Nr. ${ords[c.need - 1].nr}`; });
   return { t, C, warnVorab, ords, maxKg, hackKg };
 }
@@ -1269,7 +1316,7 @@ function packplanGruppe(S, namen) {
   }
   // Passt es immer noch nicht: die leichtesten Kisten desselben Tiers zusammenlegen (nicht Hackfleisch, nicht die Sonderfälle-Kiste)
   if (gruppe && C.length > platz) {
-    const nurH = c => c.items.every(i => i.art === HACK), sonder = c => c.items.some(i => i.art === SONDERKISTE);
+    const nurH = c => c.items.every(i => i.art === HACK), sonder = c => false;
     let zusammen = 0;
     let grenzeKg = kisteKg;
     while (C.length > platz) {
@@ -1397,7 +1444,7 @@ function packplanUebernehmen(S, pp) {
   let id = S.kisten.reduce((m, k) => Math.max(m, k.id || 0), 0);
   for (const k of pp.kisten) {
     if (k.nr > 99) break;
-    k.items.slice(0, 3).forEach(it => S.kisten.push({ id: ++id, tier: k.tier || pp.tier, nr: k.nr, art: it.art, kg: it.kg, plan: it.kg, platz: k.platzKurz, gewogen: false, info: it.info || '' }));
+    k.items.slice(0, 3).forEach(it => S.kisten.push({ id: ++id, tier: k.tier || pp.tier, nr: k.nr, art: it.art, kg: it.kg, plan: it.kg, platz: k.platzKurz, gewogen: false, info: it.info || '', ...(it.sonder ? { sonder: it.sonder.slice() } : {}) }));
   }
 }
 
@@ -1405,7 +1452,6 @@ function packplanUebernehmen(S, pp) {
 function kistenRows(S, tierName) {
   return S.kisten.filter(k => k.tier === tierName).map((k, i) => ({ k, i })).sort((a, b) => a.k.nr - b.k.nr || a.i - b.i).map(x => x.k);
 }
-const SONDERKISTE = 'Sonderfälle (beschriftet)';
 // Fingerabdruck der Bestellungen eines Tiers (für „Plan veraltet?“): Reihenfolge, Pakete, Positionen, Sonderwünsche
 function bestellFingerabdruck(S, tierName) {
   const txt = JSON.stringify(ordersOfTier(S, tierName).map(o => [o.nr, num(o.pakete), num(o.pakVak), o.pos || {}, o.sonder || []]));
@@ -1446,7 +1492,7 @@ function kistenCalc(S, tierName) {
     const bedarf = ords.reduce((s, o) => s + qty(S, o, k.art) - specSum(S, o, k.art), 0) + pak * anteil;
     const verplant = Math.max(0, Math.min(start + num(k.kg), bedarf) - start);
     const a = art(S, k.art);
-    const sonderInhalt = k.art === SONDERKISTE ? ords.flatMap(o => sonderOf(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art)).map(s => `Nr. ${o.nr}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
+    const sonderInhalt = k.art === SONDERKISTE ? ords.flatMap(o => sonderOf(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art) && (!k.sonder || k.sonder.includes(o.nr + '|' + s.art))).map(s => `Nr. ${o.nr}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
     return { k, start, anteil, bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: sonderInhalt || (k.info ? k.info : a && k.art !== HACK ? a.teile : '') };
   });
 }
@@ -1521,12 +1567,13 @@ function kommissionierung(S, nr) {
       picks.push({ kiste: null, hackTisch: true, menge: summe, roh, einheit: 'kg', art: HACK, verpacken: 'vom Hack-Tisch, fertig verpackt: ' + teile.join(' + '), platz: '' });
     }
     // Sonderfälle vom Metzger (beschriftet mit der Bestell-Nr.) liegen in der Sonderfälle-Kiste
-    const sk = kistenRows(S, t.name).find(k => k.art === SONDERKISTE);
+    const skAlle = kistenRows(S, t.name).filter(k => k.art === SONDERKISTE);
     for (const s of sonderOf(S, o)) {
       if (!(num(s.menge) > 0) || istOrgan(s.art)) continue;
       const a = art(S, s.art);
+      const sk = skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null;
       picks.push({ kiste: sk ? sk.nr : null, sonderfall: true, menge: r2(num(s.menge)), roh: 0, einheit: a ? a.einheit : 'kg', art: s.art,
-        verpacken: `Sonderfall${s.wunsch ? ' „' + s.wunsch + '“' : ''} – beim Metzger mit Nr. ${o.nr} beschriftet${sk ? '' : ' (keine Sonderfälle-Kiste im Plan)'}`, platz: sk ? sk.platz || '' : '' });
+        verpacken: `Sonderfall${s.wunsch ? ' „' + s.wunsch + '“' : ''} – beim Metzger mit Nr. ${o.nr} beschriftet${sk ? '' : ' (keine Kiste dafür im Plan)'}`, platz: sk ? sk.platz || '' : '' });
     }
     picks.sort((a, b) => (a.kiste === null ? -1 : a.kiste) - (b.kiste === null ? -1 : b.kiste));
   }
