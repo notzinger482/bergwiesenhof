@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.6.7';
+const APP_VERSION = '1.6.8';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -201,9 +201,9 @@ function viewBestellung(nr, q, vorlage) {
     const kgArt = eh === 'kg';
     return `<tr data-i="${i}">
       <td class="name">${esc(a.name)}</td>
-      <td style="width:76px">${kgArt ? `<input class="feld zahl" inputmode="numeric" data-in="pos" data-f="anzahl" value="${has(p.anzahl) ? fmtNum(p.anzahl, 3) : ''}" placeholder="Anz.">` : ''}</td>
-      <td style="width:86px">${kgArt ? `<input class="feld zahl" inputmode="numeric" data-in="pos" data-f="g" value="${has(p.g) ? fmtNum(p.g, 0) : ''}" placeholder="g">` : ''}</td>
-      <td style="width:96px"><input class="feld zahl" inputmode="decimal" data-in="pos" data-f="menge" value="${has(p.menge) ? fmtNum(p.menge, 3) : ''}" placeholder="${eh === 'kg' ? 'kg' : eh}"></td>
+      <td style="width:76px">${kgArt ? `<input class="feld zahl" inputmode="numeric" data-in="pos" data-f="anzahl" value="${has(p.anzahl) ? fmtIn(p.anzahl, 3) : ''}" placeholder="Anz.">` : ''}</td>
+      <td style="width:86px">${kgArt ? `<input class="feld zahl" inputmode="numeric" data-in="pos" data-f="g" value="${has(p.g) ? fmtIn(p.g, 0) : ''}" placeholder="g">` : ''}</td>
+      <td style="width:96px"><input class="feld zahl" inputmode="decimal" data-in="pos" data-f="menge" value="${has(p.menge) ? fmtIn(p.menge, 3) : ''}" placeholder="${eh === 'kg' ? 'kg' : eh}"></td>
       <td class="einh">${eh === 'Btl' ? `Btl<br><span class="klein">à ${a.beutelG} g</span>` : eh}</td>
       <td class="c">${a.amStueck ? `<label class="check"><input type="checkbox" data-in="pos" data-f="amStueck"${p.amStueck ? ' checked' : ''}></label>` : ''}</td>
       <td class="c"><label class="check"><input type="checkbox" data-in="pos" data-f="vak"${p.vak ? ' checked' : ''}></label></td>
@@ -273,12 +273,12 @@ function viewBestellung(nr, q, vorlage) {
         // vorher automatisch berechnet/geschätzt? (muss VOR dem Entfernen der Klassen gemerkt werden)
         const warAuto = mF.classList.contains('auto') || mF.classList.contains('schaetz');
         mF.classList.remove('auto', 'schaetz', 'fehlt'); mF.readOnly = false;
-        if (an > 0 && g > 0) { mF.value = fmtNum(an * g / 1000, 3); mF.classList.add('auto'); mF.readOnly = true; }
+        if (an > 0 && g > 0) { mF.value = fmtIn(an * g / 1000, 3); mF.classList.add('auto'); mF.readOnly = true; }
         else if (an > 0 && !(num(p.menge) > 0)) {
           const sg = posStueckG(S, a, p, Object.assign({}, o, { tier: o.tier || tierVorschlag(S, o.wunsch, o.pakete, o.nr) }));
-          if (sg > 0) { mF.value = fmtNum(an * sg / 1000, 3); mF.classList.add('schaetz'); mF.readOnly = true; }
+          if (sg > 0) { mF.value = fmtIn(an * sg / 1000, 3); mF.classList.add('schaetz'); mF.readOnly = true; }
           else { mF.value = ''; mF.classList.add('fehlt'); }
-        } else if (warAuto) mF.value = has(p.menge) ? fmtNum(p.menge, 3) : ''; // Anzahl/g gelöscht → berechneten Wert entfernen
+        } else if (warAuto) mF.value = has(p.menge) ? fmtIn(p.menge, 3) : ''; // Anzahl/g gelöscht → berechneten Wert entfernen
       }
       tr.classList.toggle('hat', qty(S, o, a.name) > 0);
     });
@@ -327,6 +327,8 @@ function viewBestellung(nr, q, vorlage) {
   ui.acts.sonderWeg = el => { o.sonder.splice(+el.dataset.i, 1); $('#sonderliste').innerHTML = o.sonder.map(sonderZeile).join(''); ui.formDirty = true; aktualisieren(); };
   ui.ins.sonder = el => {
     const i = +el.closest('[data-si]').dataset.si, s = o.sonder[i], f = el.dataset.f;
+    // gespeicherte Sonderwünsche: angezeigte Menge übernehmen, sonst ginge sie beim Ändern von Text/Artikel verloren
+    if (s.eingabe === undefined) s.eingabe = ($('[data-f=menge]', el.closest('[data-si]')) || {}).value || '';
     if (f === 'art') { s.art = el.value; const a = art(S, s.art); $('.sonder-eh', el.closest('[data-si]')).textContent = sonderEinheit(a); }
     else if (f === 'menge') s.eingabe = el.value;
     else s[f] = el.value;
@@ -372,11 +374,11 @@ function sonderAnzeige(s) {
   const a = art(S, s.art);
   if (s.eingabe !== undefined) return s.eingabe;
   if (!has(s.menge)) return '';
-  if (!a) return fmtNum(s.menge, 3);
+  if (!a) return fmtIn(s.menge, 3);
   const eh = einheitForm(a);
-  if (eh === 'kg') return fmtNum(s.menge * 1000, 0);
-  if (eh === 'Btl') return fmtNum(s.menge * 1000 / a.beutelG, 1);
-  return fmtNum(s.menge, 2);
+  if (eh === 'kg') return fmtIn(s.menge * 1000, 0);
+  if (eh === 'Btl') return fmtIn(s.menge * 1000 / a.beutelG, 1);
+  return fmtIn(s.menge, 2);
 }
 function sonderZeile(s, i) {
   const a = art(S, s.art);
@@ -549,7 +551,7 @@ function viewTier(name) {
     <label class="f ganz">Name / Nr.<input class="feld" data-in="t" data-f="name" value="${esc(t.name)}"></label>
     <label class="f ganz">Ohrmarke / Notiz<input class="feld" data-in="t" data-f="notiz" value="${esc(t.notiz || '')}"></label>
     <label class="f">Typ<select class="feld" data-in="t" data-f="typ">${['Rind', 'Bulle'].map(x => opt(x, x, t.typ === x)).join('')}</select></label>
-    <label class="f">Schlachtgewicht (kg, leer = Standard ${fmtNum(t.typ === 'Bulle' ? S.settings.sgBulle : S.settings.sgRind)})<input class="feld zahl" inputmode="decimal" data-in="t" data-f="sg" value="${has(t.sg) ? fmtNum(t.sg, 1) : ''}"></label>
+    <label class="f">Schlachtgewicht (kg, leer = Standard ${fmtNum(t.typ === 'Bulle' ? S.settings.sgBulle : S.settings.sgRind)})<input class="feld zahl" inputmode="decimal" data-in="t" data-f="sg" value="${has(t.sg) ? fmtIn(t.sg, 1) : ''}"></label>
     <label class="f">Schlachttermin<input class="feld" type="date" data-in="t" data-f="schlacht" value="${esc(t.schlacht || '')}"></label>
     <label class="f">Abholtermin<input class="feld" type="date" data-in="t" data-f="abhol" value="${esc(t.abhol || '')}"></label>
    </div><div class="hinweis" style="margin-top:14px;margin-bottom:0">${info()}</div>
@@ -613,7 +615,7 @@ async function teilenDialog(nr) {
     <label class="f" style="margin-bottom:10px">verschieben zu<select class="feld" id="tzziel">${tiereSortiert().filter(t => t.name !== o.tier).map(t => opt(t.name, `${t.name}${t.abhol ? ' – Abholung ' + fmtDate(t.abhol) : ''}`, t.name === zielStd)).join('')}${opt('Warteliste', 'Warteliste', zielStd === 'Warteliste')}</select></label>
     <div class="knopfleiste" style="margin-bottom:8px">${hatFehl ? '<button class="btn klein" data-p="fehl">nur Fehlmenge</button>' : ''}<button class="btn klein" data-p="20">20 %</button><button class="btn klein" data-p="40">40 %</button><button class="btn klein" data-p="50">50 %</button><button class="btn klein" data-p="0">nichts</button></div>
     <table class="tab"><thead><tr><th>Artikel</th><th class="r">bestellt</th><th class="r">verschieben</th><th></th><th class="r">bleibt</th></tr></thead><tbody>
-    ${zeilen.map(r => `<tr data-row="${esc(r.key)}"><td>${esc(r.text)}</td><td class="r">${fmtNum(r.bestellt, 3)}${r.max < r.bestellt ? `<div class="klein">max. ${fmtNum(r.max, 3)}</div>` : ''}${r.sonderRest ? `<div class="klein">${esc(r.sonderRest)}</div>` : ''}</td><td style="width:110px"><input class="feld zahl tz" inputmode="decimal" data-key="${esc(r.key)}" value="${fmtNum(start[r.key] || 0, 3)}"></td><td class="klein">${esc(r.einheit)}</td><td class="r tzb"></td></tr>`).join('')}
+    ${zeilen.map(r => `<tr data-row="${esc(r.key)}"><td>${esc(r.text)}</td><td class="r">${fmtNum(r.bestellt, 3)}${r.max < r.bestellt ? `<div class="klein">max. ${fmtNum(r.max, 3)}</div>` : ''}${r.sonderRest ? `<div class="klein">${esc(r.sonderRest)}</div>` : ''}</td><td style="width:110px"><input class="feld zahl tz" inputmode="decimal" data-key="${esc(r.key)}" value="${fmtIn(start[r.key] || 0, 3)}"></td><td class="klein">${esc(r.einheit)}</td><td class="r tzb"></td></tr>`).join('')}
     </tbody></table><p class="klein">${num(o.pakete) > 0 ? `<b>${fmtNum(o.pakete)} ${num(o.pakete) > 1 ? 'Genusspakete bleiben' : 'Genusspaket bleibt'} bei ${esc(o.tier)}</b> – Pakete sind nicht teilbar und haben Vorrang. ` : ''}Stück, Beutel und Portionen werden auf ganze Zahlen gerundet, kg auf 0,1 kg. Sonderwünsche bleiben bei der ursprünglichen Bestellung.</p>`;
   const d = $('#dialog');
   let werte = null, ziel = zielStd;
@@ -626,7 +628,7 @@ async function teilenDialog(nr) {
     const b = e.target.closest('[data-p]'); if (!b) return;
     e.stopPropagation(); e.preventDefault();
     const v = teilVorschlag(S, o, b.dataset.p === 'fehl' ? 'fehl' : num(b.dataset.p));
-    $$('#dialog input.tz').forEach(i => { i.value = fmtNum(v[i.dataset.key] || 0, 3); }); bleibt();
+    $$('#dialog input.tz').forEach(i => { i.value = fmtIn(v[i.dataset.key] || 0, 3); }); bleibt();
   };
   const merk = e => { if (e.target.closest('[data-k="ok"]')) { werte = {}; $$('#dialog input.tz').forEach(i => { werte[i.dataset.key] = num(i.value); }); ziel = $('#tzziel').value; } };
   const inp = e => { if (e.target.classList.contains('tz')) bleibt(); };

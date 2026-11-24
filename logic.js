@@ -32,6 +32,11 @@ function fmtNum(x, maxDec = 2, minDec = 0) {
   if (!has(x)) return '';
   return Number(x).toLocaleString('de-DE', { minimumFractionDigits: minDec, maximumFractionDigits: maxDec });
 }
+// für Eingabefelder: ohne Tausenderpunkt (sonst wird „2.500“ beim Ändern als 2,5 gelesen)
+function fmtIn(x, maxDec = 2, minDec = 0) {
+  if (!has(x)) return '';
+  return Number(x).toLocaleString('de-DE', { minimumFractionDigits: minDec, maximumFractionDigits: maxDec, useGrouping: false });
+}
 const fmtKg = x => fmtNum(x, 2);
 const fmtEur = x => has(x) ? Number(x).toLocaleString('de-DE', { style: 'currency', currency: 'EUR' }) : '';
 function fmtDate(iso) {
@@ -736,6 +741,10 @@ function packplan(S, tierName) {
   // Teilkisten
   let P = [];
   const warnVorab = [];
+  // Plan stimmt erst, wenn alle Bestellungen ok sind (Sonderwünsche/„am Stück“ werden zuerst zurückgelegt)
+  const mcTier = mengencheckTier(S, t.name);
+  const nichtOk = ords.filter(o => (mcTier[o.nr] || '').startsWith('reicht'));
+  if (nichtOk.length) warnVorab.push(`${nichtOk.length} Bestellung${nichtOk.length === 1 ? ' reicht' : 'en reichen'} nicht (Nr. ${nichtOk.map(o => o.nr).join(', ')}). Der Plan stimmt erst, wenn alle Bestellungen „ok“ sind – Sonderwünsche und „am Stück“ werden zuerst zurückgelegt, dann kann anderen Bestellungen etwas fehlen. Bitte erst umstellen (Mengenprüfung) und den Plan neu berechnen.`);
   A.forEach((a, i) => {
     if (a.isOrg || !(a.kg > 0.05)) return;
     const artDef = art(S, a.art);
@@ -993,7 +1002,7 @@ function kommissionierung(S, nr) {
           if (pz.length) verp += (verp ? ' · ' : '') + 'Paket: ' + pz.map(x => `${fmtNum(num(o.pakete) * num(x.anzahl))} × ${gText(paketG(S, x))}`).join(' + ');
         }
         if (c.k.info) verp = `Kiste enthält: ${c.k.info}` + (verp ? ' · ' + verp : '');
-        picks.push({ kiste: c.k.nr, menge: r1(m), einheit: c.einheit, art: c.k.art, verpacken: verp, platz: c.k.platz || '' });
+        picks.push({ kiste: c.k.nr, menge: r2(m + 1e-9), roh: m, einheit: c.einheit, art: c.k.art, verpacken: verp, platz: c.k.platz || '' });
       }
     }
     // Hackfleisch packt die Hilfsperson vorab am Hack-Tisch – hier nur als fertige Tüten, ohne Kistennummer
@@ -1002,13 +1011,13 @@ function kommissionierung(S, nr) {
       const r = rows.find(x => x.art === HACK), teile = [];
       if (r.einzeln > 0) { const po = portionOf(S, o, HACK); teile.push(po ? po.text : `${fmtNum(r.einzeln, 2)} kg in 1 Tüte`); }
       if (r.ausPak > 0) teile.push('Paket: ' + hackPaketText(S, o.pakete, o.pakVak));
-      const summe = r1(hp.reduce((s, p) => s + p.menge, 0));
+      const roh = hp.reduce((s, p) => s + p.roh, 0), summe = r2(roh + 1e-9);
       for (const p of hp) picks.splice(picks.indexOf(p), 1);
-      picks.push({ kiste: null, hackTisch: true, menge: summe, einheit: 'kg', art: HACK, verpacken: 'vom Hack-Tisch, fertig verpackt: ' + teile.join(' + '), platz: '' });
+      picks.push({ kiste: null, hackTisch: true, menge: summe, roh, einheit: 'kg', art: HACK, verpacken: 'vom Hack-Tisch, fertig verpackt: ' + teile.join(' + '), platz: '' });
     }
     picks.sort((a, b) => (a.kiste === null ? -1 : a.kiste) - (b.kiste === null ? -1 : b.kiste));
   }
-  rows.forEach(r => { r.ausKisten = picks.filter(p => p.art === r.art).reduce((s, p) => s + p.menge, 0); r.fehlt = istOrgan(r.art) ? 0 : (r.bedarf - r.ausKisten > 0.05 ? r.bedarf - r.ausKisten : 0); });
+  rows.forEach(r => { r.ausKisten = picks.filter(p => p.art === r.art).reduce((s, p) => s + p.roh, 0); r.fehlt = istOrgan(r.art) ? 0 : (r.bedarf - r.ausKisten > 0.05 ? r.bedarf - r.ausKisten : 0); });
   const innereien = ORGANE.map(n => { const q = qty(S, o, n); const a = art(S, n); return q > 0 ? `${fmtNum(q, 3)} ${a ? a.einheit : ''} ${n}` : ''; }).filter(Boolean);
   const sonder = sonderOf(S, o).map(s => sonderText(S, s));
   return { o, tier: t, rows, picks, innereien, sonder, tueten: tueten(S, o) };
@@ -1174,7 +1183,7 @@ function standPruefen(x) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  num, has, r1, r2, r3, roundUp, fmtNum, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
+  num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat,
