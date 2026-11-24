@@ -165,7 +165,7 @@ function ausbeuteTier(S, t) {
   const su = erfassungSumme(t), sg = num(t.sg);
   const rows = ausbeuteArtikel(S).map(a => {
     const v = su.art[a.name];
-    return { art: a.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, anteil: v && sg > 0 ? v.kg / sg : null, ref: anteilRef(S, a, t.typ), plan: yieldArt(S, t, a.name) };
+    return { art: a.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, anteil: v && sg > 0 ? v.kg / sg : null, ref: anteilRef(S, a, t.typ), plan: t.archiv && t.archivStand && t.archivStand.plan && has(t.archivStand.plan[a.name]) ? num(t.archivStand.plan[a.name]) : yieldArt(S, t, a.name) };
   }).concat(Object.keys(su.art).filter(n => !ausbeuteArtikel(S).some(a => a.name === n)).map(n => ({ art: n, kg: su.art[n].kg, teile: su.art[n].teile, anteil: sg > 0 ? su.art[n].kg / sg : null, ref: null, plan: null })));
   const teile = bratenTeile(S).map(x => { const v = su.teil[x.name]; return { teil: x.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, jeStueck: v ? v.kg / num(x.stueck) : null, stueck: num(x.stueck), ref: teilKgRef(x, t.typ) }; });
   return { rows, teile, kg: su.kg, anzahl: su.teile, sg };
@@ -409,13 +409,14 @@ function sgRechnung(S, t) {
 }
 const yieldArt = (S, t, name) => { const a = art(S, name); return t && a ? sgRechnung(S, t) * anteilVon(S, a, t.typ) : 0; };
 function tierInfo(S, t) {
-  const sg = sgRechnung(S, t);
-  const paketKg = paketGewicht(S);
+  const fest = t.archiv && t.archivStand ? t.archivStand : null; // Archiv ist Archiv: Werte vom Zeitpunkt des Archivierens
+  const sg = fest ? num(fest.sg) : sgRechnung(S, t);
+  const paketKg = fest ? num(fest.paketKg) : paketGewicht(S);
   const ords = ordersOfTier(S, t.name);
   const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
   const checks = mengencheckTier(S, t.name);
   const reichtNicht = ords.filter(o => (checks[o.nr] || '').startsWith('reicht')).length;
-  const maxPak = maxPakete(S, t);
+  const maxPak = fest ? num(fest.maxPak) : maxPakete(S, t);
   return { sg, paketKg, pakete: pak, maxPak, frei: maxPak - pak, anzahl: ords.length, reichtNicht };
 }
 // Wie viele Genusspakete gibt das Tier her? (kleinster Wert über alle Paket-Teilstücke; Hack inkl. Gulasch;
@@ -504,6 +505,18 @@ function fleischBilanz(S, t, ords) {
   kap[BRATEN] = braten.ausbeute - bugInsHack;
   return { hack, gul, braten, kap, fehlt, pakUeber };
 }
+// Archiv ist Archiv: beim Archivieren Mengencheck, Pakete und Plan-Ausbeute festhalten – danach wird nichts mehr nachgerechnet
+// (sonst würden alte Bestellungen mit der späteren Ausbeute-Statistik nachträglich „reicht nicht“ zeigen)
+function archivStandFesthalten(S, t) {
+  const a0 = t.archiv, s0 = t.archivStand;
+  t.archiv = null; t.archivStand = null;
+  try {
+    t.archivStand = { checks: mengencheckTier(S, t.name), maxPak: maxPakete(S, t), paketKg: r2(paketGewicht(S)), sg: sgRechnung(S, t),
+      plan: Object.fromEntries(ausbeuteArtikel(S).map(a => [a.name, r2(yieldArt(S, t, a.name))])) };
+  } catch (e) { t.archivStand = s0 || null; }
+  t.archiv = a0;
+  return t.archivStand;
+}
 const kapazitaet = (S, t, bil, name) => bil.kap[name] !== undefined ? bil.kap[name] : yieldArt(S, t, name);
 
 // Mengencheck aller Bestellungen eines Tiers: {nr: text}
@@ -513,6 +526,7 @@ function mengencheckTier(S, tierName) {
   if (!t) return out;
   const nen = num(S.settings.nenner) || 16;
   const ords = ordersOfTier(S, t.name);
+  if (t.archiv && t.archivStand && t.archivStand.checks) { for (const o of ords) out[o.nr] = t.archivStand.checks[o.nr] || 'ok'; return out; }
   const bil = fleischBilanz(S, t, ords);
   const maxW = has(S.settings.maxWaden) ? num(S.settings.maxWaden) : 4;
   let waden = 0;
@@ -555,7 +569,9 @@ function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
       const probe = Object.assign({}, best0, { nr: ohneNr || -1, name: best0.name || '?', tier: t.name,
         rang: alt && alt.tier === t.name ? rangVon(alt) : nextRang(S) });
       const T = Object.assign({}, S, { bestellungen: S.bestellungen.filter(x => x.nr !== probe.nr).concat([probe]) });
-      return mengencheckTier(T, t.name)[probe.nr] === 'ok';
+      const vor = mengencheckTier(S, t.name), nach = mengencheckTier(T, t.name);
+      // die ganze Bestellung passt UND keine andere Bestellung des Tiers kippt dadurch (Genusspakete haben Vorrang)
+      return nach[probe.nr] === 'ok' && !Object.keys(nach).some(nr => +nr !== probe.nr && vor[nr] === 'ok' && nach[nr] !== 'ok');
     });
     if (passt) return passt.name;
   }
@@ -937,7 +953,9 @@ function packplan(S, tierName) {
       P.push({ art: a.art, w, need });
     }
   });
-  if (specTier > 0) P.push({ art: 'Sonderfälle (beschriftet)', w: specTier, need: 0 });
+  // Sonderfälle-Kiste wird erst bei der ersten Bestellung mit Sonderwunsch gebraucht (nicht „von Anfang an“) –
+  // sonst belegt sie einen gut erreichbaren Platz hinten, den die Genusspaket-Kisten brauchen
+  if (specTier > 0) { const k1 = ords.findIndex(o => sonderOf(S, o).some(s => { const a = art(S, s.art); return a && a.einheit === 'kg' && num(s.menge) > 0; })); P.push({ art: 'Sonderfälle (beschriftet)', w: specTier, need: k1 >= 0 ? k1 + 1 : 0 }); }
   for (const p of P) if (EINE_KISTE.includes(p.art) && p.w > maxKg + 0.05) warnVorab.push(`${p.art}: eine Kiste mit ca. ${fmtNum(p.w, 1)} kg (über ${fmtNum(maxKg)} kg, Ausnahme).`);
   if (!P.length) return { fehler: `Für ${t.name} gibt es noch keine Mengen.` };
   // stabil sortieren wie Auswahlsort: need aufsteigend, bei gleichem need schwerer zuerst
@@ -1021,8 +1039,15 @@ function packplan(S, tierName) {
     if (j > 0) { anz[hackIdx] = j; rest -= j; warn.push(`Platz wird knapp: ${j} Kiste(n) stehen unter dem Hackfleisch auf „${auto[hackIdx].name}“.`); }
   }
   // 3) verteilen: früh gebrauchte Kisten an die zuerst erreichbaren Plätze (Entnahme-Reihenfolge), jeweils oben
+  //    Lagenweise statt Feld für Feld: erst die obersten Kisten aller Felder einer Reihe (hinten → Mitte → vorne),
+  //    dann die zweite Lage usw. So liegen Kisten, die dieselbe (frühe) Bestellung braucht, nebeneinander statt übereinander.
+  const reiheVon = i => { const n = String(auto[i].name || '').toLowerCase(); return /^hinten/.test(n) ? 0 : /^mitte/.test(n) ? 1 : /^vorne/.test(n) ? 2 : 1; };
+  const slots = [];
+  felderRest.forEach((i, r) => { for (let j = 0; j < anz[i]; j++) slots.push({ i, j, reihe: reiheVon(i), r }); });
+  slots.sort((a, b) => a.reihe - b.reihe || a.j - b.j || a.r - b.r);
   let p = 0;
-  for (const i of felderRest.concat(hackIdx >= 0 ? [hackIdx] : [])) for (let j = 0; j < anz[i]; j++) if (p < pool.length) liste[i].push(pool[p++]);
+  for (const sl of slots) if (p < pool.length) liste[sl.i].push(pool[p++]);
+  if (hackIdx >= 0) for (let j = 0; j < anz[hackIdx]; j++) if (p < pool.length) liste[hackIdx].push(pool[p++]);
   auto.forEach((f, i) => {
     cnt[i] = liste[i].length;
     liste[i].forEach((c, j) => { c.platz = i; c.ebene = cnt[i] - j; }); // erste = oberste Ebene
@@ -1107,6 +1132,7 @@ function tierAbschliessen(S, tierName) {
   // Archiv: Stand der Kisten am Ende festhalten, Tier archivieren (wird nicht gelöscht)
   const t = tier(S, tierName);
   if (t) {
+    archivStandFesthalten(S, t);
     t.abschluss = { datum: heute, kisten: calc.map(c => ({ nr: c.k.nr, art: c.k.art, kg: r2(num(c.k.kg)), plan: has(c.k.plan) ? r2(num(c.k.plan)) : null, gew: has(c.k.gew) ? num(c.k.gew) : null, info: c.k.info || '', bedarf: r2(c.bedarf), verplant: r2(c.verplant), rest: r2(c.rest), einheit: c.einheit })) };
     t.archiv = heute;
   }
@@ -1359,6 +1385,8 @@ function standPruefen(x) {
     if (!k.angelegt) k.angelegt = k.letzte || todayISO();
   });
   delete x.settings.preisTuete;
+  // Version 1.9.3: Archiv ist Archiv – Stand archivierter Tiere einmalig festhalten (falls noch nicht geschehen)
+  (x.tiere || []).forEach(t => { if (t.archiv && !t.archivStand) archivStandFesthalten(x, t); });
   // Version 1.6.4: Innereien nach Stück werden in €/kg berechnet → geschätztes Stückgewicht
   const stkG = { Nieren: 700, Herz: 2500, Zunge: 1500, 'Bäckle': 400, Ochsenschwanz: 2000 };
   (x.artikel || []).forEach(a => { if (a.einheit === 'Stk' && !(num(a.stueckG) > 0) && stkG[a.name]) a.stueckG = stkG[a.name]; });
@@ -1372,5 +1400,5 @@ if (typeof module !== 'undefined') module.exports = {
   tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
-  HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
+  HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
 };

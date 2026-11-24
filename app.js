@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.9.2';
+const APP_VERSION = '1.9.3';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -453,6 +453,8 @@ async function bestellungSpeichern(o) {
   let auto = false;
   if (!o.tier) { o.tier = tierVorschlag(S, o.wunsch, o.pakete, o.nr, o); auto = true; }
   const neu = !o.nr;
+  // Mengencheck der anderen Bestellungen dieses Tiers vorher merken (eine neue Bestellung mit Genusspaket hat Vorrang und kann ihnen etwas wegnehmen)
+  const vorher = tier(S, o.tier) ? mengencheckTier(S, o.tier) : {};
   // Reihenfolge beim Tier: neu oder Tier gewechselt → hinten anstellen
   if (neu) { o.nr = nextNr(S); o.rang = nextRang(S); S.bestellungen.push(o); }
   else {
@@ -464,9 +466,12 @@ async function bestellungSpeichern(o) {
   speichern();
   ui.formDirty = false; ui.letzteNr = o.nr;
   const check = mengencheck(S, o);
+  const nachher = tier(S, o.tier) ? mengencheckTier(S, o.tier) : {};
+  const gekippt = Object.keys(nachher).filter(nr => +nr !== o.nr && vorher[nr] === 'ok' && nachher[nr] !== 'ok').map(nr => S.bestellungen.find(x => x.nr === +nr)).filter(Boolean);
   const txt = `Bestellung Nr. ${o.nr} für ${o.name} ${neu ? 'gespeichert' : 'geändert'} – Tier: ${o.tier}${auto ? ' (automatisch)' : ''}${kundeNeu ? ' – neuer Kunde angelegt' : ''}`;
-  if (check && check !== 'ok' && !check.startsWith('Warteliste')) {
-    await dialog('Achtung – Mengencheck', `<p>${esc(txt)}</p><p class="warn">${esc(check)}</p><p>Die Bestellung ist gespeichert. Bitte prüfen, ob sie aufs nächste Tier umgestellt werden soll (Tier im Formular ändern).</p>`);
+  const gekipptHtml = gekippt.length ? `<p class="warn"><b>Dadurch reicht es bei ${gekippt.length === 1 ? 'einer anderen Bestellung' : gekippt.length + ' anderen Bestellungen'} von ${esc(o.tier)} nicht mehr:</b><br>${gekippt.map(x => `Nr. ${x.nr} – ${esc(x.name)}: ${esc(nachher[x.nr])}`).join('<br>')}</p><p class="klein">Genusspakete haben Vorrang und nehmen den früheren Einzelbestellungen etwas weg. Bitte diese Bestellung oder die genannten auf ein anderes Tier umstellen (Mengenprüfung).</p>` : '';
+  if ((check && check !== 'ok' && !check.startsWith('Warteliste')) || gekippt.length) {
+    await dialog('Achtung – Mengencheck', `<p>${esc(txt)}</p>${check && check !== 'ok' && !check.startsWith('Warteliste') ? `<p class="warn">${esc(check)}</p><p>Die Bestellung ist gespeichert. Bitte prüfen, ob sie aufs nächste Tier umgestellt werden soll (Tier im Formular ändern).</p>` : ''}${gekipptHtml}`);
   } else meldung(txt + (check ? ' – Mengencheck: ' + check : ''));
   if (neu) render(); else history.back();
 }
@@ -618,11 +623,11 @@ function viewTier(name) {
     if (S.kisten.some(k => k.tier === t0.name)) return dialog('Noch Kisten offen', '<p>Für dieses Tier sind noch Kisten eingetragen. Bitte unter Schlachttag → Kisten & Ladeplan „Tier abgeschlossen“ verwenden (Reste gehen dann an den Hofladen).</p>');
     const offen = ordersOfTier(S, t0.name).filter(o => (o.status || 'offen') === 'offen');
     if (offen.length && !(await frage('Ins Archiv', `${offen.length} Bestellung(en) sind noch offen. Trotzdem ins Archiv?`, 'Ins Archiv', 'Abbrechen'))) return;
-    t0.archiv = todayISO(); speichern(); meldung(`${t0.name} ist im Archiv.`); render();
+    archivStandFesthalten(S, t0); t0.archiv = todayISO(); speichern(); meldung(`${t0.name} ist im Archiv.`); render();
   };
   ui.acts.zurueck = async () => {
     if (!(await frage('Aus dem Archiv holen', `${esc(t0.name)} wieder zu den aktiven Tieren nehmen? Es zählt dann nicht mehr für die Ausbeute-Statistik.`, 'Zurückholen', 'Abbrechen'))) return;
-    t0.archiv = null; speichern(); meldung(`${t0.name} ist wieder aktiv.`); render();
+    t0.archiv = null; delete t0.archivStand; speichern(); meldung(`${t0.name} ist wieder aktiv.`); render();
   };
   ui.acts.erfWeg = async el => { if (!(await frage('Gewogenes Teil löschen', 'Diesen Eintrag löschen?', 'Löschen', 'Abbrechen', 'rot'))) return; t0.erfassung.splice(+el.dataset.i, 1); speichern(); render(); };
   ui.acts.best = el => gehe('#/bestellung/' + el.dataset.nr);
