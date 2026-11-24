@@ -769,7 +769,23 @@ function mengenpruefung(S, tierName) {
     return { art: a.name, ausbeute: y, ausbeuteStd: a.name === HACK ? yieldArt(S, t, HACK) : y, einzel, ausPak, gesamt: ges, frei: y - ges, auslastung: y > 0 ? ges / y : null,
       status: y === 0 ? '' : ges > y + 0.001 ? 'reicht nicht' : ges > 0.9 * y ? 'knapp' : 'ok' };
   });
-  return { tier: t, info: tierInfo(S, t), rows, bilanz: bil };
+  // Summen für die Gesamtübersicht. Hack zählt mit der normalen Ausbeute – was der Bug/Gulasch fürs Hack hergibt,
+  // steckt schon in deren Zeilen (sonst doppelt gezählt). „noch frei“ = geht voraussichtlich in den Hofladen.
+  const gruppe = f => {
+    const rs = rows.filter(f);
+    const aus = rs.reduce((s, r) => s + r.ausbeuteStd, 0), best = rs.reduce((s, r) => s + r.gesamt, 0);
+    return { ausbeute: aus, einzel: rs.reduce((s, r) => s + r.einzel, 0), ausPak: rs.reduce((s, r) => s + r.ausPak, 0), bestellt: best, frei: aus - best, quote: aus > 0 ? best / aus : null };
+  };
+  const knochen = r => r.art === SK || r.art === FK;
+  const sum = { fleisch: gruppe(r => !knochen(r)), knochen: gruppe(knochen), gesamt: gruppe(() => true) };
+  sum.anteilSG = num(sgRechnung(S, t)) > 0 ? sum.gesamt.ausbeute / num(sgRechnung(S, t)) : null;
+  sum.schaetz = ords.reduce((s, o) => s + num(schaetzpreis(S, o)), 0);
+  const mitEnd = ords.filter(o => has(o.endbetrag));
+  sum.endbetrag = mitEnd.reduce((s, o) => s + num(o.endbetrag), 0); sum.mitEnd = mitEnd.length;
+  sum.engpass = rows.filter(r => r.status === 'reicht nicht').map(r => r.art);
+  sum.knapp = rows.filter(r => r.status === 'knapp').map(r => r.art);
+  sum.innereien = [...ORGANE, OCHS].map(n => { const a = art(S, n); const q = ords.reduce((s, o) => s + qty(S, o, n), 0); return q > 0 ? `${fmtNum(q, a && a.einheit === 'Stk' ? 0 : 2)} ${a && a.einheit === 'Stk' ? 'Stk' : 'kg'} ${n}` : ''; }).filter(Boolean);
+  return { tier: t, info: tierInfo(S, t), rows, bilanz: bil, summen: sum };
 }
 
 // ---------- Metzgerauftrag ----------

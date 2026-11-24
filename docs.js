@@ -31,7 +31,7 @@ function docCanvas(doc, breite = 1080) {
   const c = document.createElement('canvas');
   const x = c.getContext('2d');
   const W = breite - 2 * PAD;
-  const fonts = { titel: `bold 40px ${F}`, sub: `26px ${F}`, h: `bold 30px ${F}`, text: `26px ${F}`, textB: `bold 26px ${F}`, th: `bold 23px ${F}`, td: `24px ${F}`, fuss: `20px ${F}` };
+  const fonts = { titel: `bold 40px ${F}`, sub: `26px ${F}`, h: `bold 30px ${F}`, text: `26px ${F}`, textB: `bold 26px ${F}`, tdB: `bold 24px ${F}`, th: `bold 23px ${F}`, td: `24px ${F}`, fuss: `20px ${F}` };
   const wrap = (txt, font, w) => {
     x.font = font; const out = [];
     for (const para of String(txt === null || txt === undefined ? '' : txt).split('\n')) {
@@ -85,7 +85,7 @@ function docCanvas(doc, breite = 1080) {
       };
       row(b.head, fonts.th, '#e3efd3', '#222');
       if (!b.rows.length) row([b.leer || '– keine –', ...b.head.slice(1).map(() => '')], fonts.td, null, '#777');
-      b.rows.forEach((r, i) => row(r.map(v => v === null || v === undefined ? '' : String(v)), fonts.td, ((b.rowClass || [])[i] || '').includes('rot') ? '#fde2e2' : (i % 2 ? '#f7f7f4' : null), '#111'));
+      b.rows.forEach((r, i) => { const rc = (b.rowClass || [])[i] || ''; row(r.map(v => v === null || v === undefined ? '' : String(v)), rc.includes('fett') ? (fonts.tdB || fonts.textB || fonts.td) : fonts.td, rc.includes('rot') ? '#fde2e2' : rc.includes('fett') ? '#eef4e6' : (i % 2 ? '#f7f7f4' : null), '#111'); });
       y += 14;
     }
   }

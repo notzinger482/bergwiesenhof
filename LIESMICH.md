@@ -1,6 +1,6 @@
 # Bestellsystem Bergwiesenhof – Tablet-App
 
-Version 1.9.1 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
+Version 1.9.2 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
 
 Die App ersetzt die Excel-Datei mit allen Makros. Sie läuft nach der Installation **komplett offline**.
 Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in die Cloud und für Updates.

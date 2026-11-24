@@ -49,12 +49,26 @@ function viewWarteliste() {
   ui.acts.teilen = async () => { const r = await docTeilen(doc, doc.title); if (r === 'gespeichert') meldung('Bild gespeichert (Teilen wird hier nicht unterstützt).'); };
   ui.acts.drucken = () => docDrucken(doc);
 }
+function mengenSummen(mp) {
+  const z = mp.summen, i = mp.info;
+  const zeile = (n, g) => [n, fmtNum(g.ausbeute, 1), fmtNum(g.einzel, 1), fmtNum(g.ausPak, 1), fmtNum(g.bestellt, 1), fmtNum(g.frei, 1), g.quote === null ? '' : fmtNum(g.quote * 100, 0) + ' %'];
+  return [{ type: 'h', text: 'Summen' },
+    { type: 'table', head: ['', 'Ausbeute ca. kg', 'einzeln', 'in Paketen', 'bestellt', 'noch frei → Hofladen', 'verkauft'], align: ['', 'r', 'r', 'r', 'r', 'r', 'r'], widths: [3, 2, 2, 2, 2, 2.4, 2],
+      rows: [zeile('Fleisch', z.fleisch), zeile('Knochen', z.knochen), zeile('Gesamt', z.gesamt)], rowClass: ['', '', 'fett'] },
+    { type: 'kv', rows: [
+      ['Ausbeute gesamt', `${fmtNum(z.gesamt.ausbeute, 0)} kg`, z.anteilSG === null ? '' : `${fmtNum(z.anteilSG * 100, 0)} % vom SG (${fmtNum(i.sg)} kg)`],
+      ['Bestellungen', `${i.anzahl}`, `${fmtNum(i.pakete)} Genusspakete (frei ${fmtNum(i.frei)})`],
+      ['Schätzwert Bestellungen', fmtEur(z.schaetz), z.mitEnd ? `Endbeträge eingetragen: ${fmtEur(z.endbetrag)} (${z.mitEnd} von ${i.anzahl})` : ''],
+      ['Engpässe', z.engpass.length ? z.engpass.join(', ') : 'keine', z.knapp.length ? 'knapp: ' + z.knapp.join(', ') : ''],
+      ['Innereien / Ochsenschwanz', z.innereien.length ? z.innereien.join(' · ') : '–', z.innereien.length ? 'nicht in der Prüfung' : '']] }];
+}
 function docMenge(mp) {
   const t = mp.tier, i = mp.info;
   return { title: `Mengenprüfung – ${t.name}`, sub: [`${t.typ} · ${fmtNum(i.sg)} kg SG · ${abholTxt(t)}`, `Pakete bestellt ${fmtNum(i.pakete)} / frei ${fmtNum(i.frei)} · ${i.anzahl} Bestellungen · reicht nicht: ${i.reichtNicht}`],
     blocks: [{ type: 'table', head: ['Teilstück', 'Ausbeute ca.', 'einzeln', 'in Paketen', 'gesamt', 'noch frei', 'Auslastung', 'Status'], align: ['', 'r', 'r', 'r', 'r', 'r', 'r', ''], widths: [3, 2, 2, 2, 2, 2, 2, 2.4],
       rows: mp.rows.map(r => [r.art, r.ausbeute > r.ausbeuteStd + 0.05 ? `${fmtNum(r.ausbeuteStd, 1)} (bis ${fmtNum(r.ausbeute, 1)})` : fmtNum(r.ausbeute, 1), fmtNum(r.einzel, 1), fmtNum(r.ausPak, 1), fmtNum(r.gesamt, 1), fmtNum(r.frei, 1), r.auslastung === null ? '' : fmtNum(r.auslastung * 100, 0) + ' %', r.status]),
       rowClass: mp.rows.map(r => r.status === 'reicht nicht' ? 'rot' : '') },
+      ...mengenSummen(mp),
       { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel in der Reihenfolge, in der die Bestellungen dem Tier zugeordnet wurden. Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Innereien werden nicht geprüft.' }]
       .concat(mp.rows.some(r => r.ausbeute > r.ausbeuteStd + 0.05) ? [{ type: 'text', text: 'Hackfleisch „bis“: normale Hack-Ausbeute; wenn nötig zusätzlich nicht bestelltes Gulasch und der Bug (wird dann im Metzgerauftrag aufgelöst).' }] : []), footer: fussZeile() };
 }

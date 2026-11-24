@@ -152,6 +152,7 @@ textarea.feld { min-height: 70px; }
 .doc-tab th { background: #e3efd3; text-align: left; padding: 6px 8px; font-size: 14px; }
 .doc-tab td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; }
 .doc-tab tr.rot td { background: var(--rot-h); }
+.doc-tab tr.fett td { font-weight: 700; background: #eef4e6; }
 .doc-tab .r { text-align: right; }
 .doc-tab.fest { table-layout: fixed; }
 .doc-tab.fest td, .doc-tab.fest th { overflow-wrap: break-word; hyphens: auto; }
