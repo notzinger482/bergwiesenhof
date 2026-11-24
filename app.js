@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '2.2';
+const APP_VERSION = '2.3';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -268,6 +268,7 @@ function viewBestellung(nr, q, vorlage) {
       <td style="width:86px">${kgArt ? `<input class="feld zahl" inputmode="numeric" data-in="pos" data-f="g" value="${has(p.g) ? fmtIn(p.g, 0) : ''}" placeholder="g">` : ''}</td>
       <td style="width:96px"><input class="feld zahl" inputmode="decimal" data-in="pos" data-f="menge" value="${has(p.menge) ? fmtIn(p.menge, 3) : ''}" placeholder="${eh === 'kg' ? 'kg' : eh}"></td>
       <td class="einh">${eh === 'Btl' ? `Btl<br><span class="klein">à ${a.beutelG} g</span>` : eh}</td>
+      <td style="width:150px">${kgArt ? `<input class="feld klein" data-in="pos" data-f="pack" value="${esc(p.pack || '')}" placeholder="${a.name === HACK ? 'z. B. 2x500+700' : a.name === 'Rouladen' ? 'z. B. 4+4 Stk' : ''}">` : ''}</td>
       <td class="c">${a.amStueck ? `<label class="check"><input type="checkbox" data-in="pos" data-f="amStueck"${p.amStueck ? ' checked' : ''}></label>` : ''}</td>
       <td class="c"><label class="check"><input type="checkbox" data-in="pos" data-f="vak"${istVak(o.pos[a.name] || {}) ? ' checked' : ''}></label></td>
     </tr>`;
@@ -316,8 +317,8 @@ function viewBestellung(nr, q, vorlage) {
     </div>
     <div class="karte">
       <h3 style="margin-top:0">Einzelartikel</h3>
-      <div class="klein" style="margin-bottom:6px">Anzahl × g ergibt die Menge automatisch (z. B. 6 × 500 g). Nur Anzahl (z. B. 4 Rostbraten): kg werden über das Stückgewicht geschätzt. <b>Vakuumieren ist bei allen Einzelartikeln vorbelegt (kostenlos)</b> – Haken bei „vak.“ rausnehmen, wenn nicht vakuumiert werden soll.</div>
-      <table class="tab art-tab"><thead><tr><th>Artikel</th><th class="r">Anzahl</th><th class="r">× g</th><th class="r">= Menge</th><th></th><th class="c">am Stück</th><th class="c">vak.</th></tr></thead><tbody>${artRows}</tbody></table>
+      <div class="klein" style="margin-bottom:6px">Anzahl × g ergibt die Menge automatisch (z. B. 6 × 500 g). Verschiedene Packungen unter „Packungen“, z. B. 2x500+2x700 oder 4+4 Stk. Nur Anzahl (z. B. 4 Rostbraten): kg werden über das Stückgewicht geschätzt. <b>Vakuumieren ist bei allen Einzelartikeln vorbelegt (kostenlos)</b> – Haken bei „vak.“ rausnehmen, wenn nicht vakuumiert werden soll.</div>
+      <table class="tab art-tab"><thead><tr><th>Artikel</th><th class="r">Anzahl</th><th class="r">× g</th><th class="r">= Menge</th><th></th><th>Packungen <span class="klein">(frei)</span></th><th class="c">am Stück</th><th class="c">vak.</th></tr></thead><tbody>${artRows}</tbody></table>
       <div class="summenleiste"><div class="platz" id="summe"></div>
         <button class="btn" data-act="leeren">${nr ? 'Abbrechen' : 'Leeren'}</button>
         <button class="btn haupt" data-act="speichern" style="min-width:160px">Speichern</button></div>
@@ -419,9 +420,20 @@ function viewBestellung(nr, q, vorlage) {
   ui.ins.pos = el => {
     const a = S.artikel[+el.closest('tr').dataset.i]; const f = el.dataset.f;
     const p = o.pos[a.name] = o.pos[a.name] || { vak: true };
+    const tr = el.closest('tr'), feldEl = n => $(`[data-f=${n}]`, tr);
     if (el.type === 'checkbox') p[f] = el.checked;
-    else p[f] = el.value.trim() === '' ? null : num(el.value);
-    if (!has(p.menge) && !has(p.anzahl) && !has(p.g) && !p.amStueck && p.vak !== false) delete o.pos[a.name];
+    else if (f === 'pack') {
+      // Packungen frei: Menge daraus berechnen, Anzahl/g leeren
+      const txt = el.value.trim(), r = txt ? packParse(S, a, txt) : null;
+      el.classList.toggle('fehlerfeld', !!(r && r.fehler)); el.title = r && r.fehler ? r.fehler : r ? r.text : '';
+      if (!txt) delete p.pack;
+      else { p.pack = txt; if (r && !r.fehler) { p.menge = r.kg; p.anzahl = null; p.g = null; feldEl('menge').value = fmtIn(r.kg, 3); if (feldEl('anzahl')) feldEl('anzahl').value = ''; if (feldEl('g')) feldEl('g').value = ''; } }
+    }
+    else {
+      p[f] = el.value.trim() === '' ? null : num(el.value);
+      if (['menge', 'anzahl', 'g'].includes(f) && p.pack) { delete p.pack; if (feldEl('pack')) { feldEl('pack').value = ''; feldEl('pack').classList.remove('fehlerfeld'); } }
+    }
+    if (!has(p.menge) && !has(p.anzahl) && !has(p.g) && !p.pack && !p.amStueck && p.vak !== false) delete o.pos[a.name];
     ui.formDirty = true; aktualisieren();
   };
   ui.acts.step = el => {

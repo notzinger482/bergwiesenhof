@@ -230,12 +230,43 @@ const sonderText = (S, s) => {
   const a = art(S, s.art);
   return (has(s.menge) ? fmtNum(s.menge, 3) + ' ' + (a ? a.einheit : '') + ' ' : '') + s.art + (s.wunsch ? ' – ' + s.wunsch : '');
 };
+// Packungen frei eingeben (seit 2.3): „2x500+2x700“ (g), „1500+1700“, „1,5kg+1,7kg“, „4+4 Stk“ oder „2x4 Stk“ (Stück je Packung).
+// Ganze Zahlen unter 20 ohne Einheit gelten als Stück, ab 20 als Gramm, Kommazahlen unter 20 als kg.
+function packParse(S, a, txt) {
+  const t = String(txt || '').trim().toLowerCase().replace(/\s+/g, '').replace(/[×*]/g, 'x');
+  if (!t) return null;
+  const allesStk = /(stk|stück|stueck|st)\.?$/.test(t);
+  const jeStkG = a ? num(a.stueckG) : 0;
+  const teile = [];
+  for (const teil of t.split('+')) {
+    const m = /^(?:(\d+)x)?(\d+(?:[.,]\d+)?)(g|kg|stk\.?|stück|stueck|st\.?)?$/.exec(teil);
+    if (!m) return { fehler: `„${teil}“ nicht verstanden` };
+    const n = m[1] ? +m[1] : 1, z = parseFloat(m[2].replace(',', '.'));
+    let eh = (m[3] || '').replace('.', '');
+    if (!eh) eh = allesStk ? 'stk' : /[.,]/.test(m[2]) && z < 20 ? 'kg' : z < 20 ? 'stk' : 'g';
+    if (!(n > 0) || !(z > 0)) return { fehler: `„${teil}“ nicht verstanden` };
+    if (eh === 'kg') teile.push({ n, g: Math.round(z * 1000) });
+    else if (eh === 'g') teile.push({ n, g: Math.round(z) });
+    else { if (!(jeStkG > 0)) return { fehler: 'Stück nur bei Artikeln mit Stückgewicht – bitte in g angeben' }; teile.push({ n, stk: Math.round(z) }); }
+  }
+  // gleiche Packungen zusammenfassen (Reihenfolge bleibt)
+  const zus = [];
+  for (const x of teile) { const y = zus.find(q => q.g === x.g && q.stk === x.stk); if (y) y.n += x.n; else zus.push({ ...x }); }
+  const kg = r3(zus.reduce((s, x) => s + x.n * (x.g ? x.g : x.stk * jeStkG) / 1000, 0));
+  const stk = zus.reduce((s, x) => s + (x.stk ? x.n * x.stk : 0), 0);
+  const packungen = zus.reduce((s, x) => s + x.n, 0);
+  const text = zus.map(x => x.g ? `${fmtNum(x.n)} × ${fmtNum(x.g)} g` : `${fmtNum(x.n)} ${x.n === 1 ? 'Packung' : 'Packungen'} à ${fmtNum(x.stk)} Stück`).join(' + ');
+  return { teile: zus, kg, stk, packungen, text };
+}
+const packGilt = (S, a, p) => { if (!p || !p.pack) return null; const r = packParse(S, a, p.pack); return r && !r.fehler && Math.abs(r.kg - num(p.menge)) < 0.006 ? r : null; };
 // Portionierung: [{art, anzahl, g, text, kg}]
 function portionenOf(S, o) {
   const out = [];
   for (const a of S.artikel) {
     const p = o.pos && o.pos[a.name];
     if (!p) continue;
+    const pk = a.beutelG > 0 || a.einheit === 'Stk' ? null : packGilt(S, a, p);
+    if (pk) { out.push({ art: a.name, anzahl: pk.packungen, g: pk.teile.length === 1 && pk.teile[0].g ? pk.teile[0].g : null, text: pk.text, kg: pk.kg, pack: true }); continue; }
     if (a.beutelG > 0 && num(p.menge) > 0) {
       out.push({ art: a.name, anzahl: num(p.menge), g: a.beutelG, text: `${fmtNum(p.menge)} × ${fmtNum(a.beutelG)} g`, kg: r3(num(p.menge) * a.beutelG / 1000) });
     } else if (a.einheit !== 'Stk' && num(p.anzahl) > 0) {
@@ -340,6 +371,7 @@ function formFehler(S, o) {
     const p = o.pos && o.pos[a.name];
     if (!p) continue;
     const m = num(p.menge), an = num(p.anzahl), g = num(p.g);
+    if (p.pack) { const r = packParse(S, a, p.pack); if (r && r.fehler) f.push(`${a.name} – Packungen: ${r.fehler} (Beispiele: 2x500+2x700, 1500+1700, 4+4 Stk)`); }
     if (m > 0 && an > 0 && g > 0 && Math.abs(an * g / 1000 - m) > 0.01)
       f.push(`${a.name}: ${fmtNum(an)} × ${fmtNum(g)} g = ${fmtNum(an * g / 1000, 3)} kg, eingetragen sind aber ${fmtNum(m, 3)} kg`);
     if (istWade(a, p) && !(an > 0)) f.push(`${a.name} am Stück (Wade): bitte die Anzahl Waden eintragen`);
@@ -1620,7 +1652,7 @@ function standPruefen(x) {
 if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
-  tuetenAuto, tueten, nichtVak, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
+  tuetenAuto, tueten, nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,

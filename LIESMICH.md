@@ -1,6 +1,6 @@
 # Bestellsystem Bergwiesenhof – Tablet-App
 
-Version 2.2 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
+Version 2.3 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
 
 Die App ersetzt die Excel-Datei mit allen Makros. Sie läuft nach der Installation **komplett offline**.
 Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in die Cloud und für Updates.
@@ -25,6 +25,7 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 | – (neu 2.1) | **Bewusst überbelegen**: in der Bestellung bei „reicht nicht“ – bleibt beim Tier, gelb markiert |
 | – (neu 2.1) | **Sonderfälle vom Metzger**: beim Kommissionieren mit Nummer der Sonderfälle-Kiste |
 | – (2.2) | Vakuum-Tüten werden nicht mehr gezählt; bei den Bestellungen steht nur noch, was **nicht** vakuumiert wird |
+| – (2.3) | **Packungen** frei je Artikel: z. B. `2x500+2x700`, `1500+1700`, `4+4 Stk` – Menge wird berechnet, beim Packen steht genau diese Aufteilung |
 | Preisliste, Ausbeute, Auto | **Einstellungen** |
 | Bestellformular A4/A5, Infozettel (PDF) | **Übersicht → Vordrucke drucken** (Preise automatisch aus der Preisliste; jede Preisliste = eigene Version der Zettel, frühere im Archiv) |
 | Mappe zurücksetzen | **Einstellungen → Daten & Sicherung** (ein „Neues Jahr“ gibt es nicht mehr – Bestellungen laufen über den Jahreswechsel einfach weiter) |
