@@ -722,7 +722,9 @@ function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
 function neuVerteilenPlan(S) {
   const heute = todayISO();
   const T = JSON.parse(JSON.stringify(S));
-  const mitKisten = new Set((T.kisten || []).map(k => k.tier));
+  // fest sind nur Tiere, deren Kisten schon gewogen werden (beim Metzger abgeholt); ein bloßer Kistenplan wird danach neu berechnet
+  const mitKisten = new Set((T.kisten || []).filter(k => kisteGewogen(k)).map(k => k.tier));
+  const mitPlan = new Set((T.kisten || []).map(k => k.tier).filter(n => !mitKisten.has(n)));
   const freiesTier = t => !!t && !t.archiv && !mitKisten.has(t.name);
   const beweglich = o => o.name && (o.status || 'offen') === 'offen' && !o.ueberbelegt &&
     (o.tier === 'Warteliste' || !o.tier || freiesTier(tier(T, o.tier)));
@@ -755,7 +757,32 @@ function neuVerteilenPlan(S) {
     return { nr: o.nr, name: o.name, eingang: o.eingang, von: v.tier, nach: o.tier, rang: o.rang, checkVorher: v.check,
       check: o.tier === 'Warteliste' ? '' : mengencheck(T, o) };
   });
-  return { zeilen, wechsel: zeilen.filter(z => !sameText(z.von, z.nach)), festTiere: [...mitKisten].filter(n => tier(S, n) && !tier(S, n).archiv) };
+  const wechsel = zeilen.filter(z => !sameText(z.von, z.nach));
+  // Kistenpläne (ungewogen), die durch das Verteilen nicht mehr stimmen
+  const betroffen = new Set(wechsel.flatMap(z => [z.von, z.nach]));
+  const planNeu = [...mitPlan].filter(n => tier(S, n) && !tier(S, n).archiv && (betroffen.has(n) || kistenplanVeraltet(S, n)));
+  return { zeilen, wechsel, festTiere: [...mitKisten].filter(n => tier(S, n) && !tier(S, n).archiv), planNeu };
+}
+// nach dem Verteilen: betroffene ungewogene Kistenpläne neu berechnen (bzw. zurücksetzen, wenn das Tier keine Bestellungen mehr hat)
+function kistenplaeneAktualisieren(S, namen) {
+  const neu = [], weg = [];
+  // alle betroffenen Tiere samt ihrer alten und neuen Abholgruppe einsammeln (nur ungewogene)
+  const alle = new Set();
+  for (const n of namen) { abholGruppe(S, n).forEach(x => alle.add(x)); (((S.packplaene || {})[n] || {}).tiere || []).forEach(x => alle.add(x)); alle.add(n); }
+  const liste = [...alle].filter(x => tier(S, x) && !tier(S, x).archiv && !kistenGewogenAnzahl(S, [x]) && S.kisten.some(k => k.tier === x) || namen.includes(x));
+  const erledigt = new Set();
+  for (const n of liste) {
+    if (erledigt.has(n)) continue;
+    const g = abholGruppe(S, n);
+    if (kistenGewogenAnzahl(S, g)) { g.forEach(x => erledigt.add(x)); continue; }
+    g.forEach(x => erledigt.add(x));
+    kistenZuruecksetzen(S, g);
+    if (!g.some(x => ordersOfTier(S, x).length)) { weg.push(g.join(' + ')); continue; }
+    const pp = packplanGruppe(S, g);
+    if (pp.fehler) { weg.push(g.join(' + ')); continue; }
+    (pp.tiere || []).forEach(x => { S.packplaene[x] = pp; }); packplanUebernehmen(S, pp); neu.push(pp.tier + ' (' + pp.kisten.length + ' Kisten)');
+  }
+  return { neu, weg };
 }
 function neuVerteilenUebernehmen(S, plan) {
   for (const z of plan.zeilen) { const o = S.bestellungen.find(x => x.nr === z.nr); if (o) { o.tier = z.nach; o.rang = z.rang; } }
@@ -1675,7 +1702,7 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
+  tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }

@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '2.4';
+const APP_VERSION = '2.5';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -127,23 +127,20 @@ async function neuVerteilenDialog(nurWennWechsel) {
   if (nurWennWechsel && !plan.wechsel.length) return false;
   const reicht = c => !c ? '' : c === 'ok' ? '<span class="ok">ok</span>' : `<span class="warn">${esc(c)}</span>`;
   const bleibtNicht = plan.zeilen.filter(z => sameText(z.von, z.nach) && z.check && z.check !== 'ok');
-  const html = `<p>Geprüft: <b>${plan.zeilen.length}</b> offene Bestellungen (Tiere ohne Kistenplan und Warteliste), in Reihenfolge des Eingangs.
-      ${plan.festTiere.length ? `<br><span class="klein">Fest (Kistenplan vorhanden): ${plan.festTiere.map(esc).join(', ')} · gepackte und bewusst überbelegte Bestellungen bleiben, wo sie sind.</span>` : ''}</p>
+  const html = `<p>Geprüft: <b>${plan.zeilen.length}</b> offene Bestellungen (alle Tiere ohne gewogene Kisten und Warteliste), in Reihenfolge des Eingangs.
+      ${plan.festTiere.length ? `<br><span class="klein">Fest (Kisten schon gewogen): ${plan.festTiere.map(esc).join(', ')} · gepackte und bewusst überbelegte Bestellungen bleiben, wo sie sind.</span>` : ''}</p>
     ${plan.wechsel.length ? `<p><b>${plan.wechsel.length} Bestellung${plan.wechsel.length === 1 ? '' : 'en'} wechseln das Tier:</b></p>
     <div class="tabwrap" style="max-height:50vh;overflow:auto"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Eingang</th><th>bisher</th><th></th><th>neu</th><th>Mengencheck</th></tr></thead><tbody>
     ${plan.wechsel.map(z => `<tr><td class="r fett">${z.nr}</td><td>${esc(z.name)}</td><td>${fmtDate(z.eingang)}</td><td>${esc(z.von)}</td><td>→</td><td class="fett">${esc(z.nach)}</td><td>${reicht(z.check)}</td></tr>`).join('')}
     </tbody></table></div>` : '<p class="ok"><b>Alles passt – keine Bestellung muss das Tier wechseln.</b></p>'}
     ${bleibtNicht.length ? `<p class="warn">Weiter „reicht nicht“ (kein Tier passt, bleibt wo sie war): ${bleibtNicht.map(z => 'Nr. ' + z.nr + ' ' + esc(z.name)).join(', ')}</p>` : ''}`;
-  // Tiere mit Kistenplan, aber noch nichts gewogen (noch nicht beim Metzger): Plan kann zurückgesetzt werden, dann werden sie mitverteilt
-  const ungewogen = plan.festTiere.filter(n => !kistenGewogenAnzahl(S, [n]));
-  const knoepfe = [{ k: 'x', t: plan.wechsel.length ? 'Abbrechen' : 'Schließen' }];
-  if (ungewogen.length) knoepfe.push({ k: 'reset', t: `Kistenplan ${ungewogen.join(', ')} zurücksetzen und mitverteilen`, cls: 'rot' });
-  if (plan.wechsel.length) knoepfe.push({ k: 'ok', t: `${plan.wechsel.length} übernehmen`, cls: 'haupt' });
-  const k = await dialog('Offene Bestellungen neu verteilen', html + (ungewogen.length ? `<p class="klein">${ungewogen.map(esc).join(', ')}: Kistenplan vorhanden, aber noch nichts gewogen – kann zurückgesetzt werden, dann werden diese Tiere mitverteilt.</p>` : ''), knoepfe);
-  if (k === 'reset') { kistenZuruecksetzen(S, ungewogen); speichern(); meldung(`Kistenplan von ${ungewogen.join(', ')} zurückgesetzt.`); return neuVerteilenDialog(false); }
+  const planHtml = plan.planNeu.length ? `<p class="klein">Kistenplan wird danach automatisch neu berechnet: <b>${plan.planNeu.map(esc).join(', ')}</b> (noch nichts gewogen).</p>` : '';
+  const k = await dialog('Offene Bestellungen neu verteilen', html + planHtml, plan.wechsel.length ? [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: `${plan.wechsel.length} übernehmen`, cls: 'haupt' }] : [{ k: 'x', t: 'Schließen', cls: 'haupt' }]);
   if (k !== 'ok') return false;
-  neuVerteilenUebernehmen(S, plan); speichern();
-  meldung(`${plan.wechsel.length} Bestellung(en) neu zugeordnet.`); render();
+  neuVerteilenUebernehmen(S, plan);
+  const kp = plan.planNeu.length ? kistenplaeneAktualisieren(S, plan.planNeu) : { neu: [], weg: [] };
+  speichern();
+  meldung(`${plan.wechsel.length} Bestellung(en) neu zugeordnet.` + (kp.neu.length ? ` Kistenplan neu: ${kp.neu.join(', ')}.` : '') + (kp.weg.length ? ` Kisten zurückgesetzt: ${kp.weg.join(', ')}.` : '')); render();
   return true;
 }
 ui.globalActs = { neuverteilen: () => neuVerteilenDialog(false) };
