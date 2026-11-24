@@ -684,6 +684,30 @@ function kundePflegen(S, name, tel, mail) {
   S.kunden.push({ nr: S.kunden.reduce((m, x) => Math.max(m, x.nr), 0) + 1, name, tel: tel || '', mail: mail || '', strasse: '', ort: '', notiz: '' });
   return true;
 }
+// Kunden-Vorschläge fürs Namensfeld: jedes getippte Wort muss einen Namensteil anfangen (Groß/klein, Umlaute egal);
+// ab 3 Ziffern wird auch die Telefonnummer durchsucht. Sortierung: Name beginnt mit Eingabe, dann viele Bestellungen, dann Alphabet.
+function kundenVorschlaege(S, q, max = 8) {
+  const n1 = s => String(s || '').toLowerCase().replace(/ä/g, 'ae').replace(/ö/g, 'oe').replace(/ü/g, 'ue').replace(/ß/g, 'ss');
+  const n2 = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ß/g, 'ss');
+  const woerter = s => s.split(/[\s,;.\-\/()]+/).filter(Boolean);
+  const roh = String(q || '').trim();
+  if (!roh) return [];
+  const ziffern = roh.replace(/\D/g, '');
+  const treffer = [];
+  for (const k of S.kunden || []) {
+    if (sameText(k.name, roh)) continue; // genau dieser Name steht schon im Feld
+    let ok = false, start = false;
+    for (const n of [n1, n2]) {
+      const qw = woerter(n(roh)), nw = woerter(n(k.name));
+      if (qw.length && qw.every(w => nw.some(x => x.startsWith(w)))) { ok = true; if (n(k.name).startsWith(n(roh))) start = true; }
+    }
+    if (!ok && ziffern.length >= 3 && /^[\d\s\/+\-()]+$/.test(roh) && String(k.tel || '').replace(/\D/g, '').includes(ziffern)) ok = true;
+    if (!ok) continue;
+    const os = (S.bestellungen || []).filter(o => sameText(o.name, k.name));
+    treffer.push({ k, start, anzahl: os.length, letzteNr: os.reduce((m, o) => Math.max(m, num(o.nr)), 0) || null });
+  }
+  return treffer.sort((a, b) => (b.start - a.start) || (b.anzahl - a.anzahl) || a.k.name.localeCompare(b.k.name, 'de')).slice(0, max);
+}
 function kundenStat(S, k) {
   const os = S.bestellungen.filter(o => sameText(o.name, k.name));
   return {
@@ -1284,7 +1308,7 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat,
+  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }

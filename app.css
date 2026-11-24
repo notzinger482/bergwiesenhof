@@ -301,3 +301,11 @@ details.karte summary { cursor: pointer; }
   @page vordruck { size: A4; margin: 0; }
   .druckseite.vordruck { page: vordruck; }
 }
+
+/* Kunden-Vorschläge im Bestellformular */
+.kdsuche { position: relative; }
+.kdvorschlag { display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 30; background: #fff; border: 1px solid var(--linie); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.15); max-height: 380px; overflow-y: auto; margin-top: 2px; }
+.kdvorschlag.auf { display: block; }
+.kdv { padding: 10px 14px; border-bottom: 1px solid #eee; cursor: pointer; font-size: 16px; color: var(--text); }
+.kdv:last-child { border-bottom: none; }
+.kdv.aktiv, .kdv:active { background: var(--gruen-h); }

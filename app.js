@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.8.1';
+const APP_VERSION = '1.8.2';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -215,7 +215,6 @@ function viewBestellung(nr, q, vorlage) {
   const sonderRows = () => (o.sonder.length ? o.sonder : []).map((s, i) => sonderZeile(s, i)).join('');
   const letzte = !nr && o.name ? letzteBestellungVon(o.name) : null;
   inhalt().innerHTML = `
-  <datalist id="kundenliste">${S.kunden.slice().sort((a, b) => a.name.localeCompare(b.name)).map(k => `<option value="${esc(k.name)}">`).join('')}</datalist>
   <div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">${nr ? `Bestellung Nr. ${nr}` : 'Neue Bestellung'}</h1>
     ${nr ? `${o.lagerOrt ? `<span class="marke blau" style="font-size:15px;padding:6px 12px">${esc(lagerText(o))}</span>` : ''}<button class="btn" data-act="lager">Lagerplatz …</button><select class="feld" style="width:auto" data-in="kopf" data-f="status">${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, (o.status || 'offen') === s)).join('')}</select>
     <button class="btn" data-act="teilen">Teilen …</button><button class="btn rot" data-act="loeschen">Löschen</button>` : ''}
@@ -225,7 +224,7 @@ function viewBestellung(nr, q, vorlage) {
     <div>
       <div class="karte"><h3 style="margin-top:0">Kunde</h3>
         <div class="formraster">
-          <label class="f ganz">Name<input class="feld" list="kundenliste" data-in="kopf" data-f="name" value="${esc(o.name)}" autocomplete="off" placeholder="Nachname, Vorname"></label>
+          <div class="f ganz kdsuche"><label class="f">Name<input class="feld" data-in="kopf" data-f="name" id="kdname" value="${esc(o.name)}" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="Nachname, Vorname – Vorschläge aus der Kundenliste"></label><div id="kdvorschlag" class="kdvorschlag"></div></div>
           <div class="ganz klein" id="kdinfo"></div>
           <label class="f">Telefon<input class="feld" type="tel" data-in="kopf" data-f="tel" value="${esc(o.tel)}"></label>
           <label class="f">Mail<input class="feld" type="email" data-in="kopf" data-f="mail" value="${esc(o.mail)}"></label>
@@ -311,9 +310,39 @@ function viewBestellung(nr, q, vorlage) {
     if (f === 'name') {
       const k = S.kunden.find(x => sameText(x.name, v));
       if (k) { if (!o.tel && k.tel) { o.tel = k.tel; $('[data-f=tel]').value = k.tel; } if (!o.mail && k.mail) { o.mail = k.mail; $('[data-f=mail]').value = k.mail; } }
+      kdVorschlaege(v);
     }
     aktualisieren();
   };
+  // ---- Kunden-Vorschläge beim Namen ----
+  let kdTreffer = [], kdAktiv = -1;
+  const kdBox = () => $('#kdvorschlag');
+  const kdZu = () => { kdTreffer = []; kdAktiv = -1; const b = kdBox(); if (b) { b.innerHTML = ''; b.classList.remove('auf'); } };
+  function kdVorschlaege(q) {
+    kdTreffer = kundenVorschlaege(S, q); kdAktiv = -1;
+    const b = kdBox(); if (!b) return;
+    if (!kdTreffer.length) return kdZu();
+    b.innerHTML = kdTreffer.map((t, i) => `<div class="kdv" data-i="${i}"><div class="fett">${esc(t.k.name)}</div><div class="klein">${[t.k.tel, t.k.ort, t.anzahl ? `${t.anzahl} Bestellung${t.anzahl > 1 ? 'en' : ''}${t.letzteNr ? ', zuletzt Nr. ' + t.letzteNr : ''}` : 'noch keine Bestellung'].filter(Boolean).map(esc).join(' · ')}</div></div>`).join('');
+    b.classList.add('auf');
+  }
+  function kdWaehlen(i) {
+    const t = kdTreffer[i]; if (!t) return;
+    const k = t.k, el = $('#kdname');
+    o.name = k.name; el.value = k.name;
+    if (k.tel && !o.tel) { o.tel = k.tel; $('[data-f=tel]').value = k.tel; }
+    if (k.mail && !o.mail) { o.mail = k.mail; $('[data-f=mail]').value = k.mail; }
+    ui.formDirty = true; kdZu(); aktualisieren();
+  }
+  const kdEl = $('#kdname');
+  kdEl.addEventListener('focus', () => { if (kdEl.value.trim()) kdVorschlaege(kdEl.value); });
+  kdEl.addEventListener('blur', () => setTimeout(kdZu, 200));
+  kdEl.addEventListener('keydown', e => {
+    if (!kdTreffer.length) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); kdAktiv = (kdAktiv + (e.key === 'ArrowDown' ? 1 : -1) + kdTreffer.length) % kdTreffer.length; $$('.kdv', kdBox()).forEach((d, i) => d.classList.toggle('aktiv', i === kdAktiv)); }
+    else if (e.key === 'Enter') { e.preventDefault(); kdWaehlen(kdAktiv >= 0 ? kdAktiv : 0); }
+    else if (e.key === 'Escape') kdZu();
+  });
+  kdBox().addEventListener('pointerdown', e => { const d = e.target.closest('.kdv'); if (d) { e.preventDefault(); kdWaehlen(+d.dataset.i); } });
   ui.ins.pos = el => {
     const a = S.artikel[+el.closest('tr').dataset.i]; const f = el.dataset.f;
     const p = o.pos[a.name] = o.pos[a.name] || { vak: true };
