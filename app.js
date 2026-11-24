@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '2.1';
+const APP_VERSION = '2.2';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -241,7 +241,7 @@ function tierKarte(t) {
 //  Bestellformular
 // =====================================================================
 function leereBestellung() {
-  return { nr: null, eingang: todayISO(), tier: '', name: '', tel: '', mail: '', weg: '', notiz: '', wunsch: '', pakete: 0, pakVak: 0, tuetenManuell: null, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
+  return { nr: null, eingang: todayISO(), tier: '', name: '', tel: '', mail: '', weg: '', notiz: '', wunsch: '', pakete: 0, pakVak: 0, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
 }
 function viewBestellung(nr, q, vorlage) {
   let o;
@@ -313,7 +313,6 @@ function viewBestellung(nr, q, vorlage) {
         <div id="sonderliste">${sonderRows()}</div>
         <button class="btn klein" data-act="sonderNeu">+ Sonderwunsch</button>
       </div>
-      <div class="karte"><label class="f">Vakuum-Tüten zum Packen (leer = automatisch, kostenlos)<input class="feld zahl" inputmode="numeric" style="max-width:160px" data-in="kopf" data-f="tuetenManuell" value="${has(o.tuetenManuell) ? o.tuetenManuell : ''}" id="tuetenfeld"></label><div class="klein" id="tuetenauto"></div></div>
     </div>
     <div class="karte">
       <h3 style="margin-top:0">Einzelartikel</h3>
@@ -371,15 +370,13 @@ function viewBestellung(nr, q, vorlage) {
     const k = S.kunden.find(x => sameText(x.name, o.name));
     const lb = !o.nr && o.name ? letzteBestellungVon(o.name) : null;
     $('#kdinfo').innerHTML = !o.name ? '' : k ? `Kd-Nr. ${k.nr}${k.notiz ? ' – ' + esc(k.notiz) : ''}${lb ? ` · <a href="#" data-act="uebernehmen">letzte Bestellung (Nr. ${lb.nr}) übernehmen</a>` : ''}` : '<span class="ok">neuer Kunde – wird beim Speichern angelegt</span>';
-    // Tüten & Summe
-    $('#tuetenauto').textContent = `automatisch: ${tuetenAuto(S, o)} Tüten` + (vakArtikel(S, o).length ? ` (${vakArtikel(S, o).join(', ')})` : '');
+    // Summe
     const ek = einzelKg(S, o);
     $('#summe').innerHTML = `Einzelartikel ca. <b>${fmtNum(ek, 2)} kg</b>${num(o.pakete) ? ` + ${fmtNum(o.pakete)} Genusspaket${num(o.pakete) > 1 ? 'e' : ''}` : ''} · Schätzpreis <b>${fmtEur(schaetzpreis(S, o))}</b>`;
   };
   ui.ins.kopf = el => {
     const f = el.dataset.f; let v = el.value;
     if (['pakete', 'pakVak'].includes(f)) v = num(v);
-    if (f === 'tuetenManuell') v = el.value.trim() === '' ? null : num(v);
     o[f] = v; ui.formDirty = true;
     if (f === 'tier') delete o.ueberbelegt;
     if (f === 'status') { const zb = $('#zahlbox'); if (zb) zb.style.display = v === 'abgeholt' ? '' : 'none'; }

@@ -125,7 +125,7 @@ function docPackliste(pl) {
 }
 function docPick(ko) {
   const o = ko.o;
-  return { title: `Kommissionierung Nr. ${o.nr} – ${o.name}`, sub: [`Tier: ${o.tier}`, `Genusspakete: ${fmtNum(o.pakete)}${num(o.pakVak) ? ` (davon ${fmtNum(o.pakVak)} vakuumieren)` : ''} · Vakuum-Tüten: ${ko.tueten || '–'}`],
+  return { title: `Kommissionierung Nr. ${o.nr} – ${o.name}`, sub: [`Tier: ${o.tier}`, `Genusspakete: ${fmtNum(o.pakete)}${num(o.pakVak) ? ` (davon ${fmtNum(o.pakVak)} vakuumieren)` : ''}${ko.nichtVak.length ? ' · nicht vakuumieren: ' + ko.nichtVak.join(', ') : ''}`],
     blocks: [{ type: 'kv', rows: [['Lagerplatz', lagerText(o) || lagerVorschlag(S, o).ort, lagerText(o) ? '' : '(' + lagerVorschlag(S, o).grund + ')'], ['Sonderfälle (Metzger)', ko.sonder.join('; ') || '–'], ['Innereien (separat)', ko.innereien.join(', ') || '–']] },
       ...(o.packNotiz ? [{ type: 'text', bold: true, text: 'Notiz: ' + o.packNotiz }] : []),
       { type: 'table', head: ['☐', 'Kiste', 'Menge', 'Inhalt', 'verpacken', 'Stellplatz'], widths: [0.5, 0.9, 1.2, 2.4, 4, 2.4], align: ['', 'r', 'r', '', '', ''],
@@ -386,7 +386,7 @@ function viewKommissionierung(q) {
         return `<div class="lagerbox ${ort === 'Kühlschrank' ? 'ks' : 'kr'}"><div class="klein">${ko.o.lagerOrt ? 'verräumt' : 'Lagerplatz nach dem Packen'}</div><div class="lagerort">${ort === 'Kühlschrank' ? '❄ Kühlschrank' : '▣ Kühlraum – Metzgerkiste'}${ko.o.lagerPlatz ? ' · ' + esc(lagerPlatzText(ko.o)) : ''}</div><div class="klein">${esc(lv.grund)}</div></div>`; })()}
       <table class="doc-kv"><tr><td>Genusspakete</td><td class="fett">${fmtNum(ko.o.pakete) || '–'}${num(ko.o.pakVak) ? ` (davon ${fmtNum(ko.o.pakVak)} vakuumieren)` : ''}</td></tr>
       <tr><td>Sonderfälle (Metzger)</td><td class="fett">${esc(ko.sonder.join('; ') || '–')}</td></tr>
-      <tr><td>Vakuum-Tüten</td><td class="fett">${ko.tueten || '–'}</td></tr>
+      <tr><td>Nicht vakuumieren</td><td class="fett">${esc(ko.nichtVak.join(', ') || '–')}</td></tr>
       <tr><td>Innereien (separat)</td><td class="fett">${esc(ko.innereien.join(', ') || '–')}</td></tr>
       ${ko.o.notiz ? `<tr><td>Notiz</td><td class="fett">${esc(ko.o.notiz)}</td></tr>` : ''}</table>
       <div class="knopfleiste" style="margin-top:14px"><button class="btn haupt" data-act="gepackt">Gepackt ✓ und weiter</button><button class="btn" data-act="teilen">Als Bild teilen</button><button class="btn" data-act="drucken">Drucken</button></div>
@@ -693,7 +693,7 @@ function tabAusbeute(z) {
    <div class="karte"><h3 style="margin-top:0">Einstellungen</h3><div class="zeile oben">
     ${feld('sgBulle', 'Standard-Schlachtgewicht Bulle (kg)')}${feld('sgRind', 'Standard-Schlachtgewicht Rind/Färse (kg)')}
     ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
-    ${feld('tueteJeKg', 'Vakuumieren ohne Portionsangabe: 1 Tüte je … kg')}
+
 </div></div>
    <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">
     ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}${feld('lagerFaecher', 'Fächer im Kühlschrank (Anzahl)')}${feld('lagerKisten', 'Metzgerkisten im Kühlraum (Nr. 1 bis …)')}</div></div>

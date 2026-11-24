@@ -266,6 +266,8 @@ function tuetenAuto(S, o) {
   return t;
 }
 const tueten = (S, o) => has(o.tuetenManuell) ? num(o.tuetenManuell) : tuetenAuto(S, o);
+// Ausnahmen vom Standard „vakuumiert“ (seit 2.2 ersetzt das die Tüten-Zählung)
+const nichtVak = (S, o) => S.artikel.filter(a => { const p = o.pos && o.pos[a.name]; return p && !istVak(p) && qty(S, o, a.name) > 0 && !istOrgan(a.name); }).map(a => a.name);
 // ---------- Preislisten mit „gültig ab“ ----------
 // settings.preislisten = [{ ab: 'JJJJ-MM-TT', preise: { Artikel: €/kg }, preisPaketKg, preisVakPaket }]
 // Maßgeblich für eine Bestellung ist der Abholtermin ihres Tiers (die Kasse rechnet ab dem Stichtag mit den neuen Preisen).
@@ -322,8 +324,8 @@ function bestellText(S, o) {
       t.push(`${fmtNum(q, 3)} ${a.einheit === 'Stk' ? 'Stk' : 'kg'} ${a.name}${po ? ' (' + po.text + ')' : ''}${ochsTxt}`);
     }
   }
-  const tu = tueten(S, o);
-  if (tu > 0) t.push(`${fmtNum(tu)} ${tu === 1 ? 'Tüte' : 'Tüten'} vakuumieren`);
+  const nv = nichtVak(S, o);
+  if (nv.length) t.push(`nicht vakuumieren: ${nv.join(', ')}`);
   return t.join(', ');
 }
 // Gewicht einer Position in kg (Stück-Artikel über das geschätzte Stückgewicht)
@@ -452,7 +454,6 @@ function bestellungTeilen(S, o, mengen, ziel) {
     else { np.menge = m; p.menge = r3(num(p.menge) - m); if (!(p.menge > 0)) delete o.pos[r.key]; }
   }
   if (!bewegt) return null;
-  o.tuetenManuell = null;
   o.notiz = ((o.notiz ? o.notiz + ' · ' : '') + `Teil verschoben → Nr. ${neu.nr} (${ziel})`).trim();
   S.bestellungen.push(neu);
   return neu;
@@ -1444,7 +1445,7 @@ function kommissionierung(S, nr) {
   rows.forEach(r => { r.ausKisten = picks.filter(p => p.art === r.art).reduce((s, p) => s + p.roh, 0); r.fehlt = istOrgan(r.art) ? 0 : (r.bedarf - r.ausKisten > 0.05 ? r.bedarf - r.ausKisten : 0); });
   const innereien = ORGANE.map(n => { const q = qty(S, o, n); const a = art(S, n); return q > 0 ? `${fmtNum(q, 3)} ${a ? a.einheit : ''} ${n}` : ''; }).filter(Boolean);
   const sonder = sonderOf(S, o).map(s => sonderText(S, s));
-  return { o, tier: t, rows, picks, innereien, sonder, tueten: tueten(S, o) };
+  return { o, tier: t, rows, picks, innereien, sonder, nichtVak: nichtVak(S, o) };
 }
 
 // ---------- Hackfleisch-Zettel ----------
@@ -1619,7 +1620,7 @@ function standPruefen(x) {
 if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
-  tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
+  tuetenAuto, tueten, nichtVak, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,

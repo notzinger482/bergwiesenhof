@@ -191,12 +191,12 @@ function excelExport(S) {
       { h: 'Bestell-Nr.', typ: 'num', w: 10 }, { h: 'Eingang', typ: 'date', w: 11 }, { h: 'Tier', w: 14 }, { h: 'Name', w: 22 }, { h: 'Telefon', w: 15 }, { h: 'Mail', w: 22 }, { h: 'Bestellweg', w: 11 },
       { h: 'Genusspakete', typ: 'num', w: 9 }, { h: 'davon vakuumiert', typ: 'num', w: 9 },
       ...S.artikel.map(a => ({ h: `${a.name} (${a.einheit === 'Stk' ? 'Stk' : 'kg'})`, typ: 'num', w: 10 })),
-      { h: 'Vakuum-Tüten', typ: 'num', w: 9 }, { h: 'Sonderwünsche', w: 30 }, { h: 'Schätzpreis', typ: 'eur', w: 11 }, { h: 'Endbetrag', typ: 'eur', w: 11 },
+      { h: 'Sonderwünsche', w: 30 }, { h: 'Schätzpreis', typ: 'eur', w: 11 }, { h: 'Endbetrag', typ: 'eur', w: 11 },
       { h: 'Status', w: 9 }, { h: 'Zahlung offen', w: 9 }, { h: 'abgeholt am', typ: 'date', w: 11 }, { h: 'Lagerort', w: 12 }, { h: 'Fach / Kiste', w: 10 }, { h: 'gepackt am', typ: 'date', w: 11 }, { h: 'Mengencheck', w: 22 }, { h: 'Notiz intern', w: 24 }, { h: 'Notiz zur Bestellung', w: 28 }, { h: 'Wunschtermin', typ: 'date', w: 11 }, { h: 'vakuumieren (Artikel)', w: 24 }, { h: 'Bestellung (Text)', w: 60 }
     ],
     rows: best.map(o => [o.nr, o.eingang, o.tier, o.name, o.tel, o.mail, o.weg, n(o.pakete), n(o.pakVak),
       ...S.artikel.map(a => { const q = qty(S, o, a.name); return q > 0 ? q : ''; }),
-      tueten(S, o) || '', sonderOf(S, o).map(s => sonderText(S, s)).join('; '), schaetzpreis(S, o), n(o.endbetrag),
+      sonderOf(S, o).map(s => sonderText(S, s)).join('; '), schaetzpreis(S, o), n(o.endbetrag),
       o.status || 'offen', zahlungOffen(o) ? 'ja' : '', o.abgeholtAm || '', o.lagerOrt || '', lagerPlatzText(o), o.gepacktAm || '', mengencheck(S, o), o.notiz, o.packNotiz || '', o.wunsch, vakArtikel(S, o).join('; '), bestellText(S, o)])
   };
   const SW = { name: 'Sonderwünsche', cols: [{ h: 'Bestell-Nr.', typ: 'num' }, { h: 'Name', w: 22 }, { h: 'Tier' }, { h: 'Artikel', w: 20 }, { h: 'Menge', typ: 'num' }, { h: 'Einheit' }, { h: 'Wunsch / Vorgabe', w: 30 }], rows: [] };

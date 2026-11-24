@@ -1,6 +1,6 @@
 # Bestellsystem Bergwiesenhof – Tablet-App
 
-Version 2.1 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
+Version 2.2 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
 
 Die App ersetzt die Excel-Datei mit allen Makros. Sie läuft nach der Installation **komplett offline**.
 Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in die Cloud und für Updates.
@@ -9,7 +9,7 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 
 | Excel / Makro | in der App |
 |---|---|
-| Eingabefenster (Strg+Umschalt+B) | **+ Bestellung** (Kunde, Tier, Pakete, Einzelartikel mit Anzahl × g, am Stück, vakuumieren, Sonderwünsche, Tüten) |
+| Eingabefenster (Strg+Umschalt+B) | **+ Bestellung** (Kunde, Tier, Pakete, Einzelartikel mit Anzahl × g, am Stück, vakuumieren, Sonderwünsche, Notiz) |
 | Bestellungen, Kunden, Sonderwünsche, Portionen | **Bestellungen**, **Kunden** (Suche, Statistik, „letzte Bestellung übernehmen“) |
 | Tier-Fenster (Strg+Umschalt+T), Warteliste | **Tiere** |
 | Mengenprüfung, Metzgerauftrag | **Schlachttag** → Mengenprüfung / Metzgerauftrag (als Bild an WhatsApp) |
@@ -24,6 +24,7 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 | – (neu 2.1) | **Offene Bestellungen neu verteilen** (Tiere/Bestellungen, auch automatisch nach neuem Tier): nur offene, Tiere ohne Kistenplan, mit Vorschau |
 | – (neu 2.1) | **Bewusst überbelegen**: in der Bestellung bei „reicht nicht“ – bleibt beim Tier, gelb markiert |
 | – (neu 2.1) | **Sonderfälle vom Metzger**: beim Kommissionieren mit Nummer der Sonderfälle-Kiste |
+| – (2.2) | Vakuum-Tüten werden nicht mehr gezählt; bei den Bestellungen steht nur noch, was **nicht** vakuumiert wird |
 | Preisliste, Ausbeute, Auto | **Einstellungen** |
 | Bestellformular A4/A5, Infozettel (PDF) | **Übersicht → Vordrucke drucken** (Preise automatisch aus der Preisliste; jede Preisliste = eigene Version der Zettel, frühere im Archiv) |
 | Mappe zurücksetzen | **Einstellungen → Daten & Sicherung** (ein „Neues Jahr“ gibt es nicht mehr – Bestellungen laufen über den Jahreswechsel einfach weiter) |
