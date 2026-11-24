@@ -3,7 +3,9 @@
 // Reine Funktionen auf dem Datenstand "S" (state) – keine Oberfläche.
 'use strict';
 
-const ORGANE = ['Leber', 'Nieren', 'Herz', 'Zunge', 'Bäckle', 'Ochsenschwanz'];
+const ORGANE = ['Leber', 'Nieren', 'Herz', 'Zunge', 'Bäckle'];
+// Ochsenschwanz: nach Stück bestellt, läuft aber über Metzgerauftrag und Kisten (gemeinsam mit den Beinscheiben)
+const OCHS = 'Ochsenschwanz';
 const BEIN = 'Beinscheiben';
 const HACK = 'Hackfleisch';
 const GULASCH = 'Gulasch geschnitten';
@@ -563,7 +565,9 @@ function metzgerauftrag(S, tierName) {
     separat.push({ nr: o.nr, name: o.name, art: s.art, menge: has(s.menge) ? fmtNum(s.menge, 3) + ' ' + (a ? a.einheit : '') : '', hinweis: s.wunsch });
   }
   const waden = ords.reduce((s, o) => { const p = o.pos && o.pos[BEIN]; return s + (istWade(art(S, BEIN), p) ? num(p.anzahl) : 0); }, 0);
-  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, waden };
+  const ochsB = ords.reduce((s, o) => s + qty(S, o, OCHS), 0);
+  const ochs = { bestellt: ochsB, vorhanden: has(S.settings.ochsStk) ? num(S.settings.ochsStk) : 1 };
+  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, waden, ochs };
 }
 
 // ---------- Packplan (Makro PackplanFuer) ----------
@@ -582,7 +586,7 @@ function kisteGruppe(items) {
   }
   return g === -1 ? 0 : g;
 }
-const kistenTxt = items => items.map(i => `${i.art}${i.info ? ' (' + i.info + ')' : ''} ~${Math.round(i.kg)} kg`).join(' + ');
+const kistenTxt = items => items.map(i => i.art === OCHS ? `${OCHS} ${fmtNum(i.kg)} Stk` : `${i.art}${i.info ? ' (' + i.info + ')' : ''} ~${Math.round(i.kg)} kg`).join(' + ');
 function packplan(S, tierName) {
   const t = tier(S, tierName);
   if (!t) return { fehler: 'Tier unbekannt' };
@@ -702,6 +706,19 @@ function packplan(S, tierName) {
     if (p.need < C[k].need) C[k].need = p.need;
     C[k].items.push({ art: p.art, kg: r1(p.w), info: p.info || '' });
   }
+  // Ochsenschwanz (ganz, nach Stück) kommt mit in die Beinscheiben-/Waden-Kiste
+  const ochsN = Math.max(ma.ochs.vorhanden, ma.ochs.bestellt);
+  if (ochsN > 0) {
+    const kOchs = num((art(S, OCHS) || {}).stueckG) / 1000 || 2;
+    let needO = BIG;
+    ords.forEach((o, k) => { if (needO === BIG && qty(S, o, OCHS) > 0) needO = k + 1; });
+    let c = C.find(c => c.items.some(i => i.art === BEIN));
+    if (!c) { c = { items: [], w: 0, need: needO }; C.push(c); }
+    c.items.push({ art: OCHS, kg: ochsN, info: '' });
+    c.w += ochsN * kOchs;
+    if (needO < c.need) c.need = needO;
+    if (ma.ochs.bestellt > ma.ochs.vorhanden) warnVorab.push(`Ochsenschwanz: ${fmtNum(ma.ochs.bestellt)} Stk bestellt, aber nur ca. ${fmtNum(ma.ochs.vorhanden)} je Tier.`);
+  }
   // Stellplätze vorbereiten
   const auto = S.auto;
   const warn = warnVorab.slice();
@@ -712,7 +729,7 @@ function packplan(S, tierName) {
   const nFeld = auto.filter((f, i) => num(f.hoehe) > 0 && (i !== hackIdx || hatHack)).length;
   while (C.length < nFeld) {
     let aMax = -1, wMax = 0;
-    C.forEach((c, j) => { if (c.w > wMax && !c.items.some(i => i.art === 'Sonderfälle (beschriftet)' || i.art === HACK || EINE_KISTE.includes(i.art))) { wMax = c.w; aMax = j; } });
+    C.forEach((c, j) => { if (c.w > wMax && !c.items.some(i => i.art === 'Sonderfälle (beschriftet)' || i.art === HACK || i.art === OCHS || EINE_KISTE.includes(i.art))) { wMax = c.w; aMax = j; } });
     if (aMax < 0 || wMax < 1) break;
     const c = C[aMax];
     let neu;
@@ -933,7 +950,7 @@ function innereien(S, tierName) {
   const st = S.settings;
   const ords = ordersOfTier(S, t.name);
   const lp = num(st.leberPortionG) || 500;
-  const vorh = { Leber: num(st.leberKg), Nieren: num(st.nierenStk), Herz: num(st.herzStk), Zunge: num(st.zungeStk), 'Bäckle': has(st.baeckleStk) ? num(st.baeckleStk) : 2, Ochsenschwanz: num(st.ochsStk) };
+  const vorh = { Leber: num(st.leberKg), Nieren: num(st.nierenStk), Herz: num(st.herzStk), Zunge: num(st.zungeStk), 'Bäckle': has(st.baeckleStk) ? num(st.baeckleStk) : 2 };
   const uebersicht = ORGANE.map(n => {
     const best = ords.reduce((s, o) => s + qty(S, o, n), 0);
     const rest = vorh[n] - best;
@@ -944,7 +961,6 @@ function innereien(S, tierName) {
       else { const g = Math.round(rest * 1000); txt = `${Math.floor(g / lp)} × ${lp} g vakuumieren` + (g % lp > 0 ? ` + Rest ca. ${g % lp} g` : ''); }
     } else if (Math.abs(rest) < 1e-9) txt = '–';
     else if (n === 'Nieren') txt = `${fmtNum(rest)} × einzeln vakuumieren`;
-    else if (n === 'Ochsenschwanz') txt = `${fmtNum(rest)} Stk übrig`;
     else txt = `${fmtNum(rest)} × vakuumieren`;
     return { art: n, vorhanden: vorh[n], bestellt: best, rest, txt, einheit: n === 'Leber' ? 'kg' : 'Stk' };
   });
@@ -953,7 +969,7 @@ function innereien(S, tierName) {
     const po = portionOf(S, o, 'Leber');
     const lq = qty(S, o, 'Leber');
     return { nr: o.nr, name: o.name, leber: lq || null, leberAls: lq > 0 ? (po ? po.text : fmtNum(lq, 3) + ' kg') : '',
-      nieren: qty(S, o, 'Nieren') || null, herz: qty(S, o, 'Herz') || null, zunge: qty(S, o, 'Zunge') || null, baeckle: qty(S, o, 'Bäckle') || null, ochs: qty(S, o, 'Ochsenschwanz') || null,
+      nieren: qty(S, o, 'Nieren') || null, herz: qty(S, o, 'Herz') || null, zunge: qty(S, o, 'Zunge') || null, baeckle: qty(S, o, 'Bäckle') || null,
       vak: v.length ? v.join(' ') : 'nein' };
   });
   return { tier: t, uebersicht, rows };
@@ -1065,5 +1081,5 @@ if (typeof module !== 'undefined') module.exports = {
   tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, tierUmbenennen, kundePflegen, kundenStat,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
-  HACK, GULASCH, ORGANE, setDefaults: d => { global.DEFAULTS = d; }
+  HACK, GULASCH, ORGANE, OCHS, setDefaults: d => { global.DEFAULTS = d; }
 };

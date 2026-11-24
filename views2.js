@@ -19,7 +19,8 @@ function docMetzger(ma) {
   const t = ma.tier;
   const bl = [{ type: 'h', text: 'Gesamtmengen' },
     { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.kistenText ? `(${ma.hack.kistenText})` : ''], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', '']]
-      .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Namen siehe unten']] : []) }];
+      .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Namen siehe unten']] : [])
+      .concat(ma.ochs.bestellt > 0 || ma.ochs.vorhanden > 0 ? [['Ochsenschwanz', ma.ochs.bestellt > 0 ? `${fmtNum(ma.ochs.bestellt)} Stück bestellt` : 'nicht bestellt', `ganz lassen – kommt zu den Beinscheiben in die Kiste${ma.ochs.bestellt > ma.ochs.vorhanden ? ' · ACHTUNG: mehr bestellt als vorhanden' : ''}`]] : []) }];
   if (ma.hack.ueberAusbeute) bl.push({ type: 'text', bold: true, text: 'Mehr Hackfleisch als üblich: zuerst Schulterstücke (Bug) auflösen, Keulenstücke als Braten behalten.' });
   if (ma.gulasch.insHack > 0.05) bl.push({ type: 'text', text: `Kein Gulasch bestellt: ca. ${fmtNum(ma.gulasch.insHack, 0)} kg Kamm/Hals ins Hackfleisch.` });
   bl.push({ type: 'text', text: (ma.waden > 0 ? 'Übrige Hesse als Beinscheiben. ' : 'Hesse wie immer als Beinscheiben. ') + 'Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
@@ -54,8 +55,8 @@ function docInnereien(ii) {
       { type: 'table', head: ['Innerei', 'vorhanden ca.', 'bestellt', 'Rest', 'Rest verarbeiten'], widths: [2, 1.5, 1.3, 1.2, 4], align: ['', 'r', 'r', 'r', ''],
         rows: ii.uebersicht.map(u => [u.art, fmtNum(u.vorhanden) + ' ' + u.einheit, fmtNum(u.bestellt, 3), fmtNum(u.rest, 3), u.txt]), rowClass: ii.uebersicht.map(u => u.rest < -1e-9 ? 'rot' : '') },
       { type: 'h', text: 'Bestellungen' },
-      { type: 'table', head: ['Nr.', 'Name', 'Leber kg', 'Leber verpacken', 'Nieren', 'Herz', 'Zunge', 'Bäckle', 'Ochsenschw.', 'vakuumieren', '✓'], widths: [0.8, 2.6, 1, 1.7, 0.9, 0.8, 0.8, 0.8, 1.2, 1.7, 0.5], align: ['r', '', 'r', '', 'r', 'r', 'r', 'r', 'r', '', ''],
-        rows: ii.rows.map(r => [r.nr, r.name, fmtNum(r.leber, 3), r.leberAls, r.nieren || '', r.herz || '', r.zunge || '', r.baeckle || '', r.ochs || '', r.vak, '☐']) },
+      { type: 'table', head: ['Nr.', 'Name', 'Leber kg', 'Leber verpacken', 'Nieren', 'Herz', 'Zunge', 'Bäckle', 'vakuumieren', '✓'], widths: [0.8, 2.6, 1, 1.7, 0.9, 0.8, 0.8, 0.9, 1.7, 0.5], align: ['r', '', 'r', '', 'r', 'r', 'r', 'r', '', ''],
+        rows: ii.rows.map(r => [r.nr, r.name, fmtNum(r.leber, 3), r.leberAls, r.nieren || '', r.herz || '', r.zunge || '', r.baeckle || '', r.vak, '☐']) },
       { type: 'text', text: '„vorhanden“ = Schätzwerte aus den Einstellungen (Innereien je Tier).' }], footer: fussZeile() };
 }
 function docPackliste(pl) {
@@ -442,34 +443,35 @@ function tabAusbeute(z) {
   z.innerHTML = `<div class="karte"><h3 style="margin-top:0">Ausbeute je Tier (Anteil am Schlachtgewicht)</h3>
    <label class="zeile" style="gap:10px;margin-bottom:10px"><input type="checkbox" data-ch="rindwie" style="width:24px;height:24px"${eigen ? '' : ' checked'}> <b>Rind: Werte vom Bullen übernehmen</b> <span class="klein">(Haken weg = eigene Prozente für Rinder eingeben)</span></label>
    <div class="tabwrap"><table class="tab"><thead><tr><th>Bestellartikel</th><th class="r">Anteil Bulle (%)</th><th class="r">Anteil Rind (%)</th><th class="r">Referenz</th><th class="r">Bulle ${fmtNum(st.sgBulle)} kg</th><th class="r">Rind ${fmtNum(st.sgRind)} kg</th><th>Teilstücke für die Kistenfüllung</th></tr></thead><tbody>
-   ${S.artikel.map((a, i) => num(a.anteil) > 0 || num(a.anteilRind) > 0 || !istOrgan(a.name) && !a.beutelG ? `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td>
+   ${S.artikel.map((a, i) => num(a.anteil) > 0 || num(a.anteilRind) > 0 || !istOrgan(a.name) && a.name !== OCHS && !a.beutelG ? `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td>
      <td style="width:110px"><input class="feld zahl${ausserhalb(num(a.anteil), a.refMin, a.refMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="anteil" data-f="anteil" value="${fmtNum(num(a.anteil) * 100, 2)}"></td>
      <td style="width:110px"><input class="feld zahl${eigen ? '' : ' auto'}${ausserhalb(anteilVon(S, a, 'Rind'), a.refMin, a.refMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="anteil" data-f="anteilRind" value="${fmtNum(anteilVon(S, a, 'Rind') * 100, 2)}"${eigen ? '' : ' readonly'}></td>
      <td class="r klein" style="white-space:nowrap">${refText(a.refMin, a.refMax)}</td>
      <td class="r">${fmtNum(num(a.anteil) * st.sgBulle, 1)} kg</td><td class="r">${fmtNum(anteilVon(S, a, 'Rind') * st.sgRind, 1)} kg</td><td><input class="feld" data-ch="teile" value="${esc(a.teile || '')}"></td></tr>` : '').join('')}
    <tr><td class="fett">Summe</td><td class="r fett">${fmtNum(sB * 100, 1)} %</td><td class="r fett">${fmtNum(sR * 100, 1)} %</td><td colspan="4"></td></tr></tbody></table></div>
    <p class="klein">Rot = außerhalb der Referenzspanne (Tippfehler?). Gilt für alle Tiere dieses Typs ohne eingetragenes Schlachtgewicht wie mit. Änderungen wirken sofort auf Mengenprüfung, Paketgewicht und Packplan.</p></div>
-   <div class="karte"><h3 style="margin-top:0">Braten – gewachsene Stücke <span class="klein">– für Kistenfüllung, Gewichte und den Bug-Anteil</span></h3>
-    <p class="klein">Werte für Rind und Bulle mit Standard-Schlachtgewicht. Für jedes Tier werden die Stücke auf dessen Braten-Ausbeute hochgerechnet (Rind ${fmtNum(st.sgRind)} kg: ${fmtNum(yieldArt(S, { typ: 'Rind', sg: null }, 'Braten'), 1)} kg, Bulle ${fmtNum(st.sgBulle)} kg: ${fmtNum(yieldArt(S, { typ: 'Bulle', sg: null }, 'Braten'), 1)} kg). Nur die angehakten Stücke (Bug) dürfen bei Bedarf ins Hack – das falsche Filet bleibt immer Braten.</p>
-    <div class="tabwrap" style="max-width:860px"><table class="tab"><thead><tr><th>Teilstück</th><th class="r">Stück</th><th class="r">kg je Stück<br>Rind</th><th class="r">kg je Stück<br>Bulle</th><th class="r">Referenz</th><th class="r">= kg Rind</th><th class="r">= kg Bulle</th><th class="c">darf bei Bedarf<br>ins Hack</th><th></th></tr></thead><tbody>
-    ${(st.bratenTeile || []).map((x, i) => `<tr data-i="${i}"><td><input class="feld" data-ch="bt" data-f="name" value="${esc(x.name)}"></td>
-      <td style="width:80px"><input class="feld zahl" inputmode="numeric" data-ch="bt" data-f="stueck" value="${fmtNum(x.stueck)}"></td>
-      <td style="width:96px"><input class="feld zahl${ausserhalb(num(x.kg), x.kgMin, x.kgMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="bt" data-f="kg" value="${fmtNum(x.kg, 3)}"></td>
-      <td style="width:96px"><input class="feld zahl${num(x.kgBulle) > 0 && ausserhalb(num(x.kgBulle), x.kgMin, x.kgMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="bt" data-f="kgBulle" value="${num(x.kgBulle) > 0 ? fmtNum(x.kgBulle, 3) : ''}" placeholder="wie Rind"></td>
+   <div class="karte"><h3 style="margin-top:0">Ganze Stücke für die Kisten <span class="klein">– Kistenfüllung, Stückgewichte, Bug-Anteil</span></h3>
+    <p class="klein">Diese Stücke kommen ungeschnitten vom Metzger und werden Stück für Stück auf die Kisten verteilt (z. B. „Braten (2× Unterschale, 2× Hochrippe)“ oder „Filet (2 ganze Stücke)“). Werte für Rind ${fmtNum(st.sgRind)} kg und Bulle ${fmtNum(st.sgBulle)} kg; für jedes Tier wird auf dessen Ausbeute hochgerechnet. Nur angehakte Stücke (Bug) dürfen bei Bedarf ins Hack – das falsche Filet bleibt immer Braten.</p>
+    <div class="tabwrap" style="max-width:980px"><table class="tab"><thead><tr><th>Artikel</th><th>Teilstück</th><th class="r">Stück</th><th class="r">kg je Stück<br>Rind</th><th class="r">kg je Stück<br>Bulle</th><th class="r">Referenz</th><th class="r">= kg Rind</th><th class="r">= kg Bulle</th><th class="c">darf bei Bedarf<br>ins Hack</th><th></th></tr></thead><tbody>
+    ${(st.bratenTeile || []).map((x, i) => `<tr data-i="${i}"><td class="fett">${i === 0 ? 'Braten' : ''}</td><td><input class="feld" data-ch="bt" data-f="name" value="${esc(x.name)}"></td>
+      <td style="width:76px"><input class="feld zahl" inputmode="numeric" data-ch="bt" data-f="stueck" value="${fmtNum(x.stueck)}"></td>
+      <td style="width:92px"><input class="feld zahl${ausserhalb(num(x.kg), x.kgMin, x.kgMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="bt" data-f="kg" value="${fmtNum(x.kg, 3)}"></td>
+      <td style="width:92px"><input class="feld zahl${num(x.kgBulle) > 0 && ausserhalb(num(x.kgBulle), x.kgMin, x.kgMax) ? ' fehlt' : ''}" inputmode="decimal" data-ch="bt" data-f="kgBulle" value="${num(x.kgBulle) > 0 ? fmtNum(x.kgBulle, 3) : ''}" placeholder="wie Rind"></td>
       <td class="r klein" style="white-space:nowrap">${refText(x.kgMin, x.kgMax, 1, 2, 'kg')}${has(x.refMin) ? '<br>' + refText(x.refMin, x.refMax, 100, 1) : ''}</td>
       <td class="r">${fmtNum(num(x.stueck) * teilKg(x, 'Rind'), 2)}</td><td class="r">${fmtNum(num(x.stueck) * teilKg(x, 'Bulle'), 2)}</td>
       <td class="c"><label class="check"><input type="checkbox" data-ch="bt" data-f="bug"${x.bug ? ' checked' : ''}></label></td>
       <td style="width:50px"><button class="btn klein rot" data-act="btweg" data-i="${i}">✕</button></td></tr>`).join('')}
-    <tr><td class="fett">Summe</td><td></td><td></td><td></td><td></td><td class="r fett">${fmtNum(bratenTeileKg(S, 'Rind'), 2)} kg</td><td class="r fett">${fmtNum(bratenTeileKg(S, 'Bulle'), 2)} kg</td><td class="c klein">ins Hack möglich:<br>Rind ${fmtNum(bugAnteilVon(S, 'Rind') * 100, 0)} % · Bulle ${fmtNum(bugAnteilVon(S, 'Bulle') * 100, 0)} %</td><td></td></tr></tbody></table></div>
-    <div class="knopfleiste" style="margin-top:8px"><button class="btn klein" data-act="btneu">+ Teilstück</button></div></div>
-   <div class="karte"><h3 style="margin-top:0">Ganze Stücke für die Kisten</h3>
-    <p class="klein">Diese Artikel kommen als ganze Stücke vom Metzger und werden Stück für Stück auf die Kisten verteilt (z. B. „2 ganze Stücke Filet“). Rostbraten und Steak werden geschnitten – am Stück nur als Sonderwunsch. Rouladen, Steak, Rostbraten, Beinscheiben und die Knochen kommen sortenrein in je eine eigene Kiste (bis zur Ausnahme-Grenze, sonst geteilt). Immer genau eine eigene Kiste (sortenrein, bis ${fmtNum(num(st.kisteAusnahme) || 25)} kg): ${EINE_KISTE.join(', ')}. Mehrere Kisten gibt es nur bei Braten (nach Stücken), Siedfleisch, Gulasch, Beinscheiben und Hackfleisch. Gewicht je Stück = Ausbeute des Tiers ÷ Anzahl. 0 = nicht als ganzes Stück.</p>
-    <div class="tabwrap" style="max-width:760px"><table class="tab"><thead><tr><th>Artikel</th><th class="r">Anzahl je Tier</th><th class="r">kg je Stück Rind</th><th class="r">kg je Stück Bulle</th><th class="r">Referenz</th></tr></thead><tbody>
+    <tr><td></td><td class="klein">Summe Braten · ins Hack möglich: Rind ${fmtNum(bugAnteilVon(S, 'Rind') * 100, 0)} %, Bulle ${fmtNum(bugAnteilVon(S, 'Bulle') * 100, 0)} %</td><td></td><td></td><td></td><td></td><td class="r fett">${fmtNum(bratenTeileKg(S, 'Rind'), 2)} kg</td><td class="r fett">${fmtNum(bratenTeileKg(S, 'Bulle'), 2)} kg</td><td></td><td><button class="btn klein" data-act="btneu" title="Bratenstück hinzufügen">+</button></td></tr>
     ${S.artikel.map((a, i) => ({ a, i })).filter(({ a }) => num(a.ganzeStuecke) > 0 || ['Filet', 'Tafelspitz'].includes(a.name)).map(({ a, i }) => { const n = num(a.ganzeStuecke);
-      const kR = n > 0 ? yieldArt(S, { typ: 'Rind', sg: null }, a.name) / n : 0, kB = n > 0 ? yieldArt(S, { typ: 'Bulle', sg: null }, a.name) / n : 0;
-      return `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td><td style="width:110px"><input class="feld zahl" inputmode="numeric" data-ch="ganz" value="${n || 0}"></td>
-      <td class="r${n > 0 && ausserhalb(kR, a.stkMin, a.stkMax) ? ' warn' : ''}">${n > 0 ? fmtNum(kR, 2) + ' kg' : '–'}</td><td class="r${n > 0 && ausserhalb(kB, a.stkMin, a.stkMax) ? ' warn' : ''}">${n > 0 ? fmtNum(kB, 2) + ' kg' : '–'}</td>
-      <td class="r klein">${refText(a.stkMin, a.stkMax, 1, 2, 'kg')}</td></tr>`; }).join('')}</tbody></table></div></div>
+      const yR = yieldArt(S, { typ: 'Rind', sg: null }, a.name), yB = yieldArt(S, { typ: 'Bulle', sg: null }, a.name);
+      const kR = n > 0 ? yR / n : 0, kB = n > 0 ? yB / n : 0;
+      return `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td><td class="klein">ganzes Stück${n > 0 ? '' : ' – aus (wird nach kg verteilt)'}</td>
+      <td style="width:76px"><input class="feld zahl" inputmode="numeric" data-ch="ganz" value="${n || 0}"></td>
+      <td class="r${n > 0 && ausserhalb(kR, a.stkMin, a.stkMax) ? ' warn' : ''}">${n > 0 ? fmtNum(kR, 2) : '–'}</td><td class="r${n > 0 && ausserhalb(kB, a.stkMin, a.stkMax) ? ' warn' : ''}">${n > 0 ? fmtNum(kB, 2) : '–'}</td>
+      <td class="r klein">${refText(a.stkMin, a.stkMax, 1, 2, 'kg')}</td>
+      <td class="r">${n > 0 ? fmtNum(yR, 2) : ''}</td><td class="r">${n > 0 ? fmtNum(yB, 2) : ''}</td><td class="c klein">nein</td><td></td></tr>`; }).join('')}
+    </tbody></table></div>
+    <p class="klein" style="margin-bottom:0">Braten: kg je Stück frei eintragbar. Filet und Tafelspitz: nur die Anzahl – das Gewicht je Stück ergibt sich aus der Ausbeute (0 = nicht als ganzes Stück). Rostbraten und Hüftsteak werden geschnitten, am Stück nur als Sonderwunsch. Immer genau eine eigene Kiste (sortenrein, bis ${fmtNum(num(st.kisteAusnahme) || 25)} kg): ${EINE_KISTE.join(', ')}.</p></div>
    <div class="karte"><h3 style="margin-top:0">Einzelgewichte <span class="klein">– Schätzwerte, bitte nachwiegen</span></h3>
     <div class="zeile oben" style="margin-bottom:8px">${feld('maxWaden', 'Waden am Stück höchstens je Tier')}<p class="klein" style="max-width:420px;margin:22px 0 0">Gewicht einer Wade = Beinscheiben-Ausbeute ÷ Anzahl Waden: Rind ${fmtNum(wadeKg(S, null), 1)} kg, Bulle ${fmtNum(yieldArt(S, { typ: 'Bulle', sg: null }, 'Beinscheiben') / (num(st.maxWaden) || 4), 1)} kg.</p></div>
     <p class="klein">Damit wird überall gerechnet: Bestellungen nach Stück (z. B. „Steak 3“ = 3 × Stückgewicht), Genusspaket, Beutelgrößen der Knochen. Leer = Artikel wird nur nach kg bestellt.</p>
@@ -484,7 +486,8 @@ function tabAusbeute(z) {
    <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">
     ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Innereien je Tier (werden vorab separat geholt)</h3><div class="zeile oben">
-    ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('baeckleStk', 'Bäckle ca. (Stk)')}${feld('ochsStk', 'Ochsenschwanz ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>`;
+    ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('baeckleStk', 'Bäckle ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>
+   <div class="karte"><h3 style="margin-top:0">Ochsenschwanz</h3><div class="zeile oben">${feld('ochsStk', 'Ochsenschwanz je Tier (Stk)')}<p class="klein" style="max-width:420px;margin:22px 0 0">Kein Innereien-Artikel: steht im Metzgerauftrag, kommt ganz zu den Beinscheiben/Waden in die Kiste und wird beim Kommissionieren wie die übrigen Artikel zugeteilt.</p></div></div>`;
   ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
   ui.acts.eg = el => {
     const a = S.artikel[+el.closest('tr').dataset.i], f = el.dataset.f, v = num(el.value);
