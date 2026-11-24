@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.6.6';
+const APP_VERSION = '1.6.7';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -90,13 +90,13 @@ function render() {
   const seite = teile[0] || 'start';
   ui.acts = {}; ui.ins = {};
   if (seite !== 'neu' && seite !== 'bestellung') ui.formDirty = false;
-  const navKey = seite === 'bestellung' ? 'bestellungen' : seite === 'kunde' ? 'kunden' : seite === 'tier' ? 'tiere' : seite;
+  const navKey = seite === 'bestellung' ? 'bestellungen' : seite === 'kunde' ? 'kunden' : seite === 'tier' ? 'tiere' : seite === 'warteliste' ? 'bestellungen' : seite;
   navRender(navKey);
   const V = {
     start: viewStart, neu: () => viewBestellung(null, q), bestellung: () => viewBestellung(+teile[1], q), bestellungen: viewBestellungen,
     kunden: viewKunden, kunde: () => viewKunde(teile[1]), tiere: viewTiere, tier: () => viewTier(teile[1]),
     schlachttag: () => viewSchlachttag(teile[1] || 'menge', q), kommissionierung: () => viewKommissionierung(q),
-    hofladen: viewHofladen, einstellungen: () => viewEinstellungen(teile[1] || 'daten')
+    hofladen: viewHofladen, warteliste: viewWarteliste, einstellungen: () => viewEinstellungen(teile[1] || 'daten')
   };
   try { (V[seite] || viewStart)(); }
   catch (e) { console.error(e); inhalt().innerHTML = `<div class="fehlerbox">Fehler beim Anzeigen: ${esc(e.message)}</div>`; }
@@ -446,7 +446,7 @@ function viewBestellungen() {
       }).join('') + '</tbody></table></div>';
     $('#anzahl').textContent = `${os.length} Bestellung${os.length === 1 ? '' : 'en'}`;
   };
-  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Bestellungen</h1><a class="btn haupt" href="#/neu">+ Neue Bestellung</a></div>
+  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Bestellungen</h1><a class="btn" href="#/warteliste">Prüfliste Warteliste (${S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name).length})</a><a class="btn haupt" href="#/neu">+ Neue Bestellung</a></div>
     <div class="suchzeile">
       <input class="feld" type="search" placeholder="Suchen: Name, Telefon oder Nr." data-in="q" value="${esc(F.q)}">
       <select class="feld" data-ch="ft" style="max-width:260px">${opt('', 'alle Tiere', !F.tier)}${tiereSortiert().map(t => opt(t.name, t.name, F.tier === t.name)).join('')}${opt('Warteliste', 'Warteliste', F.tier === 'Warteliste')}</select>

@@ -7,6 +7,48 @@ const fussZeile = () => S.settings.hofZeile || '';
 const knopfTeilen = (extra = '') => `<div class="knopfleiste" style="margin:10px 0">${extra}<button class="btn haupt" data-act="teilen">Als Bild teilen (WhatsApp)</button><button class="btn" data-act="drucken">Drucken</button></div>`;
 
 // ---------- Dokumente ----------
+function docWarteliste(w) {
+  const st = S.settings;
+  const mg = (v, eh) => v === null || v === undefined ? '' : `${fmtNum(v, eh === 'Stk' ? 0 : 1)} ${eh}`;
+  const ja = (x, nr) => x.nicht.includes(nr) ? 'reicht nicht' : 'ok';
+  const eng = x => Object.entries(x.engpass).sort((a, b) => b[1] - a[1]).map(e => e[0]).join(', ') || '–';
+  const bl = [{ type: 'h', text: 'Empfehlung' }];
+  w.emp.forEach((t, i) => bl.push({ type: 'text', text: t, bold: t.startsWith('Empfehlung') }));
+  if (w.anzahl) {
+    bl.push({ type: 'h', text: 'Offene Mengen auf der Warteliste' },
+      { type: 'table', head: ['Artikel', 'einzeln', 'aus Paketen', 'gesamt', `Rind ca. (${fmtNum(w.rind.sg)} kg SG)`, `Bulle ca. (${fmtNum(w.bulle.sg)} kg SG)`, 'reicht?'],
+        widths: [3, 1.6, 1.6, 1.6, 2.2, 2.2, 2.2], align: ['', 'r', 'r', 'r', 'r', 'r', ''],
+        rows: w.rows.map(r => [r.art, r.einzeln > 0 ? mg(r.einzeln, r.einheit) : '', r.ausPak > 0 ? mg(r.ausPak, r.einheit) : '', mg(r.gesamt, r.einheit),
+          mg(r.rind, r.einheit) + (r.dehnbar ? ` (bis ${fmtNum(r.rindMax, 0)})` : ''), mg(r.bulle, r.einheit) + (r.dehnbar ? ` (bis ${fmtNum(r.bulleMax, 0)})` : ''), r.status]),
+        rowClass: w.rows.map(r => r.status === 'zu viel für 1 Tier' ? 'rot' : '') },
+      { type: 'text', text: `Gesamt ca. ${fmtNum(w.kgGesamt, 0)} kg, davon ${fmtNum(w.pakete)} Genusspakete. Hackfleisch „bis“: mit Gulasch (Kamm/Hals) und Bug. Innereien/Ochsenschwanz: vorhanden je Tier laut Einstellungen.` },
+      { type: 'h', text: 'Rind oder Bulle?' },
+      { type: 'table', head: ['', 'Rind', 'Bulle'], widths: [3.5, 4, 4], align: ['', '', ''],
+        rows: [['Schlachtgewicht (Standard)', `${fmtNum(w.rind.sg)} kg`, `${fmtNum(w.bulle.sg)} kg`],
+          ['Bestellungen passen', `${w.rind.ok} von ${w.anzahl}`, `${w.bulle.ok} von ${w.anzahl}`],
+          ['Genusspakete möglich', `ca. ${fmtNum(w.rind.maxPak)} (bestellt ${fmtNum(w.pakete)})`, `ca. ${fmtNum(w.bulle.maxPak)} (bestellt ${fmtNum(w.pakete)})`],
+          ['verkauft (Fleisch + Knochen)', `ca. ${fmtNum(w.rind.verkauft, 0)} von ${fmtNum(w.rind.ausbeute, 0)} kg = ${fmtNum(w.rind.auslastung * 100, 0)} %`, `ca. ${fmtNum(w.bulle.verkauft, 0)} von ${fmtNum(w.bulle.ausbeute, 0)} kg = ${fmtNum(w.bulle.auslastung * 100, 0)} %`],
+          ['Rest für den Hofladen', `ca. ${fmtNum(w.rind.rest, 0)} kg`, `ca. ${fmtNum(w.bulle.rest, 0)} kg`],
+          ['Engpass', eng(w.rind), eng(w.bulle)]] },
+      { type: 'h', text: 'Bestellungen auf der Warteliste' },
+      { type: 'table', head: ['Nr.', 'Name', 'Eingang', 'Wunsch', 'Pakete', 'Bestellung', 'Rind', 'Bulle'], widths: [0.8, 2.4, 1.4, 1.4, 0.9, 5, 1.4, 1.4], align: ['r', '', '', '', 'r', '', '', ''],
+        rows: w.ords.map(o => [o.nr, o.name, fmtDate(o.eingang), o.wunsch ? fmtDate(o.wunsch) : '', num(o.pakete) || '', bestellText(S, o), ja(w.rind, o.nr), ja(w.bulle, o.nr)]),
+        rowClass: w.ords.map(o => w.bulle.nicht.includes(o.nr) ? 'rot' : '') },
+      { type: 'text', text: `Probeweise Zuordnung in der Reihenfolge der Warteliste (Genusspakete zuerst), Standard-Schlachtgewichte aus den Einstellungen. Schlachten empfohlen ab ${fmtNum(w.schwelle)} % verkauft.` });
+  }
+  return { title: 'Prüfliste Warteliste', sub: [`Stand ${fmtDate(todayISO())} · ${w.anzahl} offene Bestellung${w.anzahl === 1 ? '' : 'en'} ohne Tier`], blocks: bl, footer: fussZeile() };
+}
+function viewWarteliste() {
+  titel('Prüfliste Warteliste');
+  const w = wartelistePruefung(S);
+  const doc = docWarteliste(w);
+  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Prüfliste Warteliste</h1><a class="btn" href="#/bestellungen">Zurück zu den Bestellungen</a></div>
+    <div class="zeile oben" style="margin-bottom:6px"><label class="f" style="width:300px">Schlachten empfohlen ab … % verkauft<input class="feld zahl" inputmode="decimal" data-ch="wlschwelle" value="${fmtNum(w.schwelle)}"></label></div>
+    ${knopfTeilen()}${docHtml(doc)}`;
+  ui.acts.wlschwelle = el => { S.settings.wlSchwelle = num(el.value) > 0 ? num(el.value) : 60; speichern(); render(); };
+  ui.acts.teilen = async () => { const r = await docTeilen(doc, doc.title); if (r === 'gespeichert') meldung('Bild gespeichert (Teilen wird hier nicht unterstützt).'); };
+  ui.acts.drucken = () => docDrucken(doc);
+}
 function docMenge(mp) {
   const t = mp.tier, i = mp.info;
   return { title: `Mengenprüfung – ${t.name}`, sub: [`${t.typ} · ${fmtNum(i.sg)} kg SG · ${abholTxt(t)}`, `Pakete bestellt ${fmtNum(i.pakete)} / frei ${fmtNum(i.frei)} · ${i.anzahl} Bestellungen · reicht nicht: ${i.reichtNicht}`],

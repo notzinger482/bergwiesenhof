@@ -495,6 +495,105 @@ function wartelistePassend(S, t) {
   if (!t.abhol || t.abhol < todayISO()) return [];
   return S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name && (!o.wunsch || t.abhol <= o.wunsch));
 }
+// ---------- Prüfliste Warteliste ----------
+// Alle Bestellungen auf der Warteliste zusammengezählt und probeweise einem Rind und einem Bullen
+// (Standard-Schlachtgewicht) zugeordnet – als Entscheidungshilfe: schlachten ja/nein, Rind oder Bulle.
+function wartelistePruefung(S) {
+  const ords = S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name).sort((a, b) => rangVon(a) - rangVon(b) || a.nr - b.nr);
+  const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
+  const schwelle = has(S.settings.wlSchwelle) && num(S.settings.wlSchwelle) > 0 ? num(S.settings.wlSchwelle) : 60;
+  const wuensche = ords.map(o => o.wunsch).filter(Boolean).sort();
+  // Probe-Tiere
+  const sim = typ => {
+    const t = { name: '\u0000Probe ' + typ, typ, sg: null };
+    const T = Object.assign({}, S, { tiere: S.tiere.concat([t]), bestellungen: S.bestellungen.filter(o => o.tier !== 'Warteliste').concat(ords.map(o => Object.assign({}, o, { tier: t.name }))) });
+    const ch = mengencheckTier(T, t.name);
+    const bil = fleischBilanz(T, t, ordersOfTier(T, t.name));
+    const nicht = ords.filter(o => (ch[o.nr] || '').startsWith('reicht'));
+    const engpass = {};
+    for (const o of nicht) {
+      if (bil.pakUeber[o.nr]) engpass['Genusspakete'] = (engpass['Genusspakete'] || 0) + 1;
+      for (const k of Object.keys(bil.fehlt[o.nr] || {})) engpass[k] = (engpass[k] || 0) + 1;
+      if (/Wade/.test(ch[o.nr])) engpass['Waden am Stück'] = (engpass['Waden am Stück'] || 0) + 1;
+    }
+    // verkauft = je Artikel höchstens die Ausbeute; Hack darf sich aus übrigem Gulasch und Bug bedienen
+    let ausbeute = 0;
+    const best = {}, y = {};
+    for (const a of ausbeuteArtikel(S)) {
+      y[a.name] = yieldArt(S, t, a.name); ausbeute += y[a.name];
+      best[a.name] = ords.reduce((s, o) => s + qty(S, o, a.name), 0) + pak * paketKgArt(S, a.name);
+    }
+    let verkauft = 0;
+    for (const k in y) verkauft += Math.min(best[k], y[k]);
+    const v = k => y[k] || 0, bq = k => best[k] || 0;
+    const hackMehr = Math.max(0, bq(HACK) - v(HACK));
+    const frei = Math.max(0, v(GULASCH) - bq(GULASCH)) + Math.min(v(BRATEN) * bugAnteilVon(S, typ), Math.max(0, v(BRATEN) - bq(BRATEN)));
+    verkauft = Math.min(ausbeute, verkauft + Math.min(hackMehr, frei));
+    return { typ, t, sg: sgRechnung(S, t), maxPak: maxPakete(S, t), ok: ords.length - nicht.length, nicht: nicht.map(o => o.nr), engpass,
+      ausbeute, verkauft, auslastung: ausbeute > 0 ? verkauft / ausbeute : 0, rest: Math.max(0, ausbeute - verkauft) };
+  };
+  const R = sim('Rind'), B = sim('Bulle');
+  // Mengen je Artikel
+  const vorhStk = { Nieren: num(S.settings.nierenStk), Herz: num(S.settings.herzStk), Zunge: num(S.settings.zungeStk), 'Bäckle': has(S.settings.baeckleStk) ? num(S.settings.baeckleStk) : 2, [OCHS]: has(S.settings.ochsStk) ? num(S.settings.ochsStk) : 1, Leber: num(S.settings.leberKg) };
+  const rows = [];
+  for (const a of S.artikel) {
+    const einzeln = ords.reduce((s, o) => s + qty(S, o, a.name), 0);
+    const ausPak = pak * paketKgArt(S, a.name);
+    const ges = einzeln + ausPak;
+    if (!(ges > 0.0001)) continue;
+    const mitAusbeute = ausbeuteArtikel(S).some(x => x.name === a.name);
+    const kap = x => {
+      if (!mitAusbeute) return has(vorhStk[a.name]) ? vorhStk[a.name] : null;
+      const y = yieldArt(S, x.t, a.name);
+      // Hack ist dehnbar: Gulasch (Kamm/Hals) und Bug können dazukommen
+      return { y, max: a.name === HACK ? y + yieldArt(S, x.t, GULASCH) + yieldArt(S, x.t, BRATEN) * bugAnteilVon(S, x.typ) : y };
+    };
+    const kr = kap(R), kb = kap(B);
+    const yR = kr === null ? null : typeof kr === 'object' ? kr.y : kr, yB = kb === null ? null : typeof kb === 'object' ? kb.y : kb;
+    const mR = kr === null ? null : typeof kr === 'object' ? kr.max : kr, mB = kb === null ? null : typeof kb === 'object' ? kb.max : kb;
+    const status = mR === null ? '' : ges <= mR + 0.001 ? 'passt bei Rind' : mB !== null && ges <= mB + 0.001 ? 'nur beim Bullen' : 'zu viel für 1 Tier';
+    rows.push({ art: a.name, einheit: a.einheit === 'Stk' ? 'Stk' : 'kg', einzeln, ausPak, gesamt: ges, rind: yR, bulle: yB, dehnbar: a.name === HACK, status, organ: !mitAusbeute, rindMax: mR, bulleMax: mB });
+  }
+  const kgGesamt = ords.reduce((s, o) => s + S.artikel.reduce((t, a) => t + kgVon(S, o, a), 0), 0) + pak * paketGewicht(S);
+  // Empfehlung
+  const emp = [];
+  let wahl = null;
+  if (!ords.length) emp.push('Keine offenen Bestellungen auf der Warteliste.');
+  else {
+    const passtR = R.ok === ords.length, passtB = B.ok === ords.length;
+    wahl = passtR ? R : passtB ? B : (B.ok > R.ok || (B.ok === R.ok && B.auslastung > R.auslastung)) ? B : R;
+    const pz = x => fmtNum(x.auslastung * 100, 0) + ' %';
+    const dat = x => x.typ === 'Bulle' ? 'Bullen' : 'Rind';
+    const eng = x => Object.entries(x.engpass).sort((a, b) => b[1] - a[1]).map(e => e[0]).join(', ');
+    if (passtR && passtB) emp.push(`Rind reicht für alle ${ords.length} Bestellungen (verkauft ca. ${pz(R)} der Ausbeute, Bulle nur ${pz(B)}) – ein Rind ist besser ausgelastet.`);
+    else if (passtB) emp.push(`Ein Rind reicht nicht für alle Bestellungen (${R.nicht.length} würden nicht passen – Engpass: ${eng(R)}). Ein Bulle reicht für alle – verkauft ca. ${pz(B)} der Ausbeute.`);
+    else {
+      emp.push(`Selbst ein Bulle reicht nicht für alle Bestellungen (${B.nicht.length} passen nicht – Engpass: ${eng(B)}). Bei einem ${dat(wahl)} passen ${wahl.ok} von ${ords.length}.`);
+      // grob: wie viele Tiere bräuchte die ganze Warteliste?
+      const n = typ => { const x = typ === 'Rind' ? R : B; let m = x.maxPak > 0 ? pak / x.maxPak : (pak > 0 ? 99 : 0);
+        for (const r of rows) { const y = typ === 'Rind' ? r.rindMax : r.bulleMax; if (y > 0) m = Math.max(m, r.gesamt / y); } return Math.ceil(m - 1e-9); };
+      emp.push(`Für die ganze Warteliste bräuchte es rechnerisch ca. ${n('Bulle')} Bullen oder ${n('Rind')} Rinder – sonst einen Teil auf ein späteres Tier legen oder mit den Kunden sprechen.`);
+    }
+    const ziel = x => x.auslastung * 100 >= schwelle;
+    // Bulle nötig für alle, aber erst ein Rind lohnt sich: Rind schlachten, Rest bleibt auf der Warteliste
+    if (wahl === B && !ziel(B) && ziel(R) && R.ok > 0) {
+      emp.push(`Empfehlung: schlachten – Rind. Damit sind ca. ${pz(R)} verkauft (${fmtNum(R.verkauft, 0)} von ${fmtNum(R.ausbeute, 0)} kg); ${R.nicht.length} Bestellung${R.nicht.length === 1 ? '' : 'en'} (Nr. ${R.nicht.join(', ')}) bleiben auf der Warteliste fürs nächste Tier. Ein Bulle wäre nur zu ${pz(B)} verkauft.`);
+      wahl = R;
+    } else if (ziel(wahl)) emp.push(`Empfehlung: schlachten – ${wahl.typ}. Ca. ${fmtNum(wahl.verkauft, 0)} kg von ${fmtNum(wahl.ausbeute, 0)} kg sind verkauft, ca. ${fmtNum(wahl.rest, 0)} kg gehen in den Hofladen.`);
+    else {
+      emp.push(`Empfehlung: noch warten. Bei einem ${dat(wahl)} wären erst ca. ${pz(wahl)} verkauft (Ziel ab ${fmtNum(schwelle)} %) – ca. ${fmtNum(wahl.rest, 0)} kg müssten über den Hofladen gehen.`);
+      if (wahl === B && R.auslastung > B.auslastung) emp.push(`Zum Vergleich: ein Rind wäre zu ${pz(R)} verkauft, dann passen aber nur ${R.ok} von ${ords.length} Bestellungen.`);
+    }
+    const pFrei = wahl.maxPak - pak;
+    if (pFrei > 0) emp.push(`Beim ${dat(wahl)} wären noch ca. ${fmtNum(pFrei)} Genusspakete frei.`);
+    else if (pFrei < 0) emp.push(`Achtung: ${fmtNum(pak)} Genusspakete bestellt, ein ${wahl.typ} gibt nur ca. ${fmtNum(wahl.maxPak)} her.`);
+    if (wuensche.length) emp.push(`Frühester Wunschtermin: ${fmtDate(wuensche[0])}.`);
+    const heute = todayISO();
+    const geplant = S.tiere.filter(t => t.abhol && t.abhol >= heute).map(t => ({ t, n: wartelistePassend(S, t).length })).filter(x => x.n > 0);
+    if (geplant.length) emp.push(`Schon geplant: ${geplant.map(x => `${x.t.name} (Abholung ${fmtDate(x.t.abhol)}, ${x.n} Bestellung${x.n === 1 ? '' : 'en'} würden passen)`).join('; ')} – erst prüfen, ob die Warteliste dort Platz hat.`);
+  }
+  return { anzahl: ords.length, pakete: pak, kgGesamt, rows, rind: R, bulle: B, wahl: wahl ? wahl.typ : '', emp, schwelle, ords };
+}
 function tierUmbenennen(S, alt, neu) {
   S.bestellungen.forEach(o => { if (o.tier === alt) o.tier = neu; });
   S.kisten.forEach(k => { if (k.tier === alt) k.tier = neu; });
@@ -1078,7 +1177,7 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, tierUmbenennen, kundePflegen, kundenStat,
+  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, OCHS, setDefaults: d => { global.DEFAULTS = d; }
