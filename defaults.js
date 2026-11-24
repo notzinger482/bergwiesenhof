@@ -277,6 +277,7 @@ const DEFAULTS = {
   "sgRind": 300,
   "nenner": 16,
   "hackKiste": 20,
+  "fettSiedProzent": 50,
   "kisteMax": 20,
   "kisteAusnahme": 25,
   "hackPaketG": 500,

@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.0.4';
+const APP_VERSION = '3.0.5';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -335,7 +335,7 @@ function viewBestellung(nr, q, vorlage) {
       </div>
       <div class="karte"><label class="f ganz"><span class="fett">Notiz zur Bestellung</span> <span class="klein">– erscheint beim Kommissionieren und in der Packliste</span><textarea class="feld" rows="2" data-in="kopf" data-f="packNotiz" placeholder="z. B. „Steak in 2er-Packungen“, „holt Nachbar ab“">${esc(o.packNotiz || '')}</textarea></label></div>
       <div class="karte"><h3 style="margin-top:0">Sonderwünsche <span class="klein">– macht der Metzger separat</span></h3>
-        <div class="klein" style="margin-bottom:6px">z. B. Hackfleisch 2000 g „besonders mager“. Die Menge gehört trotzdem rechts mit in die Bestellung. Nur den Wunsch eintragen, keine Gründe wie Krankheiten.</div>
+        <div class="klein" style="margin-bottom:6px">z. B. Hackfleisch 2000 g „besonders mager“ (bei Hackfleisch darunter auswählen: fettig zählt zur Hälfte als Siedfleisch, mager als Bugstück). Die Menge gehört trotzdem rechts mit in die Bestellung. Nur den Wunsch eintragen, keine Gründe wie Krankheiten.</div>
         <div id="sonderliste">${sonderRows()}</div>
         <button class="btn klein" data-act="sonderNeu">+ Sonderwunsch</button>
       </div>
@@ -471,7 +471,7 @@ function viewBestellung(nr, q, vorlage) {
     const i = +el.closest('[data-si]').dataset.si, s = o.sonder[i], f = el.dataset.f;
     // gespeicherte Sonderwünsche: angezeigte Menge übernehmen, sonst ginge sie beim Ändern von Text/Artikel verloren
     if (s.eingabe === undefined) s.eingabe = ($('[data-f=menge]', el.closest('[data-si]')) || {}).value || '';
-    if (f === 'art') { s.art = el.value; const a = art(S, s.art); $('.sonder-eh', el.closest('[data-si]')).textContent = sonderEinheit(a); }
+    if (f === 'art') { s.art = el.value; const a = art(S, s.art); $('.sonder-eh', el.closest('[data-si]')).textContent = sonderEinheit(a); const so = $('.sonder-sorte', el.closest('[data-si]')); if (so) so.style.display = s.art === HACK ? '' : 'none'; }
     else if (f === 'menge') s.eingabe = el.value;
     else s[f] = el.value;
     s.menge = sonderMengeIntern(s);
@@ -541,12 +541,16 @@ function sonderAnzeige(s) {
 }
 function sonderZeile(s, i) {
   const a = art(S, s.art);
-  return `<div class="zeile" data-si="${i}" style="margin-bottom:8px;flex-wrap:nowrap">
-    <select class="feld" style="flex:1.2" data-in="sonder" data-f="art">${opt('', 'Artikel …', !s.art)}${S.artikel.map(x => opt(x.name, x.name, s.art === x.name)).join('')}</select>
+  // zwei Reihen: Artikel · Menge · ✕ – darunter Hack-Sorte (nur bei Hackfleisch) und Wunsch
+  return `<div data-si="${i}" style="margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #eee">
+    <div class="zeile" style="flex-wrap:nowrap;margin-bottom:6px">
+    <select class="feld" style="flex:1" data-in="sonder" data-f="art">${opt('', 'Artikel …', !s.art)}${S.artikel.map(x => opt(x.name, x.name, s.art === x.name)).join('')}</select>
     <input class="feld zahl" style="width:92px" inputmode="decimal" data-in="sonder" data-f="menge" value="${esc(sonderAnzeige(s))}" placeholder="Menge">
     <span class="klein sonder-eh" style="width:26px">${sonderEinheit(a)}</span>
-    <input class="feld" style="flex:2" data-in="sonder" data-f="wunsch" value="${esc(s.wunsch || '')}" placeholder="Wunsch / Vorgabe">
-    <button class="btn klein rot" data-act="sonderWeg" data-i="${i}">✕</button></div>`;
+    <button class="btn klein rot" data-act="sonderWeg" data-i="${i}">✕</button></div>
+    <div class="zeile" style="flex-wrap:nowrap">
+    <select class="feld sonder-sorte" style="width:170px;${s.art === HACK ? '' : 'display:none'}" data-in="sonder" data-f="sorte" title="fettig: zählt zur Hälfte als Siedfleisch · mager: zählt als Bugstück">${opt('', 'Hack normal', !s.sorte)}${opt('fettig', 'besonders fettig', s.sorte === 'fettig')}${opt('mager', 'besonders mager', s.sorte === 'mager')}</select>
+    <input class="feld" style="flex:1" data-in="sonder" data-f="wunsch" value="${esc(s.wunsch || '')}" placeholder="Wunsch / Vorgabe"></div></div>`;
 }
 async function bestellungSpeichern(o) {
   o.name = String(o.name || '').trim();
@@ -556,7 +560,7 @@ async function bestellungSpeichern(o) {
   if (f.length) { fb.innerHTML = `<div class="fehlerbox"><b>Bitte korrigieren – nicht gespeichert:</b><br>${f.map(esc).join('<br>')}</div>`; window.scrollTo(0, 0); return; }
   fb.innerHTML = '';
   // aufräumen
-  o.sonder = (o.sonder || []).filter(s => s.art).map(s => ({ art: s.art, menge: has(s.menge) ? s.menge : null, wunsch: (s.wunsch || '').trim() }));
+  o.sonder = (o.sonder || []).filter(s => s.art).map(s => ({ art: s.art, menge: has(s.menge) ? s.menge : null, wunsch: (s.wunsch || '').trim(), ...(s.art === HACK && (s.sorte === 'fettig' || s.sorte === 'mager') ? { sorte: s.sorte } : {}) }));
   for (const [k, p] of Object.entries(o.pos)) {
     const a = art(S, k);
     if (!a) { delete o.pos[k]; continue; }

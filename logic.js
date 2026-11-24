@@ -139,11 +139,26 @@ function kistenAusbeute(t, S) {
   if (out[HACK]) { out[HACK].kg = Math.max(0, out[HACK].kg - abzug); out[HACK].abzug = abzug; }
   return out;
 }
+// geplante Umleitung ins Sonder-Hack je Tier (Topf: anteilig nach Schlachtgewicht)
+function umleitung(t, S) {
+  if (!t) return {};
+  if (t.abschluss) return t.abschluss.umleitung || {};
+  if (!S || t.archiv) return {};
+  try {
+    const T = topfTier(S, t.name) || t, b = fleischBilanz(S, T, ordersOfTopf(S, T));
+    const f = T.glieder ? sgRechnung(S, t) / (sgRechnung(S, T) || 1) : 1;
+    const u = {}; if (num(b.hack.fettSied) > 0) u[SIED] = r2(b.hack.fettSied * f); if (num(b.braten.bugMager) > 0) u[BRATEN] = r2(b.braten.bugMager * f);
+    return u;
+  } catch (e) { return {}; }
+}
 function erfassungSumme(t, S) {
   const art = {}, teil = {};
   let kg = 0, teile = 0;
   const ki = kistenAusbeute(t, S);
   for (const [n, v] of Object.entries(ki)) { art[n] = { kg: v.kg, teile: v.teile, kisten: true, abzug: v.abzug }; kg += v.kg; teile += v.teile; }
+  // Ausbeute-Statistik: was ins fettige/magere Hack ging (Siedfleisch, Bug), wurde nicht als Siedfleisch/Braten gewogen –
+  // geplante Menge wieder dazuzählen, sonst wirken diese Teilstücke zu klein
+  const um = umleitung(t, S);
   for (const e of (t && t.erfassung) || []) {
     const w = num(e.kg); if (!(w > 0)) continue;
     if (ki[e.art]) continue; // Kistengewicht hat Vorrang (alte, einzeln gewogene Hack-/Knochen-Teile)
@@ -151,6 +166,7 @@ function erfassungSumme(t, S) {
     if (e.teil) { const x = teil[e.teil] = teil[e.teil] || { kg: 0, teile: 0 }; x.kg += w; x.teile++; }
     kg += w; teile++;
   }
+  for (const [n, w] of Object.entries(um)) if (art[n] && !art[n].kisten && w > 0.05) { art[n].kg += w; art[n].umleitung = w; kg += w; }
   return { art, teil, kg, teile };
 }
 // zählt für die Statistik: archiviert, nicht ausgeblendet, echtes Schlachtgewicht, etwas gewogen
@@ -233,10 +249,30 @@ function sonderOf(S, o) {
       out.push({ art: a.name, menge: q > 0 ? q : null, wunsch: w, auto: true });
     }
   }
-  for (const s of (o.sonder || [])) if (s && s.art) out.push({ art: s.art, menge: has(s.menge) ? num(s.menge) : null, wunsch: s.wunsch || '' });
+  for (const s of (o.sonder || [])) if (s && s.art) out.push({ art: s.art, menge: has(s.menge) ? num(s.menge) : null, sorte: s.art === HACK && HACK_SORTEN[s.sorte] ? s.sorte : '',
+    wunsch: [s.art === HACK && HACK_SORTEN[s.sorte] ? HACK_SORTEN[s.sorte] : '', s.wunsch || ''].filter(Boolean).join(' – ') });
   return out;
 }
 const specSum = (S, o, name) => sonderOf(S, o).filter(s => s.art === name).reduce((t, s) => t + num(s.menge), 0);
+// Hack-Sorte beim Sonderwunsch (seit 3.0.5, Regel Nutzer): „fettig“ = Siedfleisch-Anteil (Standard 50 %) + Rest Hack-Material,
+// „mager“ = reines Bugstück (aus dem Bug des Bratens). Die Menge bleibt Hackfleisch in der Bestellung (Preis, Sonderfall),
+// gerechnet wird sie aber gegen das Material, aus dem sie wirklich gemacht wird.
+const SIED = 'Siedfleisch';
+const HACK_SORTEN = { mager: 'besonders mager', fettig: 'besonders fettig' };
+const fettSiedAnteil = S => { const p = S && S.settings && has(S.settings.fettSiedProzent) ? num(S.settings.fettSiedProzent) : 50; return Math.min(100, Math.max(0, p)) / 100; };
+function hackSorten(S, o) {
+  let fett = 0, mager = 0;
+  for (const s of (o.sonder || [])) if (s && s.art === HACK && num(s.menge) > 0) { if (s.sorte === 'fettig') fett += num(s.menge); else if (s.sorte === 'mager') mager += num(s.menge); }
+  const sied = fett * fettSiedAnteil(S);
+  return { fett, mager, sied }; // sied = Siedfleisch-Anteil; Hack-Material sinkt um sied + mager, Bug um mager
+}
+// Verschiebung je Artikel durch Hack-Sorten (für Mengencheck/Mengenprüfung)
+function sortenAdj(S, o, name) {
+  const h = hackSorten(S, o);
+  if (name === HACK) return -(h.sied + h.mager);
+  if (name === SIED) return h.sied;
+  return 0;
+}
 const sonderText = (S, s) => {
   const a = art(S, s.art);
   return (has(s.menge) ? fmtNum(s.menge, 3) + ' ' + (a ? a.einheit : '') + ' ' : '') + s.art + (s.wunsch ? ' – ' + s.wunsch : '');
@@ -566,6 +602,9 @@ function fleischBilanz(S, t, ords) {
     return { einzeln, separat, ausPak, bestellt: einzeln + ausPak, ausbeute: yieldArt(S, t, name) };
   };
   const hack = calc(HACK), gul = calc(GULASCH), braten = calc(BRATEN);
+  // Hack-Sorten: fettig/mager kommt nicht (ganz) aus dem Hack-Material
+  const sorten = ords.reduce((a, o) => { const h = hackSorten(S, o); a.sied += h.sied; a.mager += h.mager; return a; }, { sied: 0, mager: 0 });
+  hack.einzeln -= sorten.sied + sorten.mager; hack.separat -= sorten.sied + sorten.mager; hack.bestellt -= sorten.sied + sorten.mager;
   // Gulasch bleibt grundsätzlich Gulasch. Nur wenn KEIN Gulasch einzeln bestellt ist und das Hack nicht reicht,
   // geht Gulasch (Kamm/Hals) ins Hack – so viel wie fehlt; der Paket-Anteil bleibt Gulasch.
   const hackMehr = Math.max(0, hack.bestellt - hack.ausbeute);
@@ -582,7 +621,7 @@ function fleischBilanz(S, t, ords) {
   let keule = Math.max(0, topf[BRATEN] || 0) - bug;
   let hackTopf = (topf[HACK] || 0) + gul.insHack;
   if (topf[GULASCH] !== undefined) topf[GULASCH] -= gul.insHack;
-  let bugInsHack = 0, bugFuerBraten = 0;
+  let bugInsHack = 0, bugFuerBraten = 0, bugMager = 0;
   const fehlt = {}, pakUeber = {};
   // reicht ein Teilstück nicht einmal für alle Pakete: die zuletzt zugeordneten Paket-Bestellungen markieren
   const pakFehlt = {};
@@ -600,8 +639,11 @@ function fleischBilanz(S, t, ords) {
     pakCum += num(o.pakete);
     if (num(o.pakete) > 0 && pakCum > nen + 1e-9) pakUeber[o.nr] = ['mehr als ' + nen];
     if (pakFehlt[o.nr]) pakUeber[o.nr] = (pakUeber[o.nr] || []).concat(pakFehlt[o.nr]);
+    // mageres Hack: reines Bugstück – kommt zuerst aus dem Bug
+    const hs = hackSorten(S, o);
+    if (hs.mager > 0) { const b = Math.min(hs.mager, Math.max(0, bug)); bug -= b; bugMager += b; if (hs.mager - b > 0.001) f[HACK] = (f[HACK] || 0) + hs.mager - b; }
     for (const name of Object.keys(topf)) {
-      let q = qty(S, o, name);
+      let q = qty(S, o, name) + (name === HACK ? -(hs.sied + hs.mager) : name === SIED ? hs.sied : 0);
       if (!(q > 0)) continue;
       if (name === HACK) {
         const a = Math.min(q, Math.max(0, hackTopf)); hackTopf -= a; q -= a;
@@ -612,16 +654,18 @@ function fleischBilanz(S, t, ords) {
       } else {
         const a = Math.min(q, Math.max(0, topf[name])); topf[name] -= a; q -= a;
       }
-      if (q > 0.001) f[name] = q;
+      if (q > 0.001) f[name] = (f[name] || 0) + q;
     }
     fehlt[o.nr] = f;
   }
   hack.ausBug = bugInsHack;
   hack.ueberAusbeute = bugInsHack > 0.001;
   braten.bugFuerBraten = bugFuerBraten;
+  braten.bugMager = bugMager; // Bug für mageres Hack (Sonderfall)
+  hack.fettSied = sorten.sied; // Siedfleisch für fettiges Hack (Sonderfall)
   // Obergrenzen (für die Anzeige in der Mengenprüfung)
   const kap = {};
-  kap[HACK] = hack.ausbeuteMitGulasch + braten.bugKg - bugFuerBraten;
+  kap[HACK] = hack.ausbeuteMitGulasch + braten.bugKg - bugFuerBraten - bugMager;
   kap[BRATEN] = braten.ausbeute - bugInsHack;
   return { hack, gul, braten, kap, fehlt, pakUeber };
 }
@@ -700,6 +744,8 @@ function fehlDetail(S, o) {
     zeilen.push(z);
   }
   const sonst = [];
+  // Fehlmengen ohne eigene Zeile (z. B. Siedfleisch für fettiges Hack)
+  for (const [k, fe] of Object.entries(f)) if (fe > 0.001 && !zeilen.some(z => z.art === k)) sonst.push(`${k} −${fmtNum(fe, 1)} kg${k === SIED ? ' (für fettiges Hack)' : ''}`);
   if (bil.pakUeber[key]) sonst.push('Genusspakete (' + bil.pakUeber[key].join(', ') + ')');
   const maxW = (has(S.settings.maxWaden) ? num(S.settings.maxWaden) : 4) * topfN(t);
   let waden = 0;
@@ -1030,7 +1076,7 @@ function mengenpruefung(S, tierName) {
   const bil = fleischBilanz(S, t, ords);
   const rows = ausbeuteArtikel(S).map(a => {
     const y = kapazitaet(S, t, bil, a.name);
-    const einzel = ords.reduce((s, o) => s + qty(S, o, a.name), 0);
+    const einzel = ords.reduce((s, o) => s + qty(S, o, a.name) + sortenAdj(S, o, a.name), 0) + (a.name === BRATEN ? num(bil.braten.bugMager) : 0);
     const ausPak = pak * paketKgArt(S, a.name);
     const ges = einzel + ausPak;
     return { art: a.name, ausbeute: y, ausbeuteStd: a.name === HACK ? yieldArt(S, t, HACK) : y, einzel, ausPak, gesamt: ges, frei: y - ges, auslastung: y > 0 ? ges / y : null,
@@ -1061,7 +1107,7 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   if (!t) return null;
   const ords = ordersOfTopf(S, t);
   const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
-  const { hack, gul } = fleischBilanz(S, t, ords);
+  const { hack, gul, braten } = fleischBilanz(S, t, ords);
   // Hackfleisch: Ausbeute + nicht bestelltes Gulasch – oder mehr, wenn mehr bestellt ist (dann Bug auflösen).
   // Separat vorbereitetes Hack (z. B. besonders mager) steht unten bei den Sonderfällen und geht hier ab.
   hack.vorgabe = Math.max(0, roundUp(hack.ausbeuteMitGulasch + hack.ausBug - hack.separat));
@@ -1080,7 +1126,7 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   // Ochsenschwanz: nur „am Stück“ bestellte bleiben ganz (Zeile im Metzgerauftrag), alle anderen schneidet der Metzger wie gewohnt
   const ochsGanzListe = ords.filter(o => qty(S, o, OCHS) > 0 && ochsGanz(S, o)).map(o => ({ nr: o.nr, name: o.name, stk: qty(S, o, OCHS) }));
   const ochs = { bestellt: ochsB, vorhanden: (has(S.settings.ochsStk) ? num(S.settings.ochsStk) : 1) * topfN(t), ganz: ochsGanzListe.reduce((s, x) => s + x.stk, 0), ganzListe: ochsGanzListe };
-  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, waden, ochs };
+  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, waden, ochs, bugMager: num(braten.bugMager), fettSied: num(hack.fettSied) };
 }
 
 // ---------- Packplan (Makro PackplanFuer) ----------
@@ -1201,7 +1247,8 @@ function packplanKisten(S, tierName, f = 1) {
     let kg = 0;
     if (a.name === HACK) kg = ma.hack.vorgabe;
     else if (a.name === GULASCH) kg = ma.gulasch.vorgabe;
-    else if (a.name === BRATEN) kg = Math.max(0, yt - ma.hack.ausBug - (specT[a.name] || 0)); // Bug ging ins Hack
+    else if (a.name === BRATEN) kg = Math.max(0, yt - ma.hack.ausBug - num(ma.bugMager) - (specT[a.name] || 0)); // Bug ging ins Hack (auch mageres Hack)
+    else if (a.name === SIED) kg = Math.max(0, yt - num(ma.fettSied) - (specT[a.name] || 0)); // Siedfleisch ging ins fettige Hack
     else if (!isOrg) kg = Math.max(0, yt - (specT[a.name] || 0));
     return { art: a.name, isOrg, shr, kg };
   });
@@ -1571,10 +1618,12 @@ function tierAbschliessen(S, tierName) {
   const sgSum = tiere.reduce((s, t) => s + sgRechnung(S, t), 0);
   const hackGes = tiere.length ? hackAbzugPlan(S, tiere[0]) : 0;
   const kisten = calc.map(c => ({ nr: c.k.nr, art: c.k.art, kg: r2(num(c.k.kg)), gewogen: kisteGewogen(c.k), plan: has(c.k.plan) ? r2(num(c.k.plan)) : null, gew: has(c.k.gew) ? num(c.k.gew) : null, info: c.k.info || '', bedarf: r2(c.bedarf), verplant: r2(c.verplant), rest: r2(c.rest), einheit: c.einheit }));
+  const umlAlle = Object.fromEntries(tiere.map(t => [t.name, umleitung(t, S)]));
   tiere.forEach(t => archivStandFesthalten(S, t));
   for (const t of tiere) {
     const anteil = ctx.topf && sgSum > 0 ? sgRechnung(S, t) / sgSum : 1;
     t.abschluss = { datum: heute, hackAbzug: r2(hackGes * anteil), kisten };
+    if (Object.keys(umlAlle[t.name] || {}).length) t.abschluss.umleitung = umlAlle[t.name];
     if (ctx.topf) { t.abschluss.anteil = r3(anteil); t.abschluss.topf = namen.slice(); t.topfMit = namen.slice(); }
   }
   tiere.forEach(t => { t.archiv = heute; });
