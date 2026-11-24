@@ -709,8 +709,16 @@ function kundenVorschlaege(S, q, max = 8) {
   }
   return treffer.sort((a, b) => (b.start - a.start) || (b.anzahl - a.anzahl) || a.k.name.localeCompare(b.k.name, 'de')).slice(0, max);
 }
-function kundenStat(S, k) {
-  const os = S.bestellungen.filter(o => sameText(o.name, k.name));
+// Bestellungen je Kunde (Name ohne Groß/klein und Leerzeichen am Rand) – für Listen mit vielen Kunden einmal aufbauen
+const nameKey = s => String(s || '').trim().toLowerCase();
+function bestellIndex(S) {
+  const m = new Map();
+  for (const o of S.bestellungen || []) { const k = nameKey(o.name); if (!m.has(k)) m.set(k, []); m.get(k).push(o); }
+  return m;
+}
+const ordersVonKunde = (S, k, idx) => idx ? (idx.get(nameKey(k.name)) || []) : (S.bestellungen || []).filter(o => sameText(o.name, k.name));
+function kundenStat(S, k, idx) {
+  const os = ordersVonKunde(S, k, idx);
   return {
     anzahl: os.length,
     letzte: os.reduce((m, o) => (o.eingang > m ? o.eingang : m), ''),
@@ -720,20 +728,21 @@ function kundenStat(S, k) {
 }
 
 // ---------- Datenschutz: inaktive Kunden anonymisieren ----------
-// Maßgeblich ist das letzte Lebenszeichen: letzte Bestellung (bleibt auch nach „Neues Jahr“ am Kunden gespeichert) oder Anlagedatum.
+// Maßgeblich ist das letzte Lebenszeichen: letzte Bestellung (wird zusätzlich am Kunden gespeichert, falls Bestellungen gelöscht werden) oder Anlagedatum.
 const ANONYM = 'anonymisiert';
-function kundeLetzte(S, k) {
-  return (S.bestellungen || []).filter(o => sameText(o.name, k.name)).reduce((m, o) => (o.eingang || '') > m ? o.eingang : m, k.letzte || k.angelegt || '');
+function kundeLetzte(S, k, idx) {
+  return ordersVonKunde(S, k, idx).reduce((m, o) => (o.eingang || '') > m ? o.eingang : m, k.letzte || k.angelegt || '');
 }
 function kundenFrist(S) { const j = num(S.settings.kundenFristJahre); return j >= 1 ? Math.round(j) : 3; }
 function inaktiveKunden(S, heute = todayISO()) {
   const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(heute) || /^(\d{4})-(\d{2})-(\d{2})/.exec(todayISO());
   const grenze = isoOf(new Date(+m[1] - kundenFrist(S), +m[2] - 1, +m[3]));
   const archiviert = n => { const t = (S.tiere || []).find(x => x.name === n); return !!(t && t.archiv); };
-  return (S.kunden || []).map(k => ({ k, letzte: kundeLetzte(S, k) }))
+  const idx = bestellIndex(S);
+  return (S.kunden || []).map(k => ({ k, letzte: kundeLetzte(S, k, idx) }))
     .filter(x => x.letzte && x.letzte < grenze)
     // Bestellungen, die noch laufen (nicht abgeholt, Tier nicht im Archiv), schützen den Kunden
-    .filter(x => !(S.bestellungen || []).some(o => sameText(o.name, x.k.name) && (o.status || 'offen') !== 'abgeholt' && !archiviert(o.tier)))
+    .filter(x => !ordersVonKunde(S, x.k, idx).some(o => (o.status || 'offen') !== 'abgeholt' && !archiviert(o.tier)))
     .sort((a, b) => a.letzte.localeCompare(b.letzte));
 }
 // Kunde aus der Kundenliste löschen; seine Bestellungen bleiben für Statistik und Ausbeute, aber ohne Name, Telefon, Mail und Notiz.
@@ -1328,7 +1337,7 @@ function standPruefen(x) {
     (x.kunden || []).forEach(k => { delete k.strasse; delete k.ort; });
     x.schema = 8;
   }
-  // letzte Bestellung und Anlagedatum je Kunde (für die Löschfrist; bleibt auch nach „Neues Jahr“ erhalten)
+  // letzte Bestellung und Anlagedatum je Kunde (für die Löschfrist; bleibt auch erhalten, wenn Bestellungen gelöscht werden)
   (x.kunden || []).forEach(k => {
     k.letzte = (x.bestellungen || []).filter(o => sameText(o.name, k.name)).reduce((m, o) => (o.eingang || '') > m ? o.eingang : m, k.letzte || '');
     if (!k.angelegt) k.angelegt = k.letzte || todayISO();
@@ -1344,7 +1353,7 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
+  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }

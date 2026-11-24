@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.9.1';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -516,10 +516,11 @@ function viewKunden() {
   titel('Kunden');
   const liste = () => {
     const q = ui.kfilter.trim().toLowerCase();
+    const idx = bestellIndex(S);
     const ks = S.kunden.filter(k => !q || k.name.toLowerCase().includes(q) || (k.tel || '').includes(q)).sort((a, b) => a.name.localeCompare(b.name));
     $('#liste').innerHTML = !ks.length ? '<div class="karte">Keine Kunden gefunden. Neue Kunden entstehen automatisch beim Speichern einer Bestellung.</div>' :
       `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Kd-Nr.</th><th>Name</th><th>Telefon</th><th>Mail</th><th class="r">Bestellungen</th><th>letzte</th><th class="r">Pakete</th><th class="r">Summe Endbeträge</th></tr></thead><tbody>` +
-      ks.map(k => { const s = kundenStat(S, k); return `<tr class="klick" data-act="oeffnen" data-nr="${k.nr}"><td class="r">${k.nr}</td><td class="fett">${esc(k.name)}</td><td>${esc(k.tel)}</td><td>${esc(k.mail)}</td><td class="r">${s.anzahl}</td><td>${fmtDate(kundeLetzte(S, k))}</td><td class="r">${s.pakete || ''}</td><td class="r">${s.umsatz ? fmtEur(s.umsatz) : ''}</td></tr>`; }).join('') + '</tbody></table></div>';
+      ks.map(k => { const s = kundenStat(S, k, idx); return `<tr class="klick" data-act="oeffnen" data-nr="${k.nr}"><td class="r">${k.nr}</td><td class="fett">${esc(k.name)}</td><td>${esc(k.tel)}</td><td>${esc(k.mail)}</td><td class="r">${s.anzahl}</td><td>${fmtDate(kundeLetzte(S, k, idx))}</td><td class="r">${s.pakete || ''}</td><td class="r">${s.umsatz ? fmtEur(s.umsatz) : ''}</td></tr>`; }).join('') + '</tbody></table></div>';
   };
   inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Kunden</h1><a class="btn" href="#/kunde/neu">+ Kunde anlegen</a></div>
     <div class="suchzeile"><input class="feld" type="search" placeholder="Suchen: Name oder Telefon" data-in="q" value="${esc(ui.kfilter)}"></div><div id="liste"></div>`;

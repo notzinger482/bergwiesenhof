@@ -1,6 +1,6 @@
 # Bestellsystem Bergwiesenhof – Tablet-App
 
-Version 1.9.0 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
+Version 1.9.1 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
 
 Die App ersetzt die Excel-Datei mit allen Makros. Sie läuft nach der Installation **komplett offline**.
 Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in die Cloud und für Updates.
@@ -20,7 +20,7 @@ Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in 
 | Hofladen | **Hofladen** |
 | Preisliste, Ausbeute, Auto | **Einstellungen** |
 | Bestellformular A4/A5, Infozettel (PDF) | **Übersicht → Vordrucke drucken** (Preise automatisch aus der Preisliste) |
-| Neues Jahr, Mappe zurücksetzen | **Einstellungen → Daten & Sicherung** |
+| Mappe zurücksetzen | **Einstellungen → Daten & Sicherung** (ein „Neues Jahr“ gibt es nicht mehr – Bestellungen laufen über den Jahreswechsel einfach weiter) |
 
 Preise, Ausbeute-Anteile, Stückgewichte, Beutelgrößen und Stellplätze sind aus `Bestellsystem_Bergwiesenhof.xlsm` übernommen.
 
@@ -39,7 +39,7 @@ Die Daten (Bestellungen, Kunden …) liegen **nur auf dem Tablet**, nicht auf de
 
 ## Datensicherung
 
-**Verschlüsselt (ab 1.9.0):** Alle Sicherungen, die das Tablet verlassen (Google Drive, „Sicherung teilen“, Archiv „Neues Jahr“),
+**Verschlüsselt (ab 1.9.0):** Alle Sicherungen, die das Tablet verlassen (Google Drive, „Sicherung teilen“, „als Datei speichern“),
 werden mit dem **Sicherungs-Passwort** verschlüsselt (AES-256, Einstellungen → Daten & Sicherung). Das Passwort liegt nur auf dem
 Tablet und gehört aufgeschrieben – ohne es lässt sich keine Sicherung einspielen. Ohne Passwort wird nichts gesichert.
 

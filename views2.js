@@ -427,7 +427,7 @@ async function tabDaten(z) {
   const inaktiv = inaktiveKunden(S);
   z.innerHTML = `<div class="spalten2"><div>
     <div class="karte"><h3 style="margin-top:0">Sicherungs-Passwort</h3>
-      <p class="klein">Alle Sicherungen, die das Tablet verlassen (Google Drive, Teilen, Archiv „Neues Jahr“), werden mit diesem Passwort verschlüsselt. Google sieht nur Zeichensalat. Das Passwort bleibt nur auf diesem Tablet und ist nicht in der Sicherung.</p>
+      <p class="klein">Alle Sicherungen, die das Tablet verlassen (Google Drive, Teilen, als Datei), werden mit diesem Passwort verschlüsselt. Google sieht nur Zeichensalat. Das Passwort bleibt nur auf diesem Tablet und ist nicht in der Sicherung.</p>
       <p>Status: ${sicherungPw ? '<b class="ok">festgelegt ✓</b>' : '<b class="warn">noch nicht festgelegt – es wird nichts gesichert</b>'}</p>
       <p class="klein"><b>Wichtig:</b> Passwort aufschreiben und sicher aufbewahren (nicht auf dem Tablet). Ohne Passwort lässt sich keine Sicherung mehr einspielen – auch Claude oder Google können dann nicht helfen.</p>
       <button class="btn ${sicherungPw ? '' : 'haupt'}" data-act="pw">${sicherungPw ? 'Passwort ändern …' : 'Passwort festlegen …'}</button></div>
@@ -455,8 +455,6 @@ async function tabDaten(z) {
       <p>${inaktiv.length ? `<b class="warn">${inaktiv.length} Kunde${inaktiv.length > 1 ? 'n' : ''}</b> seit über ${kundenFrist(S)} Jahren ohne Bestellung.` : `Keine Kunden über der Frist von ${kundenFrist(S)} Jahren.`}</p>
       ${inaktiv.length ? '<button class="btn braun" data-act="anonym">Liste ansehen & anonymisieren …</button>' : ''}
       <p class="klein">Kopien in den Tageskopien verschwinden nach 14 Tagen, in Google Drive nach 90 Tagen von selbst.</p></div>
-    <div class="karte"><h3 style="margin-top:0">Neues Jahr beginnen</h3><p class="klein">Erst wird eine Sicherung (Archiv) erstellt, danach werden Bestellungen, Tiere, Kisten, Packpläne und die Hofladen-Liste geleert. Kunden, Preisliste und Einstellungen bleiben. Die Bestellnummern beginnen wieder bei 1.</p>
-      <button class="btn braun" data-act="jahr">Neues Jahr beginnen …</button></div>
     <div class="karte"><h3 style="margin-top:0">Alles zurücksetzen</h3><p class="klein">Löscht Bewegungsdaten (optional auch Kunden). Preisliste und Einstellungen bleiben.</p><button class="btn rot" data-act="reset">Zurücksetzen …</button></div>
   </div></div>`;
   ui.acts.sadrSpeichern = async () => {
@@ -537,15 +535,6 @@ async function tabDaten(z) {
     S = standPruefen(x); speichern(); meldung('Stand wiederhergestellt.'); render();
   };
   ui.acts.persist = async () => { ui.dauerhaft = await dauerhaftAnfordern(); meldung(ui.dauerhaft ? 'Dauerhafter Speicher aktiv.' : 'Noch nicht bestätigt – App zuerst auf dem Startbildschirm installieren.'); render(); };
-  ui.acts.jahr = async () => {
-    if (!(await frage('Neues Jahr beginnen', 'Zuerst wird eine Archiv-Sicherung erstellt. Danach werden Bestellungen, Tiere, Kisten und die Hofladen-Liste geleert. Kunden, Preisliste und Einstellungen bleiben.', 'Weiter'))) return;
-    if (!sicherungPw) return meldung(PW_FEHLT, true);
-    const blob = await sicherungBlob(S), name = `Bergwiesenhof_Archiv_${todayISO()}.json`;
-    const r = await teilenDatei(blob, name, 'Archiv Bestellsystem', '');
-    if (r === 'abgebrochen') return meldung('Abgebrochen – es wurde nichts geändert.');
-    if (!(await frage('Archiv gespeichert?', `Ist das Archiv „${esc(name)}“ sicher abgelegt? Erst dann die Daten leeren.`, 'Ja, jetzt leeren', 'Abbrechen', 'rot'))) return;
-    bewegungsdatenLeeren(S, false); S.letzteSicherung = new Date().toISOString(); speichern(); meldung('Neues Jahr ist angelegt.'); gehe('#/start');
-  };
   ui.acts.reset = async () => {
     let mitK = false, txt = '';
     const d = $('#dialog');
