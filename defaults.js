@@ -319,7 +319,8 @@ const DEFAULTS = {
   "vdHoflaedle": "Wurst, Gemüse und viele regionale Produkte jederzeit im Hoflädle",
   "vdHofladen": "Hofladen: Mittwoch 15.30–18.00 · Freitag 9.00–11.30 und 15.00–18.00 · Samstag 9.00–11.30 Uhr · Marktstand Neuffen: Samstag 8.00–12.00 Uhr",
   "vdMotto": "Extensiv aus Überzeugung",
-  "kistePfand": 10
+  "kistePfand": 10,
+  "kundenFristJahre": 3
  },
  "auto": [
   {

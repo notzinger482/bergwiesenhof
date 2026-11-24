@@ -76,7 +76,49 @@ async function teilenDatei(blob, name, titel, text) {
   download(blob, name);
   return 'gespeichert';
 }
-function sicherungBlob(S) { return new Blob([JSON.stringify(S, null, 1)], { type: 'application/json' }); }
+// ---------- Verschlüsselte Sicherung ----------
+// Alles, was das Tablet verlässt (Google Drive, Teilen, Archiv), wird mit dem Sicherungs-Passwort verschlüsselt:
+// AES-GCM 256 Bit, Schlüssel aus dem Passwort über PBKDF2-SHA256. Das Passwort bleibt nur auf dem Tablet (nicht in der Sicherung).
+const KRYPTO_ITER = 250000;
+let sicherungPw = null;
+async function pwLaden() { sicherungPw = (await idbGet('sicherungPw')) || null; }
+async function pwSetzen(pw) { if (pw) await idbSet('sicherungPw', pw); else await idbDel('sicherungPw'); sicherungPw = pw || null; }
+const b64 = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+const unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function kryptoSchluessel(pw, salt, iter) {
+  const basis = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({ name: 'PBKDF2', salt, iterations: iter, hash: 'SHA-256' }, basis, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+}
+async function verschluesseln(text, pw) {
+  const salt = crypto.getRandomValues(new Uint8Array(16)), iv = crypto.getRandomValues(new Uint8Array(12));
+  const key = await kryptoSchluessel(pw, salt, KRYPTO_ITER);
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, new TextEncoder().encode(text)));
+  return JSON.stringify({ format: 'bwh-verschluesselt', v: 1, app: 'Bestellsystem Bergwiesenhof', erstellt: new Date().toISOString(), kdf: 'PBKDF2-SHA256', iter: KRYPTO_ITER, salt: b64(salt), iv: b64(iv), daten: b64(ct) });
+}
+const istVerschluesselt = x => !!(x && typeof x === 'object' && x.format === 'bwh-verschluesselt');
+async function entschluesseln(x, pw) {
+  const key = await kryptoSchluessel(pw, unb64(x.salt), num(x.iter) || KRYPTO_ITER);
+  let pt;
+  try { pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: unb64(x.iv) }, key, unb64(x.daten)); }
+  catch (e) { throw new Error('Passwort falsch (oder Datei beschädigt).'); }
+  return new TextDecoder().decode(pt);
+}
+const PW_FEHLT = 'Kein Sicherungs-Passwort festgelegt (Einstellungen → Daten & Sicherung).';
+async function sicherungInhalt(S) { if (!sicherungPw) throw new Error(PW_FEHLT); return verschluesseln(JSON.stringify(S), sicherungPw); }
+async function sicherungBlob(S) { return new Blob([await sicherungInhalt(S)], { type: 'application/json' }); }
+
+// Kopien vor Import/Zurücksetzen/Wiederherstellen (vor_…) nach 30 Tagen vom Tablet löschen
+async function idbKeys() {
+  const db = await idb();
+  return new Promise((res, rej) => { const t = db.transaction(DB_STORE, 'readonly').objectStore(DB_STORE).getAllKeys(); t.onsuccess = () => res(t.result); t.onerror = () => rej(t.error); });
+}
+async function alteKopienAufraeumen(tage = 30) {
+  const grenze = isoOf(new Date(Date.now() - tage * 864e5));
+  for (const k of await idbKeys()) {
+    const m = /^vor_.*?(\d{4}-\d{2}-\d{2})/.exec(String(k));
+    if (m && m[1] < grenze) await idbDel(k);
+  }
+}
 const sicherungName = () => `Bergwiesenhof_Sicherung_${stempel()}.json`;
 
 // ---------- Minimaler XLSX-Schreiber (ZIP ohne Kompression) ----------
@@ -163,8 +205,8 @@ function excelExport(S) {
     for (const s of sonderOf(S, o)) { const a = art(S, s.art); SW.rows.push([o.nr, o.name, o.tier, s.art, has(s.menge) ? num(s.menge) : '', a ? a.einheit : '', s.wunsch]); }
     for (const p of portionenOf(S, o)) PO.rows.push([o.nr, o.name, p.art, p.anzahl, p.g || '', p.text, p.kg || '']);
   }
-  const K = { name: 'Kunden', cols: [{ h: 'Kd-Nr.', typ: 'num' }, { h: 'Name', w: 24 }, { h: 'Telefon', w: 15 }, { h: 'Mail', w: 24 }, { h: 'Straße', w: 20 }, { h: 'PLZ / Ort', w: 18 }, { h: 'Notiz', w: 30 }, { h: 'Bestellungen', typ: 'num' }, { h: 'letzte Bestellung', typ: 'date' }, { h: 'Pakete gesamt', typ: 'num' }, { h: 'Summe Endbeträge', typ: 'eur' }],
-    rows: S.kunden.slice().sort((a, b) => a.nr - b.nr).map(k => { const st = kundenStat(S, k); return [k.nr, k.name, k.tel, k.mail, k.strasse, k.ort, k.notiz, st.anzahl, st.letzte, st.pakete, st.umsatz]; }) };
+  const K = { name: 'Kunden', cols: [{ h: 'Kd-Nr.', typ: 'num' }, { h: 'Name', w: 24 }, { h: 'Telefon', w: 15 }, { h: 'Mail', w: 24 }, { h: 'Notiz', w: 30 }, { h: 'angelegt', typ: 'date' }, { h: 'Bestellungen', typ: 'num' }, { h: 'letzte Bestellung', typ: 'date' }, { h: 'Pakete gesamt', typ: 'num' }, { h: 'Summe Endbeträge', typ: 'eur' }],
+    rows: S.kunden.slice().sort((a, b) => a.nr - b.nr).map(k => { const st = kundenStat(S, k); return [k.nr, k.name, k.tel, k.mail, k.notiz, k.angelegt || '', st.anzahl, kundeLetzte(S, k), st.pakete, st.umsatz]; }) };
   const T = { name: 'Tiere', cols: [{ h: 'Tier', w: 14 }, { h: 'Ohrmarke / Notiz', w: 20 }, { h: 'Typ' }, { h: 'Schlachtgewicht', typ: 'num' }, { h: 'Schlachttermin', typ: 'date' }, { h: 'Abholtermin', typ: 'date' }, { h: 'SG für Rechnung', typ: 'num' }, { h: 'Paketgewicht ca.', typ: 'num' }, { h: 'bestellte Pakete', typ: 'num' }, { h: 'Pakete frei', typ: 'num' }, { h: 'Bestellungen', typ: 'num' }, { h: 'davon reicht nicht', typ: 'num' }, { h: 'Archiv seit', typ: 'date' }, { h: 'Statistik' }, { h: 'gewogen kg', typ: 'num' }, { h: 'gewogene Teile', typ: 'num' }, { h: 'Kommentar', w: 30 }],
     rows: S.tiere.map(t => { const i = tierInfo(S, t); const su = erfassungSumme(t); return [t.name, t.notiz, t.typ, n(t.sg), t.schlacht, t.abhol, i.sg, r2(i.paketKg), i.pakete, i.frei, i.anzahl, i.reichtNicht, t.archiv || '', zaehltStatistik(t) ? 'zählt' : t.ohneStatistik ? 'ausgeblendet' : 'nein', r2(su.kg), su.teile, t.kommentar || '']; }) };
   const AU = { name: 'Ausbeute gewogen', cols: [{ h: 'Tier', w: 14 }, { h: 'Typ' }, { h: 'Schlachtgewicht', typ: 'num' }, { h: 'Artikel', w: 20 }, { h: 'Teilstück', w: 28 }, { h: 'kg', typ: 'num' }, { h: 'für Bestell-Nr.', typ: 'num' }, { h: 'Zeit', w: 20 }],
@@ -207,7 +249,7 @@ async function autoSicherung(erzwingen, test) {
   const stand = S.gespeichert;
   try {
     autoMeta.letzterVersuch = Date.now();
-    const body = test ? { k: a.k, test: true } : { k: a.k, inhalt: JSON.stringify(S) };
+    const body = test ? { k: a.k, test: true } : { k: a.k, inhalt: await sicherungInhalt(S) };
     const r = await fetch(a.url, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body), redirect: 'follow' });
     const txt = await r.text();
     let j; try { j = JSON.parse(txt); } catch (e) { throw new Error('Antwort ist keine Sicherungsbestätigung – ist das Skript als Web-App „für jeden“ bereitgestellt?'); }

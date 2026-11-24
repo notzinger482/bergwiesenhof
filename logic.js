@@ -672,16 +672,17 @@ function tierUmbenennen(S, alt, neu) {
 }
 
 // ---------- Kunden ----------
-function kundePflegen(S, name, tel, mail) {
+function kundePflegen(S, name, tel, mail, eingang) {
   name = String(name || '').trim();
-  if (!name) return false;
+  if (!name || sameText(name, ANONYM)) return false;
   const k = S.kunden.find(x => sameText(x.name, name));
   if (k) {
     if (!k.tel && tel) k.tel = tel;
     if (!k.mail && mail) k.mail = mail;
+    if (eingang && eingang > (k.letzte || '')) k.letzte = eingang;
     return false;
   }
-  S.kunden.push({ nr: S.kunden.reduce((m, x) => Math.max(m, x.nr), 0) + 1, name, tel: tel || '', mail: mail || '', strasse: '', ort: '', notiz: '' });
+  S.kunden.push({ nr: S.kunden.reduce((m, x) => Math.max(m, x.nr), 0) + 1, name, tel: tel || '', mail: mail || '', notiz: '', angelegt: todayISO(), letzte: eingang || '' });
   return true;
 }
 // Kunden-Vorschläge fürs Namensfeld: jedes getippte Wort muss einen Namensteil anfangen (Groß/klein, Umlaute egal);
@@ -716,6 +717,31 @@ function kundenStat(S, k) {
     pakete: os.reduce((s, o) => s + num(o.pakete), 0),
     umsatz: os.reduce((s, o) => s + num(o.endbetrag), 0)
   };
+}
+
+// ---------- Datenschutz: inaktive Kunden anonymisieren ----------
+// Maßgeblich ist das letzte Lebenszeichen: letzte Bestellung (bleibt auch nach „Neues Jahr“ am Kunden gespeichert) oder Anlagedatum.
+const ANONYM = 'anonymisiert';
+function kundeLetzte(S, k) {
+  return (S.bestellungen || []).filter(o => sameText(o.name, k.name)).reduce((m, o) => (o.eingang || '') > m ? o.eingang : m, k.letzte || k.angelegt || '');
+}
+function kundenFrist(S) { const j = num(S.settings.kundenFristJahre); return j >= 1 ? Math.round(j) : 3; }
+function inaktiveKunden(S, heute = todayISO()) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(heute) || /^(\d{4})-(\d{2})-(\d{2})/.exec(todayISO());
+  const grenze = isoOf(new Date(+m[1] - kundenFrist(S), +m[2] - 1, +m[3]));
+  const archiviert = n => { const t = (S.tiere || []).find(x => x.name === n); return !!(t && t.archiv); };
+  return (S.kunden || []).map(k => ({ k, letzte: kundeLetzte(S, k) }))
+    .filter(x => x.letzte && x.letzte < grenze)
+    // Bestellungen, die noch laufen (nicht abgeholt, Tier nicht im Archiv), schützen den Kunden
+    .filter(x => !(S.bestellungen || []).some(o => sameText(o.name, x.k.name) && (o.status || 'offen') !== 'abgeholt' && !archiviert(o.tier)))
+    .sort((a, b) => a.letzte.localeCompare(b.letzte));
+}
+// Kunde aus der Kundenliste löschen; seine Bestellungen bleiben für Statistik und Ausbeute, aber ohne Name, Telefon, Mail und Notiz.
+function kundeAnonymisieren(S, k) {
+  let n = 0;
+  for (const o of S.bestellungen) if (sameText(o.name, k.name)) { o.name = ANONYM; o.tel = ''; o.mail = ''; o.notiz = ''; o.anonym = true; n++; }
+  S.kunden = S.kunden.filter(x => x !== k && x.nr !== k.nr);
+  return n;
 }
 
 // ---------- Mengenprüfung (Blatt "Mengenprüfung") ----------
@@ -1231,7 +1257,7 @@ function hofladenSummen(S, jahr) {
 function leererStand() {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   return {
-    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 7, gespeichert: null,
+    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 8, gespeichert: null,
     artikel: d.artikel, settings: d.settings, auto: d.auto, wege: d.wege,
     kunden: [], tiere: [], bestellungen: [], kisten: [], hofladen: [],
     metzgerManuell: {}, packplaene: {}, letzteSicherung: null
@@ -1297,6 +1323,16 @@ function standPruefen(x) {
     (x.bestellungen || []).forEach(o => Object.values(o.pos || {}).forEach(p => { if (p && p.vak !== true) p.vak = false; }));
     x.schema = 7;
   }
+  // Version 1.9.0 (Datenschutz): Straße und PLZ/Ort werden nicht mehr gespeichert
+  if (!(altSchema >= 8)) {
+    (x.kunden || []).forEach(k => { delete k.strasse; delete k.ort; });
+    x.schema = 8;
+  }
+  // letzte Bestellung und Anlagedatum je Kunde (für die Löschfrist; bleibt auch nach „Neues Jahr“ erhalten)
+  (x.kunden || []).forEach(k => {
+    k.letzte = (x.bestellungen || []).filter(o => sameText(o.name, k.name)).reduce((m, o) => (o.eingang || '') > m ? o.eingang : m, k.letzte || '');
+    if (!k.angelegt) k.angelegt = k.letzte || todayISO();
+  });
   delete x.settings.preisTuete;
   // Version 1.6.4: Innereien nach Stück werden in €/kg berechnet → geschätztes Stückgewicht
   const stkG = { Nieren: 700, Herz: 2500, Zunge: 1500, 'Bäckle': 400, Ochsenschwanz: 2000 };
@@ -1308,7 +1344,7 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege,
+  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }

@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.8.2';
+const APP_VERSION = '1.9.0';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -45,6 +45,15 @@ function dialog(titel, html, knoepfe = [{ k: 'ok', t: 'OK', cls: 'haupt' }]) {
     d.onclick = e => { const b = e.target.closest('[data-k]'); if (b) fertig(b.dataset.k); else if (e.target === d) fertig(null); };
     const f = $('input,select', d); if (f) setTimeout(() => f.focus(), 50);
   });
+}
+// Dialog mit Eingabefeldern: liefert den Knopf und die Werte aller Felder mit id (vor dem Schließen gelesen)
+async function dialogFelder(titel, html, knoepfe) {
+  const d = $('#dialog'), werte = {};
+  const merk = () => $$('input,textarea,select', d).forEach(f => { if (f.id) werte[f.id] = f.type === 'checkbox' ? f.checked : f.value; });
+  d.addEventListener('click', merk, true);
+  const k = await dialog(titel, html, knoepfe);
+  d.removeEventListener('click', merk, true);
+  return { k, werte };
 }
 const frage = (titel, text, ja = 'Ja', nein = 'Abbrechen', jaCls = 'haupt') =>
   dialog(titel, `<p>${text}</p>`, [{ k: 'nein', t: nein }, { k: 'ja', t: ja, cls: jaCls }]).then(k => k === 'ja');
@@ -151,6 +160,9 @@ function viewStart() {
   let h = '';
   if (S.bestellungen.length && (tage === null || tage >= (S.settings.sicherungUrl ? 3 : 7)))
     h += `<div class="hinweis zeile"><div class="platz"><b>Datensicherung:</b> ${tage === null ? 'Es gibt noch keine Sicherung.' : `Letzte Sicherung vor ${tage} Tagen.`} ${S.settings.sicherungUrl ? 'Die automatische Sicherung hat nicht geklappt' + (autoMeta.fehler ? ' (' + esc(autoMeta.fehler) + ')' : '') + '. Bitte ins WLAN gehen oder unter Einstellungen prüfen.' : 'Bitte zu Hause im WLAN eine Sicherung erstellen.'}</div><button class="btn haupt" data-act="sichern">Jetzt sichern</button></div>`;
+  if (!sicherungPw) h += `<div class="hinweis zeile"><div class="platz"><b>Sicherungs-Passwort fehlt:</b> Sicherungen werden jetzt verschlüsselt. Bis ein Passwort festgelegt ist, wird nichts gesichert.</div><a class="btn haupt" href="#/einstellungen/daten">Passwort festlegen</a></div>`;
+  const inaktiv = inaktiveKunden(S).length;
+  if (inaktiv) h += `<div class="hinweis zeile"><div class="platz"><b>Datenschutz:</b> ${inaktiv} Kunde${inaktiv > 1 ? 'n haben' : ' hat'} seit über ${kundenFrist(S)} Jahren nicht bestellt und ${inaktiv > 1 ? 'sollten' : 'sollte'} anonymisiert werden.</div><a class="btn" href="#/einstellungen/daten">Ansehen</a></div>`;
   if (!ui.dauerhaft) h += `<div class="hinweis klein">Hinweis: Der dauerhafte Speicher ist noch nicht bestätigt. Bitte die App über „Zum Startbildschirm hinzufügen“ installieren – dann löscht Android die Daten nicht von selbst.</div>`;
   h += `<div class="zeile" style="margin-bottom:16px"><a class="btn haupt" href="#/neu" style="min-height:60px;font-size:19px;padding:0 28px">+ Neue Bestellung</a>
     <div class="kachel"><div class="gross">${offen}</div><div class="klein">offene Bestellungen</div></div>
@@ -237,7 +249,7 @@ function viewBestellung(nr, q, vorlage) {
           <label class="f">Wunschtermin (leer = nächstes Tier)<input class="feld" type="date" data-in="kopf" data-f="wunsch" value="${esc(o.wunsch)}"></label>
           <label class="f">Tier<select class="feld" id="tierwahl" data-in="kopf" data-f="tier"></select></label>
           <div class="ganz klein" id="tierinfo"></div>
-          <label class="f ganz">Notiz intern<input class="feld" data-in="kopf" data-f="notiz" value="${esc(o.notiz)}"></label>
+          <label class="f ganz">Notiz intern<input class="feld" data-in="kopf" data-f="notiz" value="${esc(o.notiz)}" placeholder="nur Bestellbezogenes – keine Gesundheitsangaben"></label>
         </div>
       </div>
       <div class="karte"><h3 style="margin-top:0">Genusspakete <span class="klein">(ca. ${fmtNum(paketGewicht(S), 1)} kg, ${fmtEur(st.preisPaketKg)}/kg)</span></h3><div class="klein" style="margin:-4px 0 8px">${esc(paketListe(S).map(p => (num(p.anzahl) > 1 ? fmtNum(p.anzahl) + ' ' : fmtNum(num(p.anzahl) * paketG(S, p) / 1000, 2) + ' kg ') + p.art).join(' · '))}</div>
@@ -247,7 +259,7 @@ function viewBestellung(nr, q, vorlage) {
         </div>
       </div>
       <div class="karte"><h3 style="margin-top:0">Sonderwünsche <span class="klein">– macht der Metzger separat</span></h3>
-        <div class="klein" style="margin-bottom:6px">z. B. Hackfleisch 2000 g „besonders mager“. Die Menge gehört trotzdem rechts mit in die Bestellung.</div>
+        <div class="klein" style="margin-bottom:6px">z. B. Hackfleisch 2000 g „besonders mager“. Die Menge gehört trotzdem rechts mit in die Bestellung. Nur den Wunsch eintragen, keine Gründe wie Krankheiten.</div>
         <div id="sonderliste">${sonderRows()}</div>
         <button class="btn klein" data-act="sonderNeu">+ Sonderwunsch</button>
       </div>
@@ -322,7 +334,7 @@ function viewBestellung(nr, q, vorlage) {
     kdTreffer = kundenVorschlaege(S, q); kdAktiv = -1;
     const b = kdBox(); if (!b) return;
     if (!kdTreffer.length) return kdZu();
-    b.innerHTML = kdTreffer.map((t, i) => `<div class="kdv" data-i="${i}"><div class="fett">${esc(t.k.name)}</div><div class="klein">${[t.k.tel, t.k.ort, t.anzahl ? `${t.anzahl} Bestellung${t.anzahl > 1 ? 'en' : ''}${t.letzteNr ? ', zuletzt Nr. ' + t.letzteNr : ''}` : 'noch keine Bestellung'].filter(Boolean).map(esc).join(' · ')}</div></div>`).join('');
+    b.innerHTML = kdTreffer.map((t, i) => `<div class="kdv" data-i="${i}"><div class="fett">${esc(t.k.name)}</div><div class="klein">${[t.k.tel, t.anzahl ? `${t.anzahl} Bestellung${t.anzahl > 1 ? 'en' : ''}${t.letzteNr ? ', zuletzt Nr. ' + t.letzteNr : ''}` : 'noch keine Bestellung'].filter(Boolean).map(esc).join(' · ')}</div></div>`).join('');
     b.classList.add('auf');
   }
   function kdWaehlen(i) {
@@ -448,7 +460,7 @@ async function bestellungSpeichern(o) {
     if (S.bestellungen[i].tier !== o.tier) o.rang = nextRang(S);
     S.bestellungen[i] = o;
   }
-  const kundeNeu = kundePflegen(S, o.name, o.tel, o.mail);
+  const kundeNeu = kundePflegen(S, o.name, o.tel, o.mail, o.eingang);
   speichern();
   ui.formDirty = false; ui.letzteNr = o.nr;
   const check = mengencheck(S, o);
@@ -504,20 +516,20 @@ function viewKunden() {
   titel('Kunden');
   const liste = () => {
     const q = ui.kfilter.trim().toLowerCase();
-    const ks = S.kunden.filter(k => !q || k.name.toLowerCase().includes(q) || (k.tel || '').includes(q) || (k.ort || '').toLowerCase().includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+    const ks = S.kunden.filter(k => !q || k.name.toLowerCase().includes(q) || (k.tel || '').includes(q)).sort((a, b) => a.name.localeCompare(b.name));
     $('#liste').innerHTML = !ks.length ? '<div class="karte">Keine Kunden gefunden. Neue Kunden entstehen automatisch beim Speichern einer Bestellung.</div>' :
-      `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Kd-Nr.</th><th>Name</th><th>Telefon</th><th>Ort</th><th class="r">Bestellungen</th><th>letzte</th><th class="r">Pakete</th><th class="r">Summe Endbeträge</th></tr></thead><tbody>` +
-      ks.map(k => { const s = kundenStat(S, k); return `<tr class="klick" data-act="oeffnen" data-nr="${k.nr}"><td class="r">${k.nr}</td><td class="fett">${esc(k.name)}</td><td>${esc(k.tel)}</td><td>${esc(k.ort)}</td><td class="r">${s.anzahl}</td><td>${fmtDate(s.letzte)}</td><td class="r">${s.pakete || ''}</td><td class="r">${s.umsatz ? fmtEur(s.umsatz) : ''}</td></tr>`; }).join('') + '</tbody></table></div>';
+      `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Kd-Nr.</th><th>Name</th><th>Telefon</th><th>Mail</th><th class="r">Bestellungen</th><th>letzte</th><th class="r">Pakete</th><th class="r">Summe Endbeträge</th></tr></thead><tbody>` +
+      ks.map(k => { const s = kundenStat(S, k); return `<tr class="klick" data-act="oeffnen" data-nr="${k.nr}"><td class="r">${k.nr}</td><td class="fett">${esc(k.name)}</td><td>${esc(k.tel)}</td><td>${esc(k.mail)}</td><td class="r">${s.anzahl}</td><td>${fmtDate(kundeLetzte(S, k))}</td><td class="r">${s.pakete || ''}</td><td class="r">${s.umsatz ? fmtEur(s.umsatz) : ''}</td></tr>`; }).join('') + '</tbody></table></div>';
   };
   inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Kunden</h1><a class="btn" href="#/kunde/neu">+ Kunde anlegen</a></div>
-    <div class="suchzeile"><input class="feld" type="search" placeholder="Suchen: Name, Telefon, Ort" data-in="q" value="${esc(ui.kfilter)}"></div><div id="liste"></div>`;
+    <div class="suchzeile"><input class="feld" type="search" placeholder="Suchen: Name oder Telefon" data-in="q" value="${esc(ui.kfilter)}"></div><div id="liste"></div>`;
   ui.ins.q = el => { ui.kfilter = el.value; liste(); };
   ui.acts.oeffnen = el => gehe('#/kunde/' + el.dataset.nr);
   liste();
 }
 function viewKunde(id) {
   const neu = id === 'neu';
-  const k0 = neu ? { nr: null, name: '', tel: '', mail: '', strasse: '', ort: '', notiz: '' } : S.kunden.find(k => k.nr === +id);
+  const k0 = neu ? { nr: null, name: '', tel: '', mail: '', notiz: '' } : S.kunden.find(k => k.nr === +id);
   if (!k0) { inhalt().innerHTML = '<div class="fehlerbox">Kunde nicht gefunden.</div>'; return; }
   const k = { ...k0 };
   titel(neu ? 'Neuer Kunde' : k.name);
@@ -526,9 +538,11 @@ function viewKunde(id) {
   const fld = (f, t, typ = 'text') => `<label class="f">${t}<input class="feld" type="${typ}" data-in="k" data-f="${f}" value="${esc(k[f] || '')}"></label>`;
   inhalt().innerHTML = `<h1>${neu ? 'Neuer Kunde' : `Kd-Nr. ${k.nr}: ${esc(k.name)}`}</h1>
     <div class="spalten2"><div class="karte"><div class="formraster">
-      <div class="ganz">${fld('name', 'Name (genau so wie in den Bestellungen)')}</div>${fld('tel', 'Telefon', 'tel')}${fld('mail', 'Mail', 'email')}${fld('strasse', 'Straße')}${fld('ort', 'PLZ / Ort')}
-      <label class="f ganz">Notiz (Vorlieben, Hinweise)<textarea class="feld" data-in="k" data-f="notiz">${esc(k.notiz || '')}</textarea></label></div>
-      <div class="knopfleiste" style="margin-top:14px"><button class="btn haupt" data-act="speichern">Speichern</button>${neu ? '' : `<a class="btn" href="#/neu?kunde=${k.nr}">+ Neue Bestellung</a>`}${!neu && !os.length ? '<button class="btn rot" data-act="loeschen">Löschen</button>' : ''}</div></div>
+      <div class="ganz">${fld('name', 'Name (genau so wie in den Bestellungen)')}</div>${fld('tel', 'Telefon', 'tel')}${fld('mail', 'Mail', 'email')}
+      <label class="f ganz">Notiz (Vorlieben, Hinweise)<textarea class="feld" data-in="k" data-f="notiz" placeholder="z. B. mag Hack mager, holt immer samstags">${esc(k.notiz || '')}</textarea>
+        <span class="klein">Nur was für Bestellung und Abholung wichtig ist. <b>Keine Gesundheitsangaben</b> (Allergien, Krankheiten) und nichts Privates.</span></label></div>
+      <div class="knopfleiste" style="margin-top:14px"><button class="btn haupt" data-act="speichern">Speichern</button>${neu ? '' : `<a class="btn" href="#/neu?kunde=${k.nr}">+ Neue Bestellung</a>`}${!neu && !os.length ? '<button class="btn rot" data-act="loeschen">Löschen</button>' : ''}${!neu && os.length ? '<button class="btn rot" data-act="anonym">Anonymisieren …</button>' : ''}</div>
+      ${neu ? '' : `<p class="klein" style="margin-top:10px">Angelegt: ${fmtDate(k.angelegt) || '–'} · letzte Bestellung: ${fmtDate(kundeLetzte(S, k)) || '–'}</p>`}</div>
     <div>${neu ? '' : `<div class="karte"><b>${st.anzahl}</b> Bestellungen · <b>${st.pakete}</b> Genusspakete · Summe Endbeträge <b>${fmtEur(st.umsatz)}</b></div>
       <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Eingang</th><th>Tier</th><th>Bestellung</th><th>Status</th></tr></thead><tbody>${os.map(o => `<tr class="klick" data-act="best" data-nr="${o.nr}"><td class="r">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${esc(o.tier)}</td><td class="klein">${esc(kurzText(o))}</td><td>${statusMarke(o.status)}</td></tr>`).join('') || '<tr><td colspan="5" class="klein">noch keine Bestellungen</td></tr>'}</tbody></table></div>`}</div></div>`;
   ui.ins.k = el => { k[el.dataset.f] = el.value; };
@@ -538,7 +552,8 @@ function viewKunde(id) {
     if (!k.name) return meldung('Bitte einen Namen eintragen.', true);
     const doppelt = S.kunden.find(x => sameText(x.name, k.name) && x.nr !== k.nr);
     if (doppelt) return meldung(`Den Namen „${k.name}“ gibt es schon (Kd-Nr. ${doppelt.nr}). Bei gleichen Namen z. B. den Ort ergänzen.`, true);
-    if (neu) { k.nr = S.kunden.reduce((m, x) => Math.max(m, x.nr), 0) + 1; S.kunden.push(k); }
+    if (sameText(k.name, ANONYM)) return meldung('„anonymisiert“ ist als Name reserviert.', true);
+    if (neu) { k.nr = S.kunden.reduce((m, x) => Math.max(m, x.nr), 0) + 1; k.angelegt = todayISO(); S.kunden.push(k); }
     else {
       if (k0.name !== k.name) {
         const n = S.bestellungen.filter(o => sameText(o.name, k0.name)).length;
@@ -552,6 +567,10 @@ function viewKunde(id) {
   ui.acts.loeschen = async () => {
     if (!(await frage('Kunde löschen', `Kunde „${esc(k.name)}“ löschen?`, 'Löschen', 'Abbrechen', 'rot'))) return;
     S.kunden = S.kunden.filter(x => x.nr !== k.nr); speichern(); gehe('#/kunden');
+  };
+  ui.acts.anonym = async () => {
+    if (!(await frage('Kunde anonymisieren', `„${esc(k0.name)}“ aus der Kundenliste löschen? Die ${os.length} Bestellung(en) bleiben für Statistik und Ausbeute erhalten, aber <b>ohne Name, Telefon, Mail und Notiz</b>.${os.some(o => (o.status || 'offen') !== 'abgeholt') ? '<br><br><span class="warn">Achtung: Es gibt noch Bestellungen, die nicht abgeholt sind.</span>' : ''}<br><br>Das kann nicht rückgängig gemacht werden.`, 'Anonymisieren', 'Abbrechen', 'rot'))) return;
+    const n = kundeAnonymisieren(S, k0); speichern(); meldung(`Kunde anonymisiert (${n} Bestellungen ohne Namen behalten).`); gehe('#/kunden');
   };
 }
 

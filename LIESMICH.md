@@ -1,6 +1,6 @@
 # Bestellsystem Bergwiesenhof – Tablet-App
 
-Version 1.8.2 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
+Version 1.9.0 · für Samsung Galaxy Tab A 10.5 (SM-T590) mit Chrome
 
 Die App ersetzt die Excel-Datei mit allen Makros. Sie läuft nach der Installation **komplett offline**.
 Internet braucht es nur zum Teilen (WhatsApp, Mail), für die Datensicherung in die Cloud und für Updates.
@@ -39,6 +39,10 @@ Die Daten (Bestellungen, Kunden …) liegen **nur auf dem Tablet**, nicht auf de
 
 ## Datensicherung
 
+**Verschlüsselt (ab 1.9.0):** Alle Sicherungen, die das Tablet verlassen (Google Drive, „Sicherung teilen“, Archiv „Neues Jahr“),
+werden mit dem **Sicherungs-Passwort** verschlüsselt (AES-256, Einstellungen → Daten & Sicherung). Das Passwort liegt nur auf dem
+Tablet und gehört aufgeschrieben – ohne es lässt sich keine Sicherung einspielen. Ohne Passwort wird nichts gesichert.
+
 **Automatisch in Google Drive:** Sobald das Tablet Internet hat und die App offen ist, sichert sie bei Änderungen
 (höchstens 1× pro Stunde) in den Drive-Ordner **„Bergwiesenhof“**. Dafür läuft in deinem Google-Konto das kleine
 Skript `Google-Sicherung\Code.gs` (Einrichtung siehe Anleitung im Chat). Aufgeräumt wird automatisch:
@@ -47,7 +51,13 @@ die neuesten 30 Sicherungen bleiben, davor eine pro Tag für 90 Tage.
 **Von Hand:** Einstellungen → Daten & Sicherung → „Sicherung teilen“ (z. B. Gmail an dich selbst).
 Zusätzlich legt die App selbst eine Tageskopie der letzten 14 Tage auf dem Tablet an.
 
-**Wiederherstellen:** Sicherungsdatei aus Drive aufs Tablet laden → Einstellungen → „Sicherung einspielen“.
+**Wiederherstellen:** Sicherungsdatei aus Drive aufs Tablet laden → Einstellungen → „Sicherung einspielen“ (fragt nach dem Passwort, mit dem die Datei erstellt wurde).
+
+## Datenschutz
+
+Kunden: nur Name, Telefon, Mail und eine kurze Notiz (keine Gesundheitsangaben). Kunden ohne Bestellung seit der Frist (Standard 3 Jahre)
+werden unter Einstellungen → Daten & Sicherung anonymisiert; die Übersicht erinnert daran. Der Metzgerauftrag enthält nur Bestell-Nummern.
+Kopien vor Import/Zurücksetzen werden nach 30 Tagen vom Tablet gelöscht.
 
 ## Updates
 

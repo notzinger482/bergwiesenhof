@@ -62,14 +62,14 @@ function docMetzger(ma) {
   const t = ma.tier;
   const bl = [{ type: 'h', text: 'Gesamtmengen' },
     { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.kistenText ? `(${ma.hack.kistenText})` : ''], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', '']]
-      .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Namen siehe unten']] : [])
-      .concat(ma.ochs.ganz > 0 ? [['Ochsenschwanz', `${fmtNum(ma.ochs.ganz)} Stück ganz lassen`, `kommt zu den Beinscheiben in die Kiste – ${ma.ochs.ganzListe.map(x => 'Nr. ' + x.nr + ' ' + x.name).join(', ')}`]] : [])
+      .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Nr. siehe unten']] : [])
+      .concat(ma.ochs.ganz > 0 ? [['Ochsenschwanz', `${fmtNum(ma.ochs.ganz)} Stück ganz lassen`, `kommt zu den Beinscheiben in die Kiste – ${ma.ochs.ganzListe.map(x => 'Nr. ' + x.nr).join(', ')}`]] : [])
       .concat(ma.ochs.bestellt > ma.ochs.vorhanden ? [['Ochsenschwanz', `ACHTUNG: ${fmtNum(ma.ochs.bestellt)} Stück bestellt`, `aber nur ca. ${fmtNum(ma.ochs.vorhanden)} je Tier`]] : []) }];
   if (ma.hack.ueberAusbeute) bl.push({ type: 'text', bold: true, text: 'Mehr Hackfleisch als üblich: zuerst Schulterstücke (Bug) auflösen, Keulenstücke als Braten behalten.' });
   if (ma.gulasch.insHack > 0.05) bl.push({ type: 'text', text: `Kein Gulasch bestellt: ca. ${fmtNum(ma.gulasch.insHack, 0)} kg Kamm/Hals ins Hackfleisch.` });
   bl.push({ type: 'text', text: (ma.waden > 0 ? 'Übrige Hesse als Beinscheiben. ' : 'Hesse wie immer als Beinscheiben. ') + 'Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
-    { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit Namen beschriften' },
-    { type: 'table', head: ['Nr.', 'Name', 'Artikel', 'Menge', 'Hinweis'], widths: [1, 3.2, 3, 1.6, 3.6], align: ['r', '', '', 'r', ''], rows: ma.separat.map(s => [s.nr, s.name, s.art, s.menge, s.hinweis]), leer: '– keine –' });
+    { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit der Bestell-Nr. beschriften' },
+    { type: 'table', head: ['Nr.', 'Artikel', 'Menge', 'Hinweis'], widths: [1.2, 3.6, 1.8, 5.8], align: ['r', '', 'r', ''], rows: ma.separat.map(s => [s.nr, s.art, s.menge, s.hinweis]), leer: '– keine –' });
   return { title: `Auftrag Metzger – ${t.name}`, sub: [abholTxt(t)], blocks: bl, footer: fussZeile() };
 }
 function docPackplan(pp, t) {
@@ -400,7 +400,8 @@ function viewHofladen() {
 // =====================================================================
 const EREITER = [['daten', 'Daten & Sicherung'], ['preise', 'Preisliste'], ['paket', 'Genusspaket'], ['ausbeute', 'Ausbeute & Kisten'], ['auto', 'Auto (Stellplätze)'], ['hof', 'Hof & Hilfe']];
 async function sicherungErstellen(teilen) {
-  const blob = sicherungBlob(S), name = sicherungName();
+  if (!sicherungPw) { meldung(PW_FEHLT, true); return gehe('#/einstellungen/daten'); }
+  const blob = await sicherungBlob(S), name = sicherungName();
   const r = teilen ? await teilenDatei(blob, name, 'Sicherung Bestellsystem', '') : (download(blob, name), 'gespeichert');
   if (r !== 'abgebrochen') { S.letzteSicherung = new Date().toISOString(); speichern(); meldung(r === 'geteilt' ? 'Sicherung geteilt.' : `Sicherung „${name}“ im Ordner „Download“ gespeichert.`); if (location.hash.includes('einstellungen') || location.hash.length < 3 || location.hash.includes('start')) render(); }
 }
@@ -423,7 +424,13 @@ async function tabDaten(z) {
   const autoTxt = !S.settings.sicherungUrl ? 'aus' : !adr ? '<span class="warn">Adresse ungültig</span>' :
     (autoMeta.gesendetAm ? `letzte: <b>${new Date(autoMeta.gesendetAm).toLocaleString('de-DE')}</b>${autoMeta.datei ? ' (' + esc(autoMeta.datei) + ')' : ''}` : 'noch keine') +
     (autoMeta.fehler ? `<br><span class="warn">Letzter Versuch fehlgeschlagen: ${esc(autoMeta.fehler)}</span>` : '');
+  const inaktiv = inaktiveKunden(S);
   z.innerHTML = `<div class="spalten2"><div>
+    <div class="karte"><h3 style="margin-top:0">Sicherungs-Passwort</h3>
+      <p class="klein">Alle Sicherungen, die das Tablet verlassen (Google Drive, Teilen, Archiv „Neues Jahr“), werden mit diesem Passwort verschlüsselt. Google sieht nur Zeichensalat. Das Passwort bleibt nur auf diesem Tablet und ist nicht in der Sicherung.</p>
+      <p>Status: ${sicherungPw ? '<b class="ok">festgelegt ✓</b>' : '<b class="warn">noch nicht festgelegt – es wird nichts gesichert</b>'}</p>
+      <p class="klein"><b>Wichtig:</b> Passwort aufschreiben und sicher aufbewahren (nicht auf dem Tablet). Ohne Passwort lässt sich keine Sicherung mehr einspielen – auch Claude oder Google können dann nicht helfen.</p>
+      <button class="btn ${sicherungPw ? '' : 'haupt'}" data-act="pw">${sicherungPw ? 'Passwort ändern …' : 'Passwort festlegen …'}</button></div>
     <div class="karte"><h3 style="margin-top:0">Automatische Sicherung in Google Drive</h3>
       <p class="klein">Sobald das Tablet Internet hat und die App offen ist, wird bei Änderungen automatisch gesichert (höchstens 1× pro Stunde) – in den Drive-Ordner „Bergwiesenhof“.</p>
       <label class="f">Sicherungs-Adresse (aus der Mail an dich selbst einfügen)<input class="feld" id="sadr" value="${esc(S.settings.sicherungUrl || '')}" placeholder="https://script.google.com/macros/s/…/exec?k=…" autocomplete="off"></label>
@@ -433,7 +440,8 @@ async function tabDaten(z) {
       <p>Letzte Sicherung von Hand: <b>${tage}</b><br><span class="klein">Zusätzlich oder falls die automatische Sicherung nicht eingerichtet ist: Datei per Gmail an dich selbst oder in Drive ablegen.</span></p>
       <div class="knopfleiste"><button class="btn haupt" data-act="teilen">Sicherung teilen (Drive, Mail …)</button><button class="btn" data-act="datei">Sicherung als Datei speichern</button></div></div>
     <div class="karte"><h3 style="margin-top:0">Sicherung einspielen</h3><p class="klein">Ersetzt alle Daten auf diesem Tablet durch die Sicherungsdatei (z. B. nach einem Gerätewechsel).</p>
-      <input type="file" accept=".json,application/json" id="datei" style="display:none"><button class="btn" data-act="laden">Sicherungsdatei wählen …</button></div>
+      <input type="file" accept=".json,application/json" id="datei" style="display:none"><button class="btn" data-act="laden">Sicherungsdatei wählen …</button>
+      <p class="klein">Verschlüsselte Sicherungen fragen nach dem Passwort, mit dem sie erstellt wurden.</p></div>
     <div class="karte"><h3 style="margin-top:0">Excel-Export</h3><p class="klein">Alle Bestellungen, Kunden, Tiere, Sonderwünsche, Portionen, Kisten und Hofladen als Excel-Datei – für Auswertungen am PC.</p>
       <div class="knopfleiste"><button class="btn" data-act="excel">Excel-Datei teilen</button><button class="btn" data-act="exceldatei">Excel-Datei speichern</button></div></div>
   </div><div>
@@ -441,6 +449,12 @@ async function tabDaten(z) {
       ${snaps.map(t => `<div class="zeile" style="margin-bottom:6px"><span class="platz">Stand vom ${fmtDate(t)}</span><button class="btn klein" data-act="snap" data-t="${t}">wiederherstellen</button></div>`).join('') || '<div class="klein">noch keine</div>'}</div>
     <div class="karte"><h3 style="margin-top:0">Speicher</h3><p class="klein">Dauerhafter Speicher: <b>${ui.dauerhaft ? 'ja ✓' : 'nicht bestätigt'}</b> · ${S.bestellungen.length} Bestellungen, ${S.kunden.length} Kunden, ${S.tiere.length} Tiere · App-Version ${APP_VERSION}</p>
       ${ui.dauerhaft ? '' : '<button class="btn klein" data-act="persist">Dauerhaften Speicher anfordern</button>'}</div>
+    <div class="karte"><h3 style="margin-top:0">Datenschutz: inaktive Kunden</h3>
+      <p class="klein">Kunden, die länger als die Frist nicht bestellt haben, werden aus der Kundenliste gelöscht. Ihre Bestellungen bleiben für Statistik und Ausbeute erhalten – aber ohne Name, Telefon, Mail und Notiz („anonymisiert“). Kunden mit laufender Bestellung sind ausgenommen.</p>
+      <div class="zeile" style="gap:10px;margin-bottom:8px"><label class="f" style="max-width:220px">Frist in Jahren (ohne Bestellung)<input class="feld zahl" inputmode="numeric" id="kfrist" value="${kundenFrist(S)}"></label><button class="btn klein" data-act="kfrist">Frist speichern</button></div>
+      <p>${inaktiv.length ? `<b class="warn">${inaktiv.length} Kunde${inaktiv.length > 1 ? 'n' : ''}</b> seit über ${kundenFrist(S)} Jahren ohne Bestellung.` : `Keine Kunden über der Frist von ${kundenFrist(S)} Jahren.`}</p>
+      ${inaktiv.length ? '<button class="btn braun" data-act="anonym">Liste ansehen & anonymisieren …</button>' : ''}
+      <p class="klein">Kopien in den Tageskopien verschwinden nach 14 Tagen, in Google Drive nach 90 Tagen von selbst.</p></div>
     <div class="karte"><h3 style="margin-top:0">Neues Jahr beginnen</h3><p class="klein">Erst wird eine Sicherung (Archiv) erstellt, danach werden Bestellungen, Tiere, Kisten, Packpläne und die Hofladen-Liste geleert. Kunden, Preisliste und Einstellungen bleiben. Die Bestellnummern beginnen wieder bei 1.</p>
       <button class="btn braun" data-act="jahr">Neues Jahr beginnen …</button></div>
     <div class="karte"><h3 style="margin-top:0">Alles zurücksetzen</h3><p class="klein">Löscht Bewegungsdaten (optional auch Kunden). Preisliste und Einstellungen bleiben.</p><button class="btn rot" data-act="reset">Zurücksetzen …</button></div>
@@ -459,13 +473,57 @@ async function tabDaten(z) {
   ui.acts.sJetzt = async () => { meldung('Sichere …'); const r = await autoSicherung(true); meldung(r.ok ? 'Gesichert in Google Drive: ' + r.datei : 'Fehler: ' + r.fehler, !r.ok); render(); };
   ui.acts.teilen = () => sicherungErstellen(true);
   ui.acts.datei = () => sicherungErstellen(false);
+  ui.acts.pw = async () => {
+    const { k, werte } = await dialogFelder(sicherungPw ? 'Sicherungs-Passwort ändern' : 'Sicherungs-Passwort festlegen',
+      `<p class="klein">Mindestens 10 Zeichen. Am besten ein Satz oder mehrere Wörter, z. B. „Bulle-Rind-Hack-2026“. ${sicherungPw ? 'Ältere Sicherungen lassen sich danach nur mit dem <b>alten</b> Passwort einspielen.' : ''}</p>
+      <label class="f">Passwort<input class="feld" type="password" id="pw1" autocomplete="new-password"></label>
+      <label class="f">Passwort wiederholen<input class="feld" type="password" id="pw2" autocomplete="new-password"></label>
+      <label class="zeile" style="gap:10px;margin-top:8px"><input type="checkbox" id="pwok" style="width:24px;height:24px"> Ich habe das Passwort aufgeschrieben.</label>`,
+      [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Speichern', cls: 'haupt' }]);
+    if (k !== 'ok') return;
+    const pw = String(werte.pw1 || '');
+    if (pw.length < 10) return meldung('Das Passwort muss mindestens 10 Zeichen haben.', true);
+    if (pw !== werte.pw2) return meldung('Die beiden Passwörter sind nicht gleich.', true);
+    if (!werte.pwok) return meldung('Bitte das Passwort erst aufschreiben und das Häkchen setzen.', true);
+    await pwSetzen(pw);
+    autoMeta.fehler = null; autoMeta.stand = null; await autoMetaSpeichern();
+    meldung('Sicherungs-Passwort gespeichert.' + (adr ? ' Sichere in Google Drive …' : ''));
+    if (adr) { const r = await autoSicherung(true); meldung(r.ok ? 'Verschlüsselte Sicherung in Google Drive: ' + r.datei : 'Google Drive: ' + r.fehler, !r.ok); }
+    render();
+  };
+  ui.acts.kfrist = () => {
+    const j = Math.round(num($('#kfrist').value));
+    if (!(j >= 1 && j <= 10)) return meldung('Bitte eine Frist von 1 bis 10 Jahren eintragen.', true);
+    S.settings.kundenFristJahre = j; speichern(); meldung(`Frist: ${j} Jahre.`); render();
+  };
+  ui.acts.anonym = async () => {
+    const liste = inaktiveKunden(S);
+    if (!liste.length) return render();
+    const k = await dialog('Inaktive Kunden anonymisieren', `<p>Diese ${liste.length} Kunden haben seit über ${kundenFrist(S)} Jahren nicht bestellt:</p>
+      <div style="max-height:40vh;overflow:auto"><table class="tab"><thead><tr><th class="r">Kd-Nr.</th><th>Name</th><th>letzte Bestellung</th></tr></thead><tbody>${liste.map(x => `<tr><td class="r">${x.k.nr}</td><td>${esc(x.k.name)}</td><td>${fmtDate(x.letzte)}</td></tr>`).join('')}</tbody></table></div>
+      <p><b>Name, Telefon, Mail und Notiz werden gelöscht.</b> Das kann nicht rückgängig gemacht werden.</p>`, [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Anonymisieren', cls: 'rot' }]);
+    if (k !== 'ok') return;
+    let b = 0; liste.forEach(x => { b += kundeAnonymisieren(S, x.k); });
+    speichern(); meldung(`${liste.length} Kunden anonymisiert (${b} Bestellungen ohne Namen behalten).`); render();
+  };
   ui.acts.excel = async () => { const r = await teilenDatei(excelExport(S), `Bergwiesenhof_Export_${stempel()}.xlsx`, 'Excel-Export', ''); if (r === 'gespeichert') meldung('Excel-Datei im Ordner „Download“ gespeichert.'); };
   ui.acts.exceldatei = () => { download(excelExport(S), `Bergwiesenhof_Export_${stempel()}.xlsx`); meldung('Excel-Datei im Ordner „Download“ gespeichert.'); };
   ui.acts.laden = () => $('#datei').click();
   $('#datei').onchange = async e => {
     const f = e.target.files[0]; if (!f) return;
     try {
-      const x = standPruefen(JSON.parse(await f.text()));
+      let roh = JSON.parse(await f.text());
+      if (istVerschluesselt(roh)) {
+        let txt = null;
+        if (sicherungPw) { try { txt = await entschluesseln(roh, sicherungPw); } catch (e) { } }
+        if (txt === null) {
+          const { k, werte } = await dialogFelder('Passwort der Sicherung', `<p>Die Datei „${esc(f.name)}“ ist verschlüsselt${roh.erstellt ? ' (erstellt ' + new Date(roh.erstellt).toLocaleString('de-DE') + ')' : ''}. Bitte das Passwort eingeben, mit dem sie erstellt wurde.</p><label class="f">Passwort<input class="feld" type="password" id="pwx" autocomplete="off"></label>`, [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Entschlüsseln', cls: 'haupt' }]);
+          if (k !== 'ok') { e.target.value = ''; return; }
+          txt = await entschluesseln(roh, String(werte.pwx || ''));
+        }
+        roh = JSON.parse(txt);
+      }
+      const x = standPruefen(roh);
       if (!(await frage('Sicherung einspielen', `Datei „${esc(f.name)}“: ${x.bestellungen.length} Bestellungen, ${x.kunden.length} Kunden, ${x.tiere.length} Tiere${x.gespeichert ? ', Stand ' + new Date(x.gespeichert).toLocaleString('de-DE') : ''}.<br><br><b>Alle aktuellen Daten auf diesem Tablet werden ersetzt.</b>`, 'Einspielen', 'Abbrechen', 'rot'))) return;
       await idbSet('vor_import_' + stempel(), JSON.stringify(S));
       S = x; speichern(); meldung('Sicherung eingespielt.'); render();
@@ -481,7 +539,8 @@ async function tabDaten(z) {
   ui.acts.persist = async () => { ui.dauerhaft = await dauerhaftAnfordern(); meldung(ui.dauerhaft ? 'Dauerhafter Speicher aktiv.' : 'Noch nicht bestätigt – App zuerst auf dem Startbildschirm installieren.'); render(); };
   ui.acts.jahr = async () => {
     if (!(await frage('Neues Jahr beginnen', 'Zuerst wird eine Archiv-Sicherung erstellt. Danach werden Bestellungen, Tiere, Kisten und die Hofladen-Liste geleert. Kunden, Preisliste und Einstellungen bleiben.', 'Weiter'))) return;
-    const blob = sicherungBlob(S), name = `Bergwiesenhof_Archiv_${todayISO()}.json`;
+    if (!sicherungPw) return meldung(PW_FEHLT, true);
+    const blob = await sicherungBlob(S), name = `Bergwiesenhof_Archiv_${todayISO()}.json`;
     const r = await teilenDatei(blob, name, 'Archiv Bestellsystem', '');
     if (r === 'abgebrochen') return meldung('Abgebrochen – es wurde nichts geändert.');
     if (!(await frage('Archiv gespeichert?', `Ist das Archiv „${esc(name)}“ sicher abgelegt? Erst dann die Daten leeren.`, 'Ja, jetzt leeren', 'Abbrechen', 'rot'))) return;
@@ -661,6 +720,8 @@ async function start() {
     document.body.innerHTML = `<div style="padding:30px"><h2>Daten konnten nicht geladen werden</h2><p>${esc(e.message)}</p></div>`; return;
   }
   await autoMetaLaden().catch(() => { });
+  await pwLaden().catch(() => { });
+  alteKopienAufraeumen().catch(() => { });
   ui.dauerhaft = await istDauerhaft();
   if (!ui.dauerhaft) ui.dauerhaft = await dauerhaftAnfordern();
   kopfStatus();
