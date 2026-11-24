@@ -168,8 +168,8 @@ const tueten = (S, o) => has(o.tuetenManuell) ? num(o.tuetenManuell) : tuetenAut
 function schaetzpreis(S, o) {
   const st = S.settings;
   let p = num(o.pakete) * paketGewicht(S) * num(st.preisPaketKg) + num(o.pakVak) * num(st.preisVakPaket);
-  // kg-/Beutel-Artikel: kg × €/kg; Stück-Artikel (Nieren, Herz, Zunge, Ochsenschwanz): Anzahl × €/Stk
-  for (const a of S.artikel) p += qty(S, o, a.name) * num(a.preis);
+  // alle Preise in €/kg; Stück-Artikel (Nieren, Herz, Zunge, Bäckle, Ochsenschwanz): Anzahl × Stückgewicht × €/kg
+  for (const a of S.artikel) p += kgVon(S, o, a) * num(a.preis);
   p += tueten(S, o) * num(st.preisTuete);
   return r2(p);
 }
@@ -188,7 +188,9 @@ function bestellText(S, o) {
   if (tu > 0) t.push(`${fmtNum(tu)} Tüten vakuumieren`);
   return t.join(', ');
 }
-const einzelKg = (S, o) => S.artikel.reduce((t, a) => t + (a.einheit !== 'Stk' ? qty(S, o, a.name) : 0), 0);
+// Gewicht einer Position in kg (Stück-Artikel über das geschätzte Stückgewicht)
+const kgVon = (S, o, a) => a.einheit === 'Stk' ? qty(S, o, a.name) * num(a.stueckG) / 1000 : qty(S, o, a.name);
+const einzelKg = (S, o) => S.artikel.reduce((t, a) => t + kgVon(S, o, a), 0);
 
 // Prüfung im Formular (PortionsText / Stückgewicht fehlt)
 function formFehler(S, o) {
@@ -986,6 +988,9 @@ function standPruefen(x) {
     x.artikel.splice(i >= 0 ? i + 1 : x.artikel.length, 0, neu);
   }
   if (!has(x.settings.baeckleStk)) x.settings.baeckleStk = 2;
+  // Version 1.6.4: Innereien nach Stück werden in €/kg berechnet → geschätztes Stückgewicht
+  const stkG = { Nieren: 700, Herz: 2500, Zunge: 1500, 'Bäckle': 400, Ochsenschwanz: 2000 };
+  (x.artikel || []).forEach(a => { if (a.einheit === 'Stk' && !(num(a.stueckG) > 0) && stkG[a.name]) a.stueckG = stkG[a.name]; });
   return x;
 }
 
