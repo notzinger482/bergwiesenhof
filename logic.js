@@ -1066,11 +1066,10 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   // Separat vorbereitetes Hack (z. B. besonders mager) steht unten bei den Sonderfällen und geht hier ab.
   hack.vorgabe = Math.max(0, roundUp(hack.ausbeuteMitGulasch + hack.ausBug - hack.separat));
   const hk = num(hackKisteKg) > 0 ? num(hackKisteKg) : num(S.settings.hackKiste) || 20;
-  hack.kisten = hack.vorgabe > 0 ? roundUp(hack.vorgabe / hk) : 0;
-  const voll = Math.floor((hack.vorgabe + 1e-9) / hk), rest = r1(hack.vorgabe - voll * hk);
-  hack.kistenText = !hack.vorgabe ? '' : (voll ? `${voll} × ${fmtNum(hk)} kg` : '') + (rest > 0 ? `${voll ? ' + ' : ''}1 × ${fmtNum(rest)} kg` : '');
-  // gemeinsame Abholung (überladen): kleiner Rest wird wie im Ladeplan auf die vollen Hack-Kisten verteilt
-  if (num(hackKisteKg) > 0 && voll >= 1 && rest > 0 && rest < 5) { hack.kisten = voll; hack.kistenText = `${voll} × ${fmtNum(r1(hack.vorgabe / voll))} kg`; }
+  // gleiche Aufteilung wie im Ladeplan (kein neuer Hack-Kiste für einen kleinen Rest)
+  const hTeile = hackAufteilung(hack.vorgabe, hk, num(S.settings.kisteAusnahme) || 25);
+  hack.kisten = hTeile.length;
+  hack.kistenText = hackKistenText(hTeile);
   const separat = [];
   for (const o of ords) for (const s of sonderOf(S, o)) {
     const a = art(S, s.art);
@@ -1110,6 +1109,23 @@ function abholGruppe(S, tierName) {
   return g.sort((a, b) => String(a.schlacht || '').localeCompare(String(b.schlacht || '')) || S.tiere.indexOf(a) - S.tiere.indexOf(b)).map(x => x.name);
 }
 const PP_BIG = 100000;
+// Hack-Kisten (seit 3.0.3, Wunsch Nutzer): jede Kiste auf hk kg (20 kg) füllen. Eine weitere Kiste wird nur angefangen,
+// wenn der Rest nicht mehr auf die vollen Kisten passt, ohne dass eine über „max“ (25 kg) kommt –
+// bei 4 vollen Kisten also erst, wenn noch mehr als 20 kg offen sind. Sonst wird der Rest gleichmäßig auf die vollen Kisten verteilt.
+function hackAufteilung(kg, hk, max) {
+  if (!(kg > 0.05) || !(hk > 0)) return [];
+  max = Math.min(30, Math.max(max || 25, hk + 5)); // normal 20 → bis 25 kg; überladen (z. B. 24) → bis 29 kg, höchstens 30
+  const voll = Math.floor((kg + 1e-9) / hk), rest = kg - voll * hk;
+  if (voll === 0) return [kg];
+  if (rest < 0.05) return Array(voll).fill(hk);
+  if (kg <= voll * max + 1e-9) return Array(voll).fill(kg / voll); // Rest auf die vollen Kisten verteilen
+  return Array(voll).fill(hk).concat([rest]);
+}
+function hackKistenText(teile) {
+  const g = [];
+  for (const w of teile.map(x => r1(x))) { const l = g[g.length - 1]; if (l && l.w === w) l.n++; else g.push({ w, n: 1 }); }
+  return g.map(x => `${x.n} × ${fmtNum(x.w)} kg`).join(' + ');
+}
 const SONDERKISTE = 'Sonderfälle (beschriftet)';
 const SONDER_MAX = 30; // Kiste mit Sonderfällen: höchstens 30 kg
 // Sonderfälle einer Bestellung als Teile (ganze Bestellung, wenn sie in eine Kiste passt, sonst je Artikel)
@@ -1268,14 +1284,13 @@ function packplanKisten(S, tierName, f = 1) {
     }
     if (EINE_KISTE.includes(a.art)) { nT = a.kg <= ausnahme + 0.001 ? 1 : Math.ceil(a.kg / maxKg - 1e-9); stueck = a.kg / nT; }
     else if (a.art === HACK) {
-      stueck = hackKg; nT = Math.floor((a.kg - 0.001) / stueck) + 1;
-      // überladen (gemeinsame Abholung): kleinen Hack-Rest (unter 5 kg) auf die übrigen Hack-Kisten verteilen
-      if (f > 1 && nT > 1 && a.kg - (nT - 1) * stueck < 5) { nT--; stueck = a.kg / nT; }
+      // Hack: neue Kiste erst ab 10 kg, sonst Rest auf die vollen Kisten (bis 25 kg) verteilen
+      for (const w of hackAufteilung(a.kg, hackKg, num(st.kisteAusnahme) || 25)) P.push({ art: a.art, w, need: 0 });
+      return;
     }
     else { nT = Math.floor((a.kg - 0.001) / maxKg) + 1; stueck = a.kg / nT; }
     for (let j = 1; j <= nT; j++) {
       let w = stueck, need = BIG;
-      if (a.art === HACK && j === nT) w = a.kg - (nT - 1) * stueck;
       if (a.art === HACK) need = 0;
       else need = ersteBestellung(i, (j - 1) * stueck, j * stueck);
       P.push({ art: a.art, w, need });
