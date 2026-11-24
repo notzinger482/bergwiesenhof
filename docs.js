@@ -14,7 +14,8 @@ function docHtml(doc) {
     else if (b.type === 'text') h += `<div class="doc-text${b.bold ? ' fett' : ''}${b.warn ? ' warn' : ''}">${esc(b.text).replace(/\n/g, '<br>')}</div>`;
     else if (b.type === 'kv') h += '<table class="doc-kv">' + b.rows.map(r => `<tr><td>${esc(r[0])}</td><td class="fett">${esc(r[1])}</td><td>${esc(r[2] || '')}</td></tr>`).join('') + '</table>';
     else if (b.type === 'table') {
-      h += '<table class="doc-tab"><thead><tr>' + b.head.map((c, i) => `<th class="${(b.align || [])[i] === 'r' ? 'r' : ''}">${esc(c)}</th>`).join('') + '</tr></thead><tbody>';
+      const sw = b.fest ? (b.widths || []).reduce((a, w) => a + w, 0) : 0; // feste Spaltenbreiten nur, wo ausdrücklich gewünscht
+      h += `<table class="doc-tab${sw ? ' fest' : ''}">` + (sw ? '<colgroup>' + b.widths.map(w => `<col style="width:${(100 * w / sw).toFixed(1)}%">`).join('') + '</colgroup>' : '') + '<thead><tr>' + b.head.map((c, i) => `<th class="${(b.align || [])[i] === 'r' ? 'r' : ''}">${esc(c)}</th>`).join('') + '</tr></thead><tbody>';
       if (!b.rows.length) h += `<tr><td colspan="${b.head.length}" class="leer">${esc(b.leer || '– keine –')}</td></tr>`;
       b.rows.forEach((r, ri) => { h += `<tr class="${(b.rowClass || [])[ri] || ''}">` + r.map((c, i) => `<td class="${(b.align || [])[i] === 'r' ? 'r' : ''}">${esc(c).replace(/\n/g, '<br>')}</td>`).join('') + '</tr>'; });
       h += '</tbody></table>';
@@ -110,6 +111,11 @@ async function docTeilen(doc, dateiname) {
 }
 function docDrucken(docs) {
   const p = document.getElementById('druck');
-  p.innerHTML = (Array.isArray(docs) ? docs : [docs]).map(d => `<section class="druckseite">${docHtml(d)}</section>`).join('');
+  // Fußzeile beim Drucken unten im Seitenrand (jede Seite) statt im Text – so landet sie nie allein auf einer leeren Seite
+  const fuss = (Array.isArray(docs) ? docs : [docs]).map(d => d.footer).find(Boolean) || '';
+  let st = document.getElementById('druckfuss');
+  if (!st) { st = document.createElement('style'); st.id = 'druckfuss'; document.head.appendChild(st); }
+  st.textContent = `@media print { .doc-fuss { display: none; } @page { @bottom-left { content: ${JSON.stringify(fuss)}; font: 8pt Roboto, Arial, sans-serif; color: #666; } } @page quer { @bottom-left { content: ${JSON.stringify(fuss)}; font: 8pt Roboto, Arial, sans-serif; color: #666; } } }`;
+  p.innerHTML = (Array.isArray(docs) ? docs : [docs]).map(d => `<section class="druckseite${d.quer ? ' quer' : ''}">${docHtml(d)}</section>`).join('');
   setTimeout(() => window.print(), 50);
 }

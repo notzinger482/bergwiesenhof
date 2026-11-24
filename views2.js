@@ -53,9 +53,10 @@ function docMenge(mp) {
   const t = mp.tier, i = mp.info;
   return { title: `Mengenprüfung – ${t.name}`, sub: [`${t.typ} · ${fmtNum(i.sg)} kg SG · ${abholTxt(t)}`, `Pakete bestellt ${fmtNum(i.pakete)} / frei ${fmtNum(i.frei)} · ${i.anzahl} Bestellungen · reicht nicht: ${i.reichtNicht}`],
     blocks: [{ type: 'table', head: ['Teilstück', 'Ausbeute ca.', 'einzeln', 'in Paketen', 'gesamt', 'noch frei', 'Auslastung', 'Status'], align: ['', 'r', 'r', 'r', 'r', 'r', 'r', ''], widths: [3, 2, 2, 2, 2, 2, 2, 2.4],
-      rows: mp.rows.map(r => [r.art, fmtNum(r.ausbeute, 1), fmtNum(r.einzel, 1), fmtNum(r.ausPak, 1), fmtNum(r.gesamt, 1), fmtNum(r.frei, 1), r.auslastung === null ? '' : fmtNum(r.auslastung * 100, 0) + ' %', r.status]),
+      rows: mp.rows.map(r => [r.art, r.ausbeute > r.ausbeuteStd + 0.05 ? `${fmtNum(r.ausbeuteStd, 1)} (bis ${fmtNum(r.ausbeute, 1)})` : fmtNum(r.ausbeute, 1), fmtNum(r.einzel, 1), fmtNum(r.ausPak, 1), fmtNum(r.gesamt, 1), fmtNum(r.frei, 1), r.auslastung === null ? '' : fmtNum(r.auslastung * 100, 0) + ' %', r.status]),
       rowClass: mp.rows.map(r => r.status === 'reicht nicht' ? 'rot' : '') },
-      { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel in der Reihenfolge, in der die Bestellungen dem Tier zugeordnet wurden. Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Innereien werden nicht geprüft.' }], footer: fussZeile() };
+      { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel in der Reihenfolge, in der die Bestellungen dem Tier zugeordnet wurden. Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Innereien werden nicht geprüft.' }]
+      .concat(mp.rows.some(r => r.ausbeute > r.ausbeuteStd + 0.05) ? [{ type: 'text', text: 'Hackfleisch „bis“: normale Hack-Ausbeute; wenn nötig zusätzlich nicht bestelltes Gulasch und der Bug (wird dann im Metzgerauftrag aufgelöst).' }] : []), footer: fussZeile() };
 }
 function docMetzger(ma) {
   const t = ma.tier;
@@ -102,8 +103,8 @@ function docInnereien(ii) {
       { type: 'text', text: '„vorhanden“ = Schätzwerte aus den Einstellungen (Innereien je Tier).' }], footer: fussZeile() };
 }
 function docPackliste(pl) {
-  return { title: `Packliste Kühlhaus – ${pl.tier.name}`, sub: [abholTxt(pl.tier)],
-    blocks: [{ type: 'table', head: ['Nr.', 'Name', 'Telefon', 'Bestellung', 'Sonderfälle (separat)', 'Lagerplatz', 'Schätzpreis', 'Endbetrag', 'gepackt', 'abgeholt'], widths: [0.7, 2.2, 1.6, 4.6, 2.2, 2, 1.3, 1.3, 0.9, 0.9], align: ['r', '', '', '', '', '', 'r', 'r', '', ''],
+  return { title: `Packliste Kühlhaus – ${pl.tier.name}`, sub: [abholTxt(pl.tier)], quer: true,
+    blocks: [{ type: 'table', head: ['Nr.', 'Name', 'Telefon', 'Bestellung', 'Sonderfälle (separat)', 'Lagerplatz', 'Schätzpreis', 'Endbetrag', 'gepackt', 'abgeholt'], fest: true, widths: [0.7, 2.4, 2.3, 6.6, 2.4, 2.2, 1.5, 1.5, 1.1, 1.1], align: ['r', '', '', '', '', '', 'r', 'r', '', ''],
       rows: pl.rows.map(r => [r.nr, r.name, r.tel, r.text, r.sonder, r.lager || `(${r.lagerVorschlag})`, fmtEur(r.schaetz), r.endbetrag !== null ? fmtEur(r.endbetrag) : '', r.status !== 'offen' ? '☑' : '☐', r.status === 'abgeholt' ? '☑' : '☐']) }], footer: fussZeile() };
 }
 function docPick(ko) {

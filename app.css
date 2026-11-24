@@ -153,6 +153,9 @@ textarea.feld { min-height: 70px; }
 .doc-tab td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; }
 .doc-tab tr.rot td { background: var(--rot-h); }
 .doc-tab .r { text-align: right; }
+.doc-tab.fest { table-layout: fixed; }
+.doc-tab.fest td, .doc-tab.fest th { overflow-wrap: break-word; hyphens: auto; }
+.doc-tab td.r { white-space: nowrap; }
 .doc-tab .leer { color: #888; }
 .doc-fuss { margin-top: 14px; font-size: 13px; color: #666; }
 #druck { display: none; }
@@ -160,12 +163,16 @@ textarea.feld { min-height: 70px; }
 @media print {
   #kopf, #nav, #inhalt, #dialog, #meldung { display: none !important; }
   #druck { display: block; }
-  body { background: #fff; }
+  html, body { background: #fff !important; height: auto; }
+  .doc-tab tr { break-inside: avoid; }
   .druckseite { page-break-after: always; }
   .druckseite:last-child { page-break-after: auto; }
   .doc { border: none; padding: 0; max-width: none; font-size: 12pt; }
   .doc-tab th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   @page { size: A4; margin: 12mm; }
+  @page quer { size: A4 landscape; margin: 10mm; }
+  .druckseite.quer { page: quer; }
+  .druckseite.quer .doc-tab td { padding: 4px 6px; }
 }
 
 /* Hochformat: Navigation unten */

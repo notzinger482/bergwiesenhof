@@ -202,7 +202,7 @@ function bestellText(S, o) {
     }
   }
   const tu = tueten(S, o);
-  if (tu > 0) t.push(`${fmtNum(tu)} Tüten vakuumieren`);
+  if (tu > 0) t.push(`${fmtNum(tu)} ${tu === 1 ? 'Tüte' : 'Tüten'} vakuumieren`);
   return t.join(', ');
 }
 // Gewicht einer Position in kg (Stück-Artikel über das geschätzte Stückgewicht)
@@ -642,7 +642,7 @@ function mengenpruefung(S, tierName) {
     const einzel = ords.reduce((s, o) => s + qty(S, o, a.name), 0);
     const ausPak = pak * paketKgArt(S, a.name);
     const ges = einzel + ausPak;
-    return { art: a.name, ausbeute: y, einzel, ausPak, gesamt: ges, frei: y - ges, auslastung: y > 0 ? ges / y : null,
+    return { art: a.name, ausbeute: y, ausbeuteStd: a.name === HACK ? yieldArt(S, t, HACK) : y, einzel, ausPak, gesamt: ges, frei: y - ges, auslastung: y > 0 ? ges / y : null,
       status: y === 0 ? '' : ges > y + 0.001 ? 'reicht nicht' : ges > 0.9 * y ? 'knapp' : 'ok' };
   });
   return { tier: t, info: tierInfo(S, t), rows, bilanz: bil };
@@ -1024,6 +1024,17 @@ function kommissionierung(S, nr) {
 }
 
 // ---------- Hackfleisch-Zettel ----------
+// Portionierung für den Hack-Zettel: geht ein Teil als Sonderwunsch separat (z. B. mager), nur den Rest portionieren
+function hackPortionText(po, ein, gesamt) {
+  if (!po) return `${fmtNum(ein, 3)} kg in 1 Tüte`;
+  if (ein >= gesamt - 0.0005) return po.text;
+  if (po.g > 0) {
+    const n = Math.round(ein * 1000 / po.g);
+    if (n > 0 && Math.abs(n * po.g / 1000 - ein) < 0.0005) return `${fmtNum(n)} × ${fmtNum(po.g)} g`;
+    return `${fmtNum(ein, 3)} kg (Portionen à ${fmtNum(po.g)} g)`;
+  }
+  return `${fmtNum(ein, 3)} kg in 1 Tüte`;
+}
 function hackZettel(S, tierName) {
   const t = tier(S, tierName);
   if (!t) return null;
@@ -1040,7 +1051,7 @@ function hackZettel(S, tierName) {
     rows.push({
       nr: o.nr, name: o.name,
       einzeln: ein > 0 ? r3(ein) : null,
-      einzelnAls: ein > 0 ? (po ? po.text : `${fmtNum(ein, 3)} kg in 1 Tüte`) : '',
+      einzelnAls: ein > 0 ? hackPortionText(po, ein, qty(S, o, HACK)) : '',
       einzelnVak: ein > 0 ? (vak ? 'VAKUUM' : 'Tüte') : '',
       pakete: pak > 0 ? pak : null,
       ausPak,
