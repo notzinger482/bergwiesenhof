@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.9.3';
+const APP_VERSION = '1.9.4';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -670,7 +670,7 @@ function viewArchiv() {
     <p class="klein">Abgeschlossene Tiere mit ihren Bestellungen, der gewogenen Ausbeute und dem Kistenstand am Ende. Tiere mit echtem Schlachtgewicht und gewogenen Teilen fließen in die Ausbeute (Einstellungen), sobald ${STAT_MIN_TIERE} Tiere eines Typs erfasst sind – außer „nicht in die Statistik“.</p>
     ${liste.length ? '' : '<div class="karte">Noch keine Tiere im Archiv. Tiere kommen hierher über Schlachttag → Kisten & Ladeplan → „Tier abgeschlossen“ oder über „Ins Archiv“ beim Tier.</div>'}
     ${liste.length ? `<div class="tabwrap"><table class="tab"><thead><tr><th>Tier</th><th>Typ</th><th>Abholung</th><th>Archiv seit</th><th class="r">SG (kg)</th><th class="r">Bestellungen</th><th class="r">gewogen</th><th>Statistik</th><th>Kommentar</th></tr></thead><tbody>
-    ${liste.map(t => { const su = erfassungSumme(t); return `<tr class="klick" data-act="oeffnen" data-t="${esc(t.name)}"><td class="fett">${esc(t.name)}</td><td>${esc(t.typ)}</td><td>${fmtDate(t.abhol)}</td><td>${fmtDate(t.archiv)}</td><td class="r">${num(t.sg) > 0 ? fmtNum(t.sg) : '<span class="warn">fehlt</span>'}</td><td class="r">${ordersOfTier(S, t.name).length}</td><td class="r">${su.teile ? `${fmtNum(su.kg, 1)} kg · ${su.teile} ${su.teile === 1 ? 'Teil' : 'Teile'}` : '–'}</td><td>${zaehltStatistik(t) ? '<span class="marke gruen">zählt</span>' : t.ohneStatistik ? '<span class="marke">ausgeblendet</span>' : '<span class="marke gelb">zählt nicht</span>'}</td><td class="klein">${esc(t.kommentar || '')}</td></tr>`; }).join('')}
+    ${liste.map(t => { const su = erfassungSumme(t, S); return `<tr class="klick" data-act="oeffnen" data-t="${esc(t.name)}"><td class="fett">${esc(t.name)}</td><td>${esc(t.typ)}</td><td>${fmtDate(t.abhol)}</td><td>${fmtDate(t.archiv)}</td><td class="r">${num(t.sg) > 0 ? fmtNum(t.sg) : '<span class="warn">fehlt</span>'}</td><td class="r">${ordersOfTier(S, t.name).length}</td><td class="r">${su.teile ? `${fmtNum(su.kg, 1)} kg · ${su.teile} ${su.teile === 1 ? 'Teil' : 'Teile'}` : '–'}</td><td>${zaehltStatistik(t) ? '<span class="marke gruen">zählt</span>' : t.ohneStatistik ? '<span class="marke">ausgeblendet</span>' : '<span class="marke gelb">zählt nicht</span>'}</td><td class="klein">${esc(t.kommentar || '')}</td></tr>`; }).join('')}
     </tbody></table></div>` : ''}`;
   ui.acts.oeffnen = el => gehe('#/tier/' + encodeURIComponent(el.dataset.t));
 }
@@ -680,15 +680,15 @@ function tierAusbeuteHtml(t) {
   const er = (t.erfassung || []).map((e, i) => ({ e, i }));
   const grund = !t.archiv ? 'zählt erst nach dem Archivieren' : t.ohneStatistik ? 'aus der Statistik ausgeblendet' : !(num(t.sg) > 0) ? 'zählt nicht – echtes Schlachtgewicht fehlt' : !au.anzahl ? 'zählt nicht – nichts gewogen' : 'zählt für die Ausbeute-Statistik';
   let h = `<div class="karte"><h3 style="margin-top:0">Ausbeute gewogen <span class="klein">– ${au.anzahl} Teile, ${fmtNum(au.kg, 2)} kg${au.sg > 0 ? ` · ${fmtNum(au.kg / au.sg * 100, 1)} % vom SG ${fmtNum(au.sg)} kg` : ''} · ${grund}</span></h3>
-    <p class="klein">Gewogen wird beim Kommissionieren (jedes Teil antippen), Reste mit „Rest (Hofladen)“. Ein Artikel zählt für die Statistik nur, wenn bei diesem Tier etwas davon gewogen wurde.</p>
+    <p class="klein">Gewogen wird beim Kommissionieren (jedes Teil in Gramm antippen), Reste mit „Rest (Hofladen)“. Hackfleisch, Suppen- und Soßenknochen kommen aus den gewogenen Kisten (beim Hack abzüglich dessen, was laut Plan an Gulasch/Bug ins Hack ging). Ein Artikel zählt für die Statistik nur, wenn bei diesem Tier etwas davon gewogen wurde.</p>
     <div class="spalten2"><div class="tabwrap"><table class="tab"><thead><tr><th>Artikel</th><th class="r">Teile</th><th class="r">kg</th><th class="r">% vom SG</th><th class="r">Einstellung</th><th class="r">Plan kg</th></tr></thead><tbody>
-    ${au.rows.map(r => `<tr><td>${esc(r.art)}</td><td class="r">${r.teile || ''}</td><td class="r">${r.kg ? fmtNum(r.kg, 2) : '–'}</td><td class="r">${r.anteil !== null ? fmtNum(r.anteil * 100, 2) + ' %' : ''}</td><td class="r klein">${r.ref !== null ? fmtNum(r.ref * 100, 2) + ' %' : ''}</td><td class="r klein">${r.plan !== null ? fmtNum(r.plan, 1) : ''}</td></tr>`).join('')}
+    ${au.rows.map(r => `<tr><td>${esc(r.art)}${r.kisten ? ` <span class="klein">(${r.teile} ${r.teile === 1 ? 'Kiste' : 'Kisten'}${r.abzug > 0.05 ? `, − ${fmtNum(r.abzug, 1)} kg Gulasch/Bug` : ''})</span>` : ''}</td><td class="r">${r.kisten ? '' : r.teile || ''}</td><td class="r">${r.kg ? fmtNum(r.kg, 2) : '–'}</td><td class="r">${r.anteil !== null ? fmtNum(r.anteil * 100, 2) + ' %' : ''}</td><td class="r klein">${r.ref !== null ? fmtNum(r.ref * 100, 2) + ' %' : ''}</td><td class="r klein">${r.plan !== null ? fmtNum(r.plan, 1) : ''}</td></tr>`).join('')}
     </tbody></table></div>
     <div class="tabwrap"><table class="tab"><thead><tr><th>Braten-Teilstück</th><th class="r">Teile</th><th class="r">kg</th><th class="r">kg je gewachsenes Stück</th><th class="r">Einstellung</th></tr></thead><tbody>
     ${au.teile.map(r => `<tr><td>${esc(r.teil)}</td><td class="r">${r.teile || ''}</td><td class="r">${r.kg ? fmtNum(r.kg, 2) : '–'}</td><td class="r">${r.jeStueck !== null ? `${fmtNum(r.jeStueck, 2)} <span class="klein">(÷ ${r.stueck})</span>` : ''}</td><td class="r klein">${fmtNum(r.ref, 2)}</td></tr>`).join('') || '<tr><td colspan="5" class="klein">keine Braten-Teilstücke in den Einstellungen</td></tr>'}
     </tbody></table></div></div>
-    ${er.length ? `<details style="margin-top:10px"><summary class="fett">Alle gewogenen Teile (${er.length})</summary><div class="tabwrap" style="margin-top:8px"><table class="tab"><thead><tr><th>Artikel</th><th class="r">kg</th><th>für</th><th></th></tr></thead><tbody>
-      ${er.map(({ e, i }) => `<tr><td>${esc(e.teil ? e.art + ': ' + e.teil : e.art)}</td><td class="r">${fmtNum(e.kg, 3)}</td><td>${num(e.nr) ? 'Nr. ' + e.nr + ' ' + esc((S.bestellungen.find(o => o.nr === num(e.nr)) || {}).name || '') : 'Rest (Hofladen)'}</td><td style="width:44px"><button class="btn klein rot" data-act="erfWeg" data-i="${i}">✕</button></td></tr>`).join('')}
+    ${er.length ? `<details style="margin-top:10px"><summary class="fett">Alle gewogenen Teile (${er.length})</summary><div class="tabwrap" style="margin-top:8px"><table class="tab"><thead><tr><th>Artikel</th><th class="r">g</th><th>für</th><th></th></tr></thead><tbody>
+      ${er.map(({ e, i }) => `<tr><td>${esc(e.teil ? e.art + ': ' + e.teil : e.art)}</td><td class="r">${fmtNum(num(e.kg) * 1000, 0)}</td><td>${num(e.nr) ? 'Nr. ' + e.nr + ' ' + esc((S.bestellungen.find(o => o.nr === num(e.nr)) || {}).name || '') : 'Rest (Hofladen)'}</td><td style="width:44px"><button class="btn klein rot" data-act="erfWeg" data-i="${i}">✕</button></td></tr>`).join('')}
     </tbody></table></div></details>` : ''}</div>`;
   if (t.abschluss && t.abschluss.kisten && t.abschluss.kisten.length) {
     const ks = t.abschluss.kisten, stk = k => k.einheit === 'Stk';

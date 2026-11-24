@@ -118,11 +118,31 @@ const anteilVon = (S, a, typ) => { const g = S && S.tiere ? gemessen(S, typ, 'ar
 // tier.erfassung = [{ art, teil (Braten-Teilstück oder ''), kg, nr (Bestell-Nr. oder 0 = Rest/Hofladen), zeit }]
 const STAT_MIN_TIERE = 3;
 const statCache = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
-function erfassungSumme(t) {
+// Hackfleisch, Suppen- und Soßenknochen werden nicht einzeln gewogen: ihre Ausbeute = Summe der gewogenen Kisten
+// (Kisten & Ladeplan, Kistengewicht = Inhalt). Beim Hack wird abgezogen, was laut Plan an Gulasch/Bug ins Hack ging.
+const KISTEN_AUSBEUTE = [HACK, SK, FK];
+const kisteGewogen = k => k.art === OCHS ? has(k.gew) : k.gewogen !== undefined ? !!k.gewogen : (has(k.plan) && has(k.kg) && Math.abs(num(k.kg) - num(k.plan)) > 0.001);
+function hackAbzugPlan(S, t) {
+  try { const b = fleischBilanz(S, t, ordersOfTier(S, t.name)); return Math.max(0, num(b.gul.insHack) + num(b.hack.ausBug)); } catch (e) { return 0; }
+}
+function kistenAusbeute(t, S) {
+  let rows, abzug = 0;
+  if (t && t.abschluss && Array.isArray(t.abschluss.kisten)) { rows = t.abschluss.kisten; abzug = num(t.abschluss.hackAbzug); }
+  else if (t && S && !t.archiv) { rows = (S.kisten || []).filter(k => k.tier === t.name); if (rows.some(k => k.art === HACK && kisteGewogen(k))) abzug = hackAbzugPlan(S, t); }
+  else return {};
+  const out = {};
+  for (const k of rows) if (KISTEN_AUSBEUTE.includes(k.art) && kisteGewogen(k) && num(k.kg) > 0) { const x = out[k.art] = out[k.art] || { kg: 0, teile: 0, kisten: true }; x.kg += num(k.kg); x.teile++; }
+  if (out[HACK]) { out[HACK].kg = Math.max(0, out[HACK].kg - abzug); out[HACK].abzug = abzug; }
+  return out;
+}
+function erfassungSumme(t, S) {
   const art = {}, teil = {};
   let kg = 0, teile = 0;
+  const ki = kistenAusbeute(t, S);
+  for (const [n, v] of Object.entries(ki)) { art[n] = { kg: v.kg, teile: v.teile, kisten: true, abzug: v.abzug }; kg += v.kg; teile += v.teile; }
   for (const e of (t && t.erfassung) || []) {
     const w = num(e.kg); if (!(w > 0)) continue;
+    if (ki[e.art]) continue; // Kistengewicht hat Vorrang (alte, einzeln gewogene Hack-/Knochen-Teile)
     const a = art[e.art] = art[e.art] || { kg: 0, teile: 0 }; a.kg += w; a.teile++;
     if (e.teil) { const x = teil[e.teil] = teil[e.teil] || { kg: 0, teile: 0 }; x.kg += w; x.teile++; }
     kg += w; teile++;
@@ -130,15 +150,15 @@ function erfassungSumme(t) {
   return { art, teil, kg, teile };
 }
 // zählt für die Statistik: archiviert, nicht ausgeblendet, echtes Schlachtgewicht, etwas gewogen
-const zaehltStatistik = t => !!(t && t.archiv) && !t.ohneStatistik && num(t.sg) > 0 && ((t.erfassung || []).length > 0);
+const zaehltStatistik = t => !!(t && t.archiv) && !t.ohneStatistik && num(t.sg) > 0 && ((t.erfassung || []).length > 0 || Object.keys(kistenAusbeute(t)).length > 0);
 function ausbeuteStatistik(S) {
   const tiere = (S.tiere || []).filter(zaehltStatistik);
-  const sig = tiere.map(t => [t.name, t.typ, t.sg, t.erfassung.length, t.erfassung.reduce((s, e) => s + num(e.kg), 0)].join('|')).join(';') + '#' + (S.settings.bratenTeile || []).map(x => x && x.name + ':' + x.stueck).join(',');
+  const sig = tiere.map(t => [t.name, t.typ, t.sg, (t.erfassung || []).length, erfassungSumme(t, S).kg].join('|')).join(';') + '#' + (S.settings.bratenTeile || []).map(x => x && x.name + ':' + x.stueck).join(',');
   const c = statCache && statCache.get(S);
   if (c && c.sig === sig) return c.stat;
   const roh = { Rind: { art: {}, teil: {} }, Bulle: { art: {}, teil: {} } };
   for (const t of tiere) {
-    const typ = t.typ === 'Bulle' ? 'Bulle' : 'Rind', sg = num(t.sg), su = erfassungSumme(t);
+    const typ = t.typ === 'Bulle' ? 'Bulle' : 'Rind', sg = num(t.sg), su = erfassungSumme(t, S);
     for (const [n, v] of Object.entries(su.art)) (roh[typ].art[n] = roh[typ].art[n] || []).push({ tier: t.name, wert: v.kg / sg });
     for (const x of bratenTeile(S)) { const v = su.teil[x.name]; if (v) (roh[typ].teil[x.name] = roh[typ].teil[x.name] || []).push({ tier: t.name, wert: v.kg / num(x.stueck) }); }
   }
@@ -155,6 +175,7 @@ const gemessenRoh = (S, typ, kind, name) => ausbeuteStatistik(S)[typ === 'Bulle'
 function wiegeArten(S) {
   const out = [];
   for (const a of ausbeuteArtikel(S)) {
+    if (KISTEN_AUSBEUTE.includes(a.name)) continue; // kommt aus den gewogenen Kisten
     if (a.name === BRATEN && bratenTeile(S).length) bratenTeile(S).forEach(x => out.push({ art: BRATEN, teil: x.name }));
     else out.push({ art: a.name, teil: '' });
   }
@@ -162,10 +183,10 @@ function wiegeArten(S) {
 }
 // Teile, die am Ende je Artikel zur Verfügung standen (für das Archiv)
 function ausbeuteTier(S, t) {
-  const su = erfassungSumme(t), sg = num(t.sg);
+  const su = erfassungSumme(t, S), sg = num(t.sg);
   const rows = ausbeuteArtikel(S).map(a => {
     const v = su.art[a.name];
-    return { art: a.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, anteil: v && sg > 0 ? v.kg / sg : null, ref: anteilRef(S, a, t.typ), plan: t.archiv && t.archivStand && t.archivStand.plan && has(t.archivStand.plan[a.name]) ? num(t.archivStand.plan[a.name]) : yieldArt(S, t, a.name) };
+    return { art: a.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, kisten: !!(v && v.kisten), abzug: v && v.abzug ? v.abzug : 0, anteil: v && sg > 0 ? v.kg / sg : null, ref: anteilRef(S, a, t.typ), plan: t.archiv && t.archivStand && t.archivStand.plan && has(t.archivStand.plan[a.name]) ? num(t.archivStand.plan[a.name]) : yieldArt(S, t, a.name) };
   }).concat(Object.keys(su.art).filter(n => !ausbeuteArtikel(S).some(a => a.name === n)).map(n => ({ art: n, kg: su.art[n].kg, teile: su.art[n].teile, anteil: sg > 0 ? su.art[n].kg / sg : null, ref: null, plan: null })));
   const teile = bratenTeile(S).map(x => { const v = su.teil[x.name]; return { teil: x.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, jeStueck: v ? v.kg / num(x.stueck) : null, stueck: num(x.stueck), ref: teilKgRef(x, t.typ) }; });
   return { rows, teile, kg: su.kg, anzahl: su.teile, sg };
@@ -942,6 +963,14 @@ function packplan(S, tierName) {
     }
     let nT, stueck;
     const ausnahme = num(st.kisteAusnahme) > 0 ? num(st.kisteAusnahme) : 25;
+    if (a.art === FK && a.kg > 0.05) {
+      // Soßenknochen aus Platzgründen immer in 2 Kisten, ganze Beutel (kein Beutel über zwei Kisten)
+      const bg = num((art(S, FK) || {}).beutelG) / 1000 || 1, nb = Math.round(a.kg / bg);
+      const w1 = Math.min(a.kg, nb > 1 ? Math.ceil(nb / 2) * bg : a.kg / 2), teileFK = [w1, a.kg - w1].filter(w => w > 0.05);
+      let von = 0;
+      for (const w of teileFK) { P.push({ art: a.art, w, need: ersteBestellung(i, von, von + w) }); von += w; }
+      return;
+    }
     if (EINE_KISTE.includes(a.art)) { nT = a.kg <= ausnahme + 0.001 ? 1 : Math.ceil(a.kg / maxKg - 1e-9); stueck = a.kg / nT; }
     else if (a.art === HACK) { stueck = hackKg; nT = Math.floor((a.kg - 0.001) / stueck) + 1; }
     else { nT = Math.floor((a.kg - 0.001) / maxKg) + 1; stueck = a.kg / nT; }
@@ -1133,7 +1162,8 @@ function tierAbschliessen(S, tierName) {
   const t = tier(S, tierName);
   if (t) {
     archivStandFesthalten(S, t);
-    t.abschluss = { datum: heute, kisten: calc.map(c => ({ nr: c.k.nr, art: c.k.art, kg: r2(num(c.k.kg)), plan: has(c.k.plan) ? r2(num(c.k.plan)) : null, gew: has(c.k.gew) ? num(c.k.gew) : null, info: c.k.info || '', bedarf: r2(c.bedarf), verplant: r2(c.verplant), rest: r2(c.rest), einheit: c.einheit })) };
+    const hackAbzug = r2(hackAbzugPlan(S, t));
+    t.abschluss = { datum: heute, hackAbzug, kisten: calc.map(c => ({ nr: c.k.nr, art: c.k.art, kg: r2(num(c.k.kg)), gewogen: kisteGewogen(c.k), plan: has(c.k.plan) ? r2(num(c.k.plan)) : null, gew: has(c.k.gew) ? num(c.k.gew) : null, info: c.k.info || '', bedarf: r2(c.bedarf), verplant: r2(c.verplant), rest: r2(c.rest), einheit: c.einheit })) };
     t.archiv = heute;
   }
   S.kisten = S.kisten.filter(k => k.tier !== tierName);
@@ -1400,5 +1430,5 @@ if (typeof module !== 'undefined') module.exports = {
   tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
-  HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
+  HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
 };

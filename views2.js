@@ -305,15 +305,15 @@ function wiegeKarte(tn, nr) {
   const t = tier(S, tn); if (!t) return '';
   const fuer = ui.wiegeFuer === 'rest' ? 0 : nr;
   const er = (t.erfassung || []).map((e, i) => ({ e, i })).filter(x => num(x.e.nr) === fuer).reverse();
-  const su = erfassungSumme(t);
+  const su = erfassungSumme(t, S);
   const knopf = w => { const v = w.teil ? su.teil[w.teil] : su.art[w.art]; return `<button class="btn" style="min-height:52px;flex:1 1 150px" data-act="wiege" data-art="${esc(w.art)}" data-teil="${esc(w.teil)}">${esc(w.teil ? w.teil.replace(/\s*\(.*\)$/, '') : w.art)}${v ? `<br><span class="klein">${v.teile} ${v.teile === 1 ? 'Teil' : 'Teile'} · ${fmtNum(v.kg, 1)} kg</span>` : ''}</button>`; };
   const arten = wiegeArten(S);
   return `<div class="karte"><div class="zeile" style="margin-bottom:8px"><h3 class="platz" style="margin:0">Ausbeute wiegen – ${esc(tn)} <span class="klein">${su.teile} ${su.teile === 1 ? 'Teil' : 'Teile'} · ${fmtNum(su.kg, 1)} kg bisher</span></h3>
       <label class="f">gewogen für<select class="feld" data-ch="wiegefuer">${opt('nr', `Nr. ${nr}`, fuer !== 0)}${opt('rest', 'Rest (Hofladen)', fuer === 0)}</select></label>
-      <label class="f">kg<input class="feld zahl" id="wiegekg" inputmode="decimal" style="width:120px;font-size:22px" placeholder="0,000"></label></div>
-    <div class="klein" style="margin-bottom:8px">Gewicht eintippen, dann das Teil antippen. Braten nach Teilstück, alles andere nach Artikel. Gesamtübersicht und Löschen beim <a href="#/tier/${encodeURIComponent(tn)}">Tier</a>.</div>
+      <label class="f">Gramm<input class="feld zahl" id="wiegekg" inputmode="numeric" style="width:120px;font-size:22px" placeholder="0"></label></div>
+    <div class="klein" style="margin-bottom:8px">Gewicht in <b>Gramm</b> eintippen, dann das Teil antippen. Braten nach Teilstück, alles andere nach Artikel. Hackfleisch, Suppen- und Soßenknochen werden nicht einzeln gewogen – sie zählen über die gewogenen Kisten (Kisten &amp; Ladeplan). Gesamtübersicht und Löschen beim <a href="#/tier/${encodeURIComponent(tn)}">Tier</a>.</div>
     <div class="zeile" style="gap:8px;flex-wrap:wrap">${arten.map(knopf).join('')}</div>
-    ${er.length ? `<div class="klein" style="margin-top:10px"><b>Zuletzt ${fuer ? 'für Nr. ' + nr : 'als Rest'}:</b> ${er.slice(0, 12).map(({ e, i }) => `<span class="marke" style="margin:2px">${esc(e.teil ? e.teil.replace(/\s*\(.*\)$/, '') : e.art)} ${fmtNum(e.kg, 3)} kg <a href="#" data-act="wiegeWeg" data-i="${i}" title="löschen">✕</a></span>`).join('')}</div>` : ''}</div>`;
+    ${er.length ? `<div class="klein" style="margin-top:10px"><b>Zuletzt ${fuer ? 'für Nr. ' + nr : 'als Rest'}:</b> ${er.slice(0, 12).map(({ e, i }) => `<span class="marke" style="margin:2px">${esc(e.teil ? e.teil.replace(/\s*\(.*\)$/, '') : e.art)} ${fmtNum(num(e.kg) * 1000, 0)} g <a href="#" data-act="wiegeWeg" data-i="${i}" title="löschen">✕</a></span>`).join('')}</div>` : ''}</div>`;
 }
 function wiegeAktionen(tn, nr) {
   const t = tier(S, tn); if (!t) return;
@@ -321,12 +321,14 @@ function wiegeAktionen(tn, nr) {
   const wiegeNeu = () => { render(); setTimeout(() => { const g = $('#wiegekg'); if (g) { g.scrollIntoView({ block: 'center' }); g.focus(); } }, 30); };
   ui.acts.wiegefuer = el => { ui.wiegeFuer = el.value; wiegeNeu(); };
   ui.acts.wiege = el => {
-    const f = $('#wiegekg'); const kg = num(f.value);
-    if (!(kg > 0)) { meldung('Bitte zuerst das Gewicht in kg eintippen.', true); f.focus(); return; }
-    if (kg > 30) { meldung(`${fmtNum(kg, 3)} kg für ein Teil? Bitte prüfen (in kg, z. B. 1,45).`, true); f.focus(); return; }
+    // Eingabe in Gramm (ganze Zahl; „1.450“ oder „1450“), gespeichert wird weiter in kg
+    const f = $('#wiegekg'); const g = Math.round(parseFloat(String(f.value).replace(/[\s.]/g, '').replace(',', '.')) || 0); const kg = g / 1000;
+    if (!(g > 0)) { meldung('Bitte zuerst das Gewicht in Gramm eintippen.', true); f.focus(); return; }
+    if (g < 20) { meldung(`${fmtNum(g)} g? Bitte in Gramm eintippen (z. B. 1450 für 1,45 kg).`, true); f.focus(); return; }
+    if (g > 30000) { meldung(`${fmtNum(g)} g für ein Teil? Bitte prüfen (in Gramm, z. B. 1450).`, true); f.focus(); return; }
     if (!Array.isArray(t.erfassung)) t.erfassung = [];
     t.erfassung.push({ art: el.dataset.art, teil: el.dataset.teil || '', kg: r3(kg), nr: ui.wiegeFuer === 'rest' ? 0 : nr, zeit: new Date().toISOString() });
-    speichern(); meldung(`${el.dataset.teil || el.dataset.art}: ${fmtNum(kg, 3)} kg erfasst.`); wiegeNeu();
+    speichern(); meldung(`${el.dataset.teil || el.dataset.art}: ${fmtNum(g)} g erfasst.`); wiegeNeu();
   };
   ui.acts.wiegeWeg = el => { t.erfassung.splice(+el.dataset.i, 1); speichern(); wiegeNeu(); };
 }
@@ -614,7 +616,7 @@ function tabAusbeute(z) {
       <td class="r klein">${refText(a.stkMin, a.stkMax, 1, 2, 'kg')}</td>
       <td class="r">${n > 0 ? fmtNum(yR, 2) : ''}</td><td class="r">${n > 0 ? fmtNum(yB, 2) : ''}</td><td class="c klein">nein</td><td></td></tr>`; }).join('')}
     </tbody></table></div>
-    <p class="klein" style="margin-bottom:0">Braten: kg je Stück frei eintragbar. Filet und Tafelspitz: nur die Anzahl – das Gewicht je Stück ergibt sich aus der Ausbeute (0 = nicht als ganzes Stück). Rostbraten und Hüftsteak werden geschnitten, am Stück nur als Sonderwunsch. Immer genau eine eigene Kiste (sortenrein, bis ${fmtNum(num(st.kisteAusnahme) || 25)} kg): ${EINE_KISTE.join(', ')}.</p></div>
+    <p class="klein" style="margin-bottom:0">Braten: kg je Stück frei eintragbar. Filet und Tafelspitz: nur die Anzahl – das Gewicht je Stück ergibt sich aus der Ausbeute (0 = nicht als ganzes Stück). Rostbraten und Hüftsteak werden geschnitten, am Stück nur als Sonderwunsch. Immer genau eine eigene Kiste (sortenrein, bis ${fmtNum(num(st.kisteAusnahme) || 25)} kg): ${EINE_KISTE.filter(x => x !== 'Soßenknochen (FK)').join(', ')}. Soßenknochen (FK) immer in 2 Kisten (Platz), ganze Beutel.</p></div>
    <div class="karte"><h3 style="margin-top:0">Einzelgewichte <span class="klein">– Schätzwerte, bitte nachwiegen</span></h3>
     <div class="zeile oben" style="margin-bottom:8px">${feld('maxWaden', 'Waden am Stück höchstens je Tier')}<p class="klein" style="max-width:420px;margin:22px 0 0">Gewicht einer Wade = Beinscheiben-Ausbeute ÷ Anzahl Waden: Rind ${fmtNum(wadeKg(S, null), 1)} kg, Bulle ${fmtNum(yieldArt(S, { typ: 'Bulle', sg: null }, 'Beinscheiben') / (num(st.maxWaden) || 4), 1)} kg.</p></div>
     <p class="klein">Damit wird überall gerechnet: Bestellungen nach Stück (z. B. „Steak 3“ = 3 × Stückgewicht), Genusspaket, Beutelgrößen der Knochen. Leer = Artikel wird nur nach kg bestellt.</p>

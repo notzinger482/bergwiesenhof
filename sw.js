@@ -1,6 +1,6 @@
 // Service Worker: hält die App komplett offline verfügbar.
 // Bei jeder neuen Version VERSION hochzählen – dann lädt das Tablet die neuen Dateien (im WLAN).
-const VERSION = 'bwh-1.9.3';
+const VERSION = 'bwh-1.9.4';
 const DATEIEN = ['./', 'index.html', 'app.css', 'defaults.js', 'logic.js', 'store.js', 'docs.js', 'app.js', 'views2.js', 'vordrucke.js', 'genusspaket.webp',
   'manifest.webmanifest', 'logo.svg', 'icon-192.png', 'icon-512.png'];
 
