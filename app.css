@@ -317,3 +317,7 @@ details.karte summary { cursor: pointer; }
 .lnr .btn { min-width: 52px; min-height: 48px; padding: 0 10px; font-size: 18px; }
 .zahlcheck { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--rot); margin-left: 6px; }
 .zahlkarte { border-color: #f1a7a7; }
+.packnotiz { background: #fff4c2; border: 2px solid #e0b93b; border-radius: 10px; padding: 8px 12px; margin: 6px 0 12px; font-size: 18px; font-weight: 600; }
+.packnotiz .klein { font-weight: 400; display: block; }
+.packnotiz-k { background: #fff4c2; border-radius: 6px; padding: 2px 6px; margin-top: 4px; font-weight: 600; color: #6b4e00; }
+.pick .kiste.sonder { background: #7a5a2b; color: #fff; }

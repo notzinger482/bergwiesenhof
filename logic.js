@@ -432,7 +432,7 @@ function teilVorschlag(S, o, prozent) {
 // führt die Teilung aus: verschiebt die angegebenen Mengen in eine neue Bestellung für „ziel“
 function bestellungTeilen(S, o, mengen, ziel) {
   const z = teilZeilen(S, o);
-  const neu = { nr: nextNr(S), rang: nextRang(S), eingang: o.eingang, tier: ziel, name: o.name, tel: o.tel, mail: o.mail, weg: o.weg, notiz: `Teil von Nr. ${o.nr}`, wunsch: '', pakete: 0, pakVak: 0, tuetenManuell: null, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
+  const neu = { nr: nextNr(S), rang: nextRang(S), eingang: o.eingang, tier: ziel, name: o.name, tel: o.tel, mail: o.mail, weg: o.weg, notiz: `Teil von Nr. ${o.nr}`, packNotiz: o.packNotiz || '', wunsch: '', pakete: 0, pakVak: 0, tuetenManuell: null, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
   let bewegt = 0;
   for (const r of z) {
     const m = teilRunden(r, mengen[r.key]);
@@ -472,9 +472,10 @@ function tierInfo(S, t) {
   const ords = ordersOfTier(S, t.name);
   const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
   const checks = mengencheckTier(S, t.name);
-  const reichtNicht = ords.filter(o => (checks[o.nr] || '').startsWith('reicht')).length;
+  const reichtNicht = ords.filter(o => (checks[o.nr] || '').startsWith('reicht') && !o.ueberbelegt).length;
+  const ueberbelegt = ords.filter(o => (checks[o.nr] || '').startsWith('reicht') && o.ueberbelegt).length;
   const maxPak = fest ? num(fest.maxPak) : maxPakete(S, t);
-  return { sg, paketKg, pakete: pak, maxPak, frei: maxPak - pak, anzahl: ords.length, reichtNicht };
+  return { sg, paketKg, pakete: pak, maxPak, frei: maxPak - pak, anzahl: ords.length, reichtNicht, ueberbelegt };
 }
 // Wie viele Genusspakete gibt das Tier her? (kleinster Wert über alle Paket-Teilstücke; Hack inkl. Gulasch;
 // zusätzlich begrenzt durch „max. Genusspakete je Tier“)
@@ -679,6 +680,53 @@ function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
   }
   return kand[0].name;
 }
+// ---------- Offene Bestellungen neu verteilen ----------
+// Wenn Tiere dazukommen (oder sich Termine ändern): alle offenen Bestellungen, deren Tier noch keine Kisten hat
+// (dazu die Warteliste), in Eingangsreihenfolge neu auf die Tiere ohne Kisten verteilen – jeweils das erste Tier
+// (bzw. mit Wunschtermin das letzte davor), bei dem die ganze Bestellung reicht und keine andere kippt.
+// Fest bleiben: gepackte/abgeholte Bestellungen, Tiere mit Kistenplan, bewusst überbelegte Bestellungen.
+// Passt eine Bestellung nirgends, bleibt sie, wo sie war. Ergebnis nur als Vorschlag (S bleibt unverändert).
+function neuVerteilenPlan(S) {
+  const heute = todayISO();
+  const T = JSON.parse(JSON.stringify(S));
+  const mitKisten = new Set((T.kisten || []).map(k => k.tier));
+  const freiesTier = t => !!t && !t.archiv && !mitKisten.has(t.name);
+  const beweglich = o => o.name && (o.status || 'offen') === 'offen' && !o.ueberbelegt &&
+    (o.tier === 'Warteliste' || !o.tier || freiesTier(tier(T, o.tier)));
+  const bew = T.bestellungen.filter(beweglich)
+    .sort((a, b) => String(a.eingang || '').localeCompare(String(b.eingang || '')) || a.nr - b.nr);
+  const vorher = new Map(bew.map(o => [o.nr, { tier: o.tier || 'Warteliste', check: o.tier && o.tier !== 'Warteliste' ? mengencheck(S, S.bestellungen.find(x => x.nr === o.nr)) : '' }]));
+  const ziele = T.tiere.filter(t => freiesTier(t) && t.abhol && t.abhol >= heute);
+  bew.forEach(o => { o.tier = '\u0000neu'; });
+  for (const o of bew) {
+    const pk = num(o.pakete);
+    const kand = ziele.filter(t => {
+      if (o.wunsch && t.abhol > o.wunsch) return false;
+      if (pk > 0) {
+        const bestellt = T.bestellungen.filter(x => x.tier === t.name && x.name).reduce((s, x) => s + num(x.pakete), 0);
+        if (maxPakete(T, t) - bestellt < pk) return false;
+      }
+      return true;
+    }).sort((a, b) => o.wunsch ? b.abhol.localeCompare(a.abhol) : a.abhol.localeCompare(b.abhol));
+    let ziel = null;
+    for (const t of kand) {
+      const vor = mengencheckTier(T, t.name);
+      o.tier = t.name; o.rang = nextRang(T);
+      const nach = mengencheckTier(T, t.name);
+      if (nach[o.nr] === 'ok' && !Object.keys(nach).some(nr => +nr !== o.nr && vor[nr] === 'ok' && nach[nr] !== 'ok')) { ziel = t.name; break; }
+    }
+    if (!ziel) { o.tier = vorher.get(o.nr).tier; o.rang = nextRang(T); }
+  }
+  const zeilen = bew.map(o => {
+    const v = vorher.get(o.nr);
+    return { nr: o.nr, name: o.name, eingang: o.eingang, von: v.tier, nach: o.tier, rang: o.rang, checkVorher: v.check,
+      check: o.tier === 'Warteliste' ? '' : mengencheck(T, o) };
+  });
+  return { zeilen, wechsel: zeilen.filter(z => !sameText(z.von, z.nach)), festTiere: [...mitKisten].filter(n => tier(S, n) && !tier(S, n).archiv) };
+}
+function neuVerteilenUebernehmen(S, plan) {
+  for (const z of plan.zeilen) { const o = S.bestellungen.find(x => x.nr === z.nr); if (o) { o.tier = z.nach; o.rang = z.rang; } }
+}
 function wartelistePassend(S, t) {
   if (!t.abhol || t.abhol < todayISO()) return [];
   return S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name && (!o.wunsch || t.abhol <= o.wunsch));
@@ -866,7 +914,7 @@ function inaktiveKunden(S, heute = todayISO()) {
 // Kunde aus der Kundenliste löschen; seine Bestellungen bleiben für Statistik und Ausbeute, aber ohne Name, Telefon, Mail und Notiz.
 function kundeAnonymisieren(S, k) {
   let n = 0;
-  for (const o of S.bestellungen) if (sameText(o.name, k.name)) { o.name = ANONYM; o.tel = ''; o.mail = ''; o.notiz = ''; o.anonym = true; n++; }
+  for (const o of S.bestellungen) if (sameText(o.name, k.name)) { o.name = ANONYM; o.tel = ''; o.mail = ''; o.notiz = ''; o.packNotiz = ''; o.anonym = true; n++; }
   S.kunden = S.kunden.filter(x => x !== k && x.nr !== k.nr);
   return n;
 }
@@ -907,7 +955,7 @@ function mengenpruefung(S, tierName) {
 }
 
 // ---------- Metzgerauftrag ----------
-function metzgerauftrag(S, tierName) {
+function metzgerauftrag(S, tierName, hackKisteKg) {
   const t = tier(S, tierName);
   if (!t) return null;
   const nen = num(S.settings.nenner) || 16;
@@ -917,10 +965,12 @@ function metzgerauftrag(S, tierName) {
   // Hackfleisch: Ausbeute + nicht bestelltes Gulasch – oder mehr, wenn mehr bestellt ist (dann Bug auflösen).
   // Separat vorbereitetes Hack (z. B. besonders mager) steht unten bei den Sonderfällen und geht hier ab.
   hack.vorgabe = Math.max(0, roundUp(hack.ausbeuteMitGulasch + hack.ausBug - hack.separat));
-  const hk = num(S.settings.hackKiste) || 20;
+  const hk = num(hackKisteKg) > 0 ? num(hackKisteKg) : num(S.settings.hackKiste) || 20;
   hack.kisten = hack.vorgabe > 0 ? roundUp(hack.vorgabe / hk) : 0;
   const voll = Math.floor((hack.vorgabe + 1e-9) / hk), rest = r1(hack.vorgabe - voll * hk);
   hack.kistenText = !hack.vorgabe ? '' : (voll ? `${voll} × ${fmtNum(hk)} kg` : '') + (rest > 0 ? `${voll ? ' + ' : ''}1 × ${fmtNum(rest)} kg` : '');
+  // gemeinsame Abholung (überladen): kleiner Rest wird wie im Ladeplan auf die vollen Hack-Kisten verteilt
+  if (num(hackKisteKg) > 0 && voll >= 1 && rest > 0 && rest < 5) { hack.kisten = voll; hack.kistenText = `${voll} × ${fmtNum(r1(hack.vorgabe / voll))} kg`; }
   const separat = [];
   for (const o of ords) for (const s of sonderOf(S, o)) {
     const a = art(S, s.art);
@@ -951,13 +1001,24 @@ function kisteGruppe(items) {
   return g === -1 ? 0 : g;
 }
 const kistenTxt = items => items.map(i => i.art === OCHS ? `${OCHS} ${fmtNum(i.kg)} Stk${i.info ? ' (' + i.info + ')' : ''}` : `${i.art}${i.info ? ' (' + i.info + ')' : ''} ~${Math.round(i.kg)} kg`).join(' + ');
-function packplan(S, tierName) {
+// Abholgruppe: aktive Tiere mit demselben Abholtermin werden gemeinsam geholt (ein Ladeplan, eine Kistennummerierung, ein Metzgerauftrag)
+function abholGruppe(S, tierName) {
+  const t = tier(S, tierName);
+  if (!t) return [];
+  if (t.archiv || !t.abhol) return [t.name];
+  const g = S.tiere.filter(x => !x.archiv && x.abhol === t.abhol);
+  return g.sort((a, b) => String(a.schlacht || '').localeCompare(String(b.schlacht || '')) || S.tiere.indexOf(a) - S.tiere.indexOf(b)).map(x => x.name);
+}
+const PP_BIG = 100000;
+function packplan(S, tierName) { return packplanGruppe(S, abholGruppe(S, tierName)); }
+// Teil 1 je Tier: welche Stücke in welche Kiste (noch ohne Stellplatz)
+function packplanKisten(S, tierName, f = 1) {
   const t = tier(S, tierName);
   if (!t) return { fehler: 'Tier unbekannt' };
   const st = S.settings;
-  const maxKg = num(st.kisteMax) > 0 ? num(st.kisteMax) : 20;
+  const maxKg = (num(st.kisteMax) > 0 ? num(st.kisteMax) : 20) * f;
   const dv = num(st.nenner) > 0 ? num(st.nenner) : 16;
-  const hackKg = num(st.hackKiste) > 0 ? num(st.hackKiste) : 20;
+  const hackKg = Math.round((num(st.hackKiste) > 0 ? num(st.hackKiste) : 20) * f);
   const ma = metzgerauftrag(S, t.name);
   const ords = ordersOfTier(S, t.name);
   // Sonderwünsche je Bestellung und gesamt
@@ -982,7 +1043,7 @@ function packplan(S, tierName) {
   });
   // Verbrauch je Bestellung als Abschnitte auf der Mengenachse: erst alle Genusspaket-Anteile
   // (Vorrang), danach die Einzelartikel – jeweils in Reihenfolge der Bestell-Nr.
-  const BIG = 100000;
+  const BIG = PP_BIG;
   const pakGes = ords.reduce((s, o) => s + num(o.pakete), 0);
   const abschn = A.map(a => {
     let pk = 0, ez = pakGes * a.shr;
@@ -1003,7 +1064,9 @@ function packplan(S, tierName) {
   const warnVorab = [];
   // Plan stimmt erst, wenn alle Bestellungen ok sind (Sonderwünsche/„am Stück“ werden zuerst zurückgelegt)
   const mcTier = mengencheckTier(S, t.name);
-  const nichtOk = ords.filter(o => (mcTier[o.nr] || '').startsWith('reicht'));
+  const nichtOk = ords.filter(o => (mcTier[o.nr] || '').startsWith('reicht') && !o.ueberbelegt);
+  const ueb = ords.filter(o => (mcTier[o.nr] || '').startsWith('reicht') && o.ueberbelegt);
+  if (ueb.length) warnVorab.push(`Bewusst überbelegt: Nr. ${ueb.map(o => o.nr).join(', ')} – dort fehlt beim Kommissionieren Ware.`);
   if (nichtOk.length) warnVorab.push(`${nichtOk.length} Bestellung${nichtOk.length === 1 ? ' reicht' : 'en reichen'} nicht (Nr. ${nichtOk.map(o => o.nr).join(', ')}). Der Plan stimmt erst, wenn alle Bestellungen „ok“ sind – Sonderwünsche und „am Stück“ werden zuerst zurückgelegt, dann kann anderen Bestellungen etwas fehlen. Bitte erst umstellen (Mengenprüfung) und den Plan neu berechnen.`);
   A.forEach((a, i) => {
     if (a.isOrg || !(a.kg > 0.05)) return;
@@ -1043,7 +1106,7 @@ function packplan(S, tierName) {
       return;
     }
     let nT, stueck;
-    const ausnahme = num(st.kisteAusnahme) > 0 ? num(st.kisteAusnahme) : 25;
+    const ausnahme = (num(st.kisteAusnahme) > 0 ? num(st.kisteAusnahme) : 25) * f;
     if (a.art === FK && a.kg > 0.05) {
       // Soßenknochen aus Platzgründen immer in 2 Kisten, ganze Beutel (kein Beutel über zwei Kisten)
       const bg = num((art(S, FK) || {}).beutelG) / 1000 || 1, nb = Math.round(a.kg / bg);
@@ -1053,7 +1116,11 @@ function packplan(S, tierName) {
       return;
     }
     if (EINE_KISTE.includes(a.art)) { nT = a.kg <= ausnahme + 0.001 ? 1 : Math.ceil(a.kg / maxKg - 1e-9); stueck = a.kg / nT; }
-    else if (a.art === HACK) { stueck = hackKg; nT = Math.floor((a.kg - 0.001) / stueck) + 1; }
+    else if (a.art === HACK) {
+      stueck = hackKg; nT = Math.floor((a.kg - 0.001) / stueck) + 1;
+      // überladen (gemeinsame Abholung): kleinen Hack-Rest (unter 5 kg) auf die übrigen Hack-Kisten verteilen
+      if (f > 1 && nT > 1 && a.kg - (nT - 1) * stueck < 5) { nT--; stueck = a.kg / nT; }
+    }
     else { nT = Math.floor((a.kg - 0.001) / maxKg) + 1; stueck = a.kg / nT; }
     for (let j = 1; j <= nT; j++) {
       let w = stueck, need = BIG;
@@ -1097,6 +1164,65 @@ function packplan(S, tierName) {
     if (needO < c.need) c.need = needO;
     if (ma.ochs.bestellt > ma.ochs.vorhanden) warnVorab.push(`Ochsenschwanz: ${fmtNum(ma.ochs.bestellt)} Stk bestellt, aber nur ca. ${fmtNum(ma.ochs.vorhanden)} je Tier.`);
   }
+  C.forEach(c => { c.tier = t.name; c.ab = c.need === 0 ? 'von Anfang an' : c.need >= BIG ? 'Rest / Hofladen' : `ab Nr. ${ords[c.need - 1].nr}`; });
+  return { t, C, warnVorab, ords, maxKg, hackKg };
+}
+// Teil 2: Kisten einer Abholgruppe (ein oder mehrere Tiere) gemeinsam ins Auto stellen und durchnummerieren.
+// Mehrere Tiere: erst werden die Bestellungen von Tier 1 kommissioniert, dann Tier 2 – danach richtet sich, welche Kiste wie gut erreichbar steht.
+function packplanGruppe(S, namen) {
+  const st = S.settings;
+  const BIG = PP_BIG;
+  // Mehrere Tiere: Kisten so weit schwerer beladen (in 1-kg-Schritten), bis alles auf die Plätze im Auto passt (höchstens 29 Etiketten)
+  const platz = Math.min(29, S.auto.reduce((s, f) => s + num(f.hoehe), 0));
+  const basis = num(st.kisteMax) > 0 ? num(st.kisteMax) : 20;
+  let teile, warnVorab, faktor = 1;
+  for (let schritt = 0; ; schritt++) {
+    faktor = (basis + schritt) / basis;
+    teile = []; warnVorab = [];
+    for (const n of namen) {
+      const r = packplanKisten(S, n, faktor);
+      if (r.fehler) { if (namen.length === 1) return r; warnVorab.push(r.fehler); continue; }
+      teile.push(r);
+    }
+    if (!teile.length) return { fehler: `Für ${namen.join(' und ')} gibt es noch keine Mengen.` };
+    const anzahl = teile.reduce((s, r) => s + r.C.length, 0);
+    // höchstens bis zur Ausnahme-Grenze (Standard 25 kg) schwerer beladen – danach werden leichte Kisten zusammengelegt
+    const grenze = num(st.kisteAusnahme) > 0 ? num(st.kisteAusnahme) : 25;
+    if (teile.length < 2 || anzahl <= platz || basis + schritt >= grenze) break;
+  }
+  const kisteKg = teile[0].maxKg, hackKisteKg = teile[0].hackKg;
+  if (faktor > 1) warnVorab.unshift(`Damit alles in ein Auto passt: Kisten bis ca. ${fmtNum(kisteKg, 0)} kg beladen (statt ${fmtNum(basis)} kg), Hackfleisch ${fmtNum(hackKisteKg)} kg je Kiste.`);
+  const gruppe = teile.length > 1;
+  let C = [], off = 0;
+  for (const r of teile) {
+    r.C.forEach(c => { if (c.need > 0 && c.need < BIG) c.need += off; });
+    off += r.ords.length;
+    C = C.concat(r.C);
+    r.warnVorab.forEach(w => warnVorab.push(gruppe ? `${r.t.name}: ${w}` : w));
+  }
+  // Passt es immer noch nicht: die leichtesten Kisten desselben Tiers zusammenlegen (nicht Hackfleisch, nicht die Sonderfälle-Kiste)
+  if (gruppe && C.length > platz) {
+    const nurH = c => c.items.every(i => i.art === HACK), sonder = c => c.items.some(i => i.art === SONDERKISTE);
+    let zusammen = 0;
+    let grenzeKg = kisteKg;
+    while (C.length > platz) {
+      let best = null;
+      for (let a = 0; a < C.length; a++) for (let b = a + 1; b < C.length; b++) {
+        const x = C[a], y = C[b];
+        if (x.tier !== y.tier || nurH(x) || nurH(y) || sonder(x) || sonder(y) || x.items.length + y.items.length > 3) continue;
+        const w = x.w + y.w;
+        if (w <= grenzeKg + 0.001 && (!best || w < best.w)) best = { a, b, w };
+      }
+      if (!best && grenzeKg < kisteKg + 5) { grenzeKg = kisteKg + 5; continue; } // notfalls bis 5 kg schwerer
+      if (!best) break;
+      const x = C[best.a], y = C[best.b];
+      if (y.need < x.need) x.ab = y.ab;
+      x.items = x.items.concat(y.items); x.w = best.w; x.need = Math.min(x.need, y.need);
+      C.splice(best.b, 1); zusammen++;
+    }
+    if (zusammen) warnVorab.push(`${zusammen}× zwei Kisten zusammengelegt (gemischt, bis ${fmtNum(grenzeKg, 0)} kg), damit alles ins Auto passt.`);
+  }
+  if (gruppe) warnVorab.unshift(`Gemeinsame Abholung: ${teile.map(r => r.t.name).join(' + ')} – ein Ladeplan, Kistennummern über beide Tiere. Erst die Bestellungen von ${teile[0].t.name}, dann ${teile.slice(1).map(r => r.t.name).join(', ')} kommissionieren.`);
   // Stellplätze vorbereiten
   const auto = S.auto;
   const warn = warnVorab.slice();
@@ -1164,17 +1290,18 @@ function packplan(S, tierName) {
   });
   if (C.length < nFeld) warn.push(`Nur ${C.length} Kisten – es können nicht alle ${nFeld} Felder im Auto belegt werden.`);
   if (C.length > cap) warn.push(`Achtung: ${C.length} Kisten, aber nur ${cap} Plätze im Auto. Die Kisten ohne Platz sind markiert.`);
-  if (C.length > 29) warn.push(`Mehr als 29 Kisten – es gibt nur 29 Etiketten. Nur die ersten 29 kommen ins Kisten-Blatt.`);
+  if (C.length > 29) warn.push(`${C.length} Kisten – es gibt nur 29 Etiketten${gruppe ? ' (zweite Fahrt bzw. zweites Fahrzeug oder Etiketten nachbeschriften)' : ''}.`);
+  if (C.length > cap && gruppe) warn.push(`Die Kisten ohne Platz werden zuletzt gebraucht (${teile[teile.length - 1].t.name}) – die gehen auf die zweite Fahrt.`);
   const kisten = C.map((c, i) => {
     const hatPlatz = c.platz !== undefined;
     const f = hatPlatz ? auto[c.platz] : null;
     return {
-      nr: i + 1, items: c.items, w: r1(c.w), text: kistenTxt(c.items),
+      nr: i + 1, tier: c.tier, items: c.items, w: r1(c.w), text: (gruppe ? c.tier + ': ' : '') + kistenTxt(c.items),
       teile: c.items.map(it => { const a = art(S, it.art); return a && a.teile && it.art !== HACK && !it.info ? `${it.art}: ${a.teile}` : ''; }).filter(Boolean),
       platz: hatPlatz ? f.name : 'KEIN PLATZ',
       ebene: hatPlatz ? (c.ebene === cnt[c.platz] ? 'oben' : `${c.ebene}. von unten`) : '',
       platzKurz: hatPlatz ? `${f.name}, ${c.ebene === cnt[c.platz] ? 'oben' : c.ebene + '. v. u.'}` : 'KEIN PLATZ',
-      ab: c.need === 0 ? 'von Anfang an' : c.need >= BIG ? 'Rest / Hofladen' : `ab Nr. ${ords[c.need - 1].nr}`,
+      ab: (gruppe && c.need !== 0 ? c.tier + ' ' : '') + c.ab,
       platzIdx: hatPlatz ? c.platz : -1, ebeneNr: c.ebene || 0
     };
   });
@@ -1189,7 +1316,7 @@ function packplan(S, tierName) {
     kisten.filter(k => k.platzIdx === i).sort((a, b) => a.ebeneNr - b.ebeneNr)
       .forEach(k => einladen.push(`${einladen.length + 1}. Kiste ${k.nr} (${k.text}) → ${k.platz}, ${k.ebeneNr === 1 ? 'unten' : k.ebeneNr + '. Ebene'}`));
   }
-  return { tier: t.name, erstellt: new Date().toISOString(), kisten, felder, einladen, cap, warn };
+  return { tier: teile.map(r => r.t.name).join(' + '), tiere: teile.map(r => r.t.name), gruppe, kisteKg, hackKisteKg, erstellt: new Date().toISOString(), kisten, felder, einladen, cap, warn };
 }
 function selSort(arr, less) {
   const a = arr.slice();
@@ -1198,11 +1325,12 @@ function selSort(arr, less) {
 }
 // Packplan ins Kistenblatt übernehmen (max. 29 Kisten, max. 3 Inhalte je Kiste)
 function packplanUebernehmen(S, pp) {
-  S.kisten = S.kisten.filter(k => k.tier !== pp.tier);
+  const tiere = pp.tiere || [pp.tier];
+  S.kisten = S.kisten.filter(k => !tiere.includes(k.tier));
   let id = S.kisten.reduce((m, k) => Math.max(m, k.id || 0), 0);
   for (const k of pp.kisten) {
-    if (k.nr > 29) break;
-    k.items.slice(0, 3).forEach(it => S.kisten.push({ id: ++id, tier: pp.tier, nr: k.nr, art: it.art, kg: it.kg, plan: it.kg, platz: k.platzKurz, gewogen: false, info: it.info || '' }));
+    if (k.nr > 99) break;
+    k.items.slice(0, 3).forEach(it => S.kisten.push({ id: ++id, tier: k.tier || pp.tier, nr: k.nr, art: it.art, kg: it.kg, plan: it.kg, platz: k.platzKurz, gewogen: false, info: it.info || '' }));
   }
 }
 
@@ -1210,6 +1338,7 @@ function packplanUebernehmen(S, pp) {
 function kistenRows(S, tierName) {
   return S.kisten.filter(k => k.tier === tierName).map((k, i) => ({ k, i })).sort((a, b) => a.k.nr - b.k.nr || a.i - b.i).map(x => x.k);
 }
+const SONDERKISTE = 'Sonderfälle (beschriftet)';
 const kistenTiere = S => [...new Set(S.kisten.map(k => k.tier))];
 function kistenSumme(S, tierName, artName) { return S.kisten.filter(k => k.tier === tierName && k.art === artName).reduce((s, k) => s + num(k.kg), 0); }
 // Menge je Genusspaket (feste Zusammensetzung aus den Einstellungen)
@@ -1228,7 +1357,8 @@ function kistenCalc(S, tierName) {
     const bedarf = ords.reduce((s, o) => s + qty(S, o, k.art) - specSum(S, o, k.art), 0) + pak * anteil;
     const verplant = Math.max(0, Math.min(start + num(k.kg), bedarf) - start);
     const a = art(S, k.art);
-    return { k, start, anteil, bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: k.info ? k.info : a && k.art !== HACK ? a.teile : '' };
+    const sonderInhalt = k.art === SONDERKISTE ? ords.flatMap(o => sonderOf(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art)).map(s => `Nr. ${o.nr}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
+    return { k, start, anteil, bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: sonderInhalt || (k.info ? k.info : a && k.art !== HACK ? a.teile : '') };
   });
 }
 // Tier abgeschlossen: Reste an Hofladen, Kisten leeren
@@ -1300,6 +1430,14 @@ function kommissionierung(S, nr) {
       const roh = hp.reduce((s, p) => s + p.roh, 0), summe = r2(roh + 1e-9);
       for (const p of hp) picks.splice(picks.indexOf(p), 1);
       picks.push({ kiste: null, hackTisch: true, menge: summe, roh, einheit: 'kg', art: HACK, verpacken: 'vom Hack-Tisch, fertig verpackt: ' + teile.join(' + '), platz: '' });
+    }
+    // Sonderfälle vom Metzger (beschriftet mit der Bestell-Nr.) liegen in der Sonderfälle-Kiste
+    const sk = kistenRows(S, t.name).find(k => k.art === SONDERKISTE);
+    for (const s of sonderOf(S, o)) {
+      if (!(num(s.menge) > 0) || istOrgan(s.art)) continue;
+      const a = art(S, s.art);
+      picks.push({ kiste: sk ? sk.nr : null, sonderfall: true, menge: r2(num(s.menge)), roh: 0, einheit: a ? a.einheit : 'kg', art: s.art,
+        verpacken: `Sonderfall${s.wunsch ? ' „' + s.wunsch + '“' : ''} – beim Metzger mit Nr. ${o.nr} beschriftet${sk ? '' : ' (keine Sonderfälle-Kiste im Plan)'}`, platz: sk ? sk.platz || '' : '' });
     }
     picks.sort((a, b) => (a.kiste === null ? -1 : a.kiste) - (b.kiste === null ? -1 : b.kiste));
   }
@@ -1386,7 +1524,7 @@ function packliste(S, tierName) {
   if (!t) return null;
   return { tier: t, rows: ordersOfTier(S, t.name).map(o => ({
     nr: o.nr, name: o.name, tel: o.tel, text: bestellText(S, o), sonder: sonderOf(S, o).map(s => sonderText(S, s)).join('; '),
-    schaetz: schaetzpreis(S, o), endbetrag: has(o.endbetrag) ? num(o.endbetrag) : null, status: o.status || 'offen', zahlOffen: zahlungOffen(o), lager: lagerText(o), lagerVorschlag: lagerVorschlag(S, o).ort })) };
+    schaetz: schaetzpreis(S, o), endbetrag: has(o.endbetrag) ? num(o.endbetrag) : null, status: o.status || 'offen', notiz: o.packNotiz || '', zahlOffen: zahlungOffen(o), lager: lagerText(o), lagerVorschlag: lagerVorschlag(S, o).ort })) };
 }
 
 // ---------- Lagerplatz nach dem Packen ----------
@@ -1482,8 +1620,8 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
-  mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
+  tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
+  mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
 };

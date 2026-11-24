@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '2.0';
+const APP_VERSION = '2.1';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -116,9 +116,31 @@ function render() {
 document.addEventListener('click', e => {
   const el = e.target.closest('[data-act]');
   if (el && ui.acts[el.dataset.act]) { e.preventDefault(); ui.acts[el.dataset.act](el, e); }
+  else if (el && ui.globalActs && ui.globalActs[el.dataset.act]) { e.preventDefault(); ui.globalActs[el.dataset.act](el, e); }
 });
 document.addEventListener('input', e => { const el = e.target.closest('[data-in]'); if (el && ui.ins[el.dataset.in]) ui.ins[el.dataset.in](el, e); });
 document.addEventListener('change', e => { const el = e.target.closest('[data-ch]'); if (el && ui.acts[el.dataset.ch]) ui.acts[el.dataset.ch](el, e); });
+
+// ---------- Offene Bestellungen neu verteilen (Vorschau, dann übernehmen) ----------
+async function neuVerteilenDialog(nurWennWechsel) {
+  const plan = neuVerteilenPlan(S);
+  if (nurWennWechsel && !plan.wechsel.length) return false;
+  const reicht = c => !c ? '' : c === 'ok' ? '<span class="ok">ok</span>' : `<span class="warn">${esc(c)}</span>`;
+  const bleibtNicht = plan.zeilen.filter(z => sameText(z.von, z.nach) && z.check && z.check !== 'ok');
+  const html = `<p>Geprüft: <b>${plan.zeilen.length}</b> offene Bestellungen (Tiere ohne Kistenplan und Warteliste), in Reihenfolge des Eingangs.
+      ${plan.festTiere.length ? `<br><span class="klein">Fest (Kistenplan vorhanden): ${plan.festTiere.map(esc).join(', ')} · gepackte und bewusst überbelegte Bestellungen bleiben, wo sie sind.</span>` : ''}</p>
+    ${plan.wechsel.length ? `<p><b>${plan.wechsel.length} Bestellung${plan.wechsel.length === 1 ? '' : 'en'} wechseln das Tier:</b></p>
+    <div class="tabwrap" style="max-height:50vh;overflow:auto"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Eingang</th><th>bisher</th><th></th><th>neu</th><th>Mengencheck</th></tr></thead><tbody>
+    ${plan.wechsel.map(z => `<tr><td class="r fett">${z.nr}</td><td>${esc(z.name)}</td><td>${fmtDate(z.eingang)}</td><td>${esc(z.von)}</td><td>→</td><td class="fett">${esc(z.nach)}</td><td>${reicht(z.check)}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="ok"><b>Alles passt – keine Bestellung muss das Tier wechseln.</b></p>'}
+    ${bleibtNicht.length ? `<p class="warn">Weiter „reicht nicht“ (kein Tier passt, bleibt wo sie war): ${bleibtNicht.map(z => 'Nr. ' + z.nr + ' ' + esc(z.name)).join(', ')}</p>` : ''}`;
+  const k = await dialog('Offene Bestellungen neu verteilen', html, plan.wechsel.length ? [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: `${plan.wechsel.length} übernehmen`, cls: 'haupt' }] : [{ k: 'x', t: 'Schließen', cls: 'haupt' }]);
+  if (k !== 'ok') return false;
+  neuVerteilenUebernehmen(S, plan); speichern();
+  meldung(`${plan.wechsel.length} Bestellung(en) neu zugeordnet.`); render();
+  return true;
+}
+ui.globalActs = { neuverteilen: () => neuVerteilenDialog(false) };
 
 // ---------- Hilfen für Formulare ----------
 const opt = (v, t, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(t)}</option>`;
@@ -132,8 +154,11 @@ function standardTier() {
 }
 const zahlMarke = o => zahlungOffen(o) ? ' <span class="marke rot">Zahlung offen</span>' : '';
 const statusMarke = s => s === 'abgeholt' ? '<span class="marke blau">abgeholt</span>' : s === 'gepackt' ? '<span class="marke gruen">gepackt</span>' : '<span class="marke">offen</span>';
-function checkMarke(txt) {
+// bewusst überbelegt (Bestellung bleibt trotz „reicht nicht“ bei diesem Tier): gelb statt rot
+const rotZeile = (ch, o) => String(ch || '').startsWith('reicht') && !(o && o.ueberbelegt);
+function checkMarke(txt, o) {
   if (!txt) return '';
+  if (o && o.ueberbelegt && txt.startsWith('reicht')) return `<span class="marke gelb">bewusst überbelegt</span> <span class="klein">${esc(txt.replace(/^reicht nicht: /, ''))}</span>`;
   if (txt === 'ok') return '<span class="marke gruen">ok</span>';
   if (txt.startsWith('Warteliste')) return '<span class="marke gelb">Warteliste</span>';
   return `<span class="marke rot">${esc(txt)}</span>`;
@@ -209,7 +234,7 @@ function tierKarte(t) {
     <div class="klein">Abholung: <b>${t.abhol ? fmtDate(t.abhol) : 'offen'}</b>${t.schlacht ? ' · Schlachtung ' + fmtDate(t.schlacht) : ''}</div>
     <div class="balken ${i.frei < 0 ? 'ueber' : i.frei === 0 ? 'voll' : ''}"><div style="width:${pct}%"></div></div>
     <div class="klein">Genusspakete: <b>${fmtNum(i.pakete)}</b> von ${nen} · frei ${fmtNum(i.frei)}</div>
-    <div class="klein">${i.anzahl} Bestellungen${i.reichtNicht ? ` · <span class="warn">${i.reichtNicht} reicht nicht</span>` : ''}</div></div>`;
+    <div class="klein">${i.anzahl} Bestellungen${i.reichtNicht ? ` · <span class="warn">${i.reichtNicht} reicht nicht</span>` : ''}${i.ueberbelegt ? ` · <span class="klein">${i.ueberbelegt} bewusst überbelegt</span>` : ''}</div></div>`;
 }
 
 // =====================================================================
@@ -282,6 +307,7 @@ function viewBestellung(nr, q, vorlage) {
           <div><div class="klein fett">davon vakuumiert (${fmtEur(vakPreisPaket(S, preislisteAm(S, preisDatum(S, o))))})</div><div class="stepper"><button data-act="step" data-f="pakVak" data-d="-1">−</button><input class="feld zahl" inputmode="numeric" data-in="kopf" data-f="pakVak" value="${num(o.pakVak) || ''}"><button data-act="step" data-f="pakVak" data-d="1">+</button></div></div>
         </div>
       </div>
+      <div class="karte"><label class="f ganz"><span class="fett">Notiz zur Bestellung</span> <span class="klein">– erscheint beim Kommissionieren und in der Packliste</span><textarea class="feld" rows="2" data-in="kopf" data-f="packNotiz" placeholder="z. B. „Steak in 2er-Packungen“, „holt Nachbar ab“">${esc(o.packNotiz || '')}</textarea></label></div>
       <div class="karte"><h3 style="margin-top:0">Sonderwünsche <span class="klein">– macht der Metzger separat</span></h3>
         <div class="klein" style="margin-bottom:6px">z. B. Hackfleisch 2000 g „besonders mager“. Die Menge gehört trotzdem rechts mit in die Bestellung. Nur den Wunsch eintragen, keine Gründe wie Krankheiten.</div>
         <div id="sonderliste">${sonderRows()}</div>
@@ -333,13 +359,14 @@ function viewBestellung(nr, q, vorlage) {
     const fd = t && !t.archiv ? fehlDetail(S, Object.assign({}, o, { tier: t.name })) : null;
     ui.fehlDetail = fd;
     if (fd && fd.ok && ti) $('#tierinfo').innerHTML = ti + ' · Mengencheck <span class="ok">ok</span>';
-    $('#mcheck').innerHTML = !fd || fd.ok ? '' : `<div class="fehlerbox mcheck"><b>Mengencheck ${esc(fd.tier)}: reicht nicht</b>
+    const ueb = !!o.ueberbelegt && !!fd && !fd.ok;
+    $('#mcheck').innerHTML = !fd || fd.ok ? '' : `<div class="${ueb ? 'hinweis' : 'fehlerbox'} mcheck"><b>${ueb ? `Bewusst überbelegt bei ${esc(fd.tier)}` : `Mengencheck ${esc(fd.tier)}: reicht nicht`}</b>${ueb ? ' <span class="klein">– bleibt bei diesem Tier, wird beim Neu-Verteilen nicht verschoben</span>' : ''}
       ${fd.zeilen.length ? `<table class="tab mcheck-tab"><thead><tr><th>Artikel</th><th class="r">bestellt</th><th class="r">verfügbar</th><th class="r">fehlt</th></tr></thead><tbody>${fd.zeilen.map(z => {
         const stk = (n, z2) => z.stkBestellt !== undefined ? ` <span class="klein">(${fmtNum(n)} ${esc(z.stkText)})</span>` : z.btlBestellt !== undefined ? ` <span class="klein">(${fmtNum(n)} Btl)</span>` : '';
         const nB = z.stkBestellt !== undefined ? z.stkBestellt : z.btlBestellt, nV = z.stkVerf !== undefined ? z.stkVerf : z.btlVerf;
         return `<tr><td class="fett">${esc(z.art)}</td><td class="r">${fmtNum(z.bestelltKg, 2)} kg${stk(nB)}</td><td class="r">ca. ${fmtNum(z.verfuegbarKg, 2)} kg${stk(nV)}</td><td class="r warn">${fehlKgText(z.fehltKg)}${nB !== undefined ? ` <span class="klein">(${fmtNum(nB - nV)} ${z.stkBestellt !== undefined ? 'Stk' : 'Btl'})</span>` : ''}</td></tr>`; }).join('')}</tbody></table>` : ''}
       ${fd.sonst.length ? `<p style="margin:6px 0">${fd.sonst.map(esc).join('<br>')}</p>` : ''}
-      ${fd.zeilen.length ? `<div class="zeile" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button class="btn" data-act="kuerzen">Auf verfügbare Menge kürzen</button>${nr ? '<button class="btn" data-act="teilen">Rest aufs nächste Tier (Teilen …)</button>' : ''}<span class="klein platz">Ist der Kunde mit weniger einverstanden, kürzen und speichern – sonst den Rest aufs nächste Tier verschieben.</span></div>` : ''}</div>`;
+      <div class="zeile" style="gap:8px;margin-top:8px;flex-wrap:wrap">${ueb ? '<button class="btn" data-act="ueberbelegen" data-w="0">Überbelegung aufheben</button>' : `${fd.zeilen.length ? '<button class="btn" data-act="kuerzen">Auf verfügbare Menge kürzen</button>' : ''}${nr && fd.zeilen.length ? '<button class="btn" data-act="teilen">Rest aufs nächste Tier (Teilen …)</button>' : ''}<button class="btn braun" data-act="ueberbelegen" data-w="1">Bewusst überbelegen – bei diesem Tier lassen</button><span class="klein platz">Ist der Kunde mit weniger einverstanden, kürzen und speichern – sonst den Rest aufs nächste Tier verschieben oder bewusst überbelegen.</span>`}</div></div>`;
     // Kunde
     const k = S.kunden.find(x => sameText(x.name, o.name));
     const lb = !o.nr && o.name ? letzteBestellungVon(o.name) : null;
@@ -354,6 +381,7 @@ function viewBestellung(nr, q, vorlage) {
     if (['pakete', 'pakVak'].includes(f)) v = num(v);
     if (f === 'tuetenManuell') v = el.value.trim() === '' ? null : num(v);
     o[f] = v; ui.formDirty = true;
+    if (f === 'tier') delete o.ueberbelegt;
     if (f === 'status') { const zb = $('#zahlbox'); if (zb) zb.style.display = v === 'abgeholt' ? '' : 'none'; }
     if (f === 'name') {
       const k = S.kunden.find(x => sameText(x.name, v));
@@ -430,6 +458,7 @@ function viewBestellung(nr, q, vorlage) {
   };
   ui.acts.speichern = () => bestellungSpeichern(o);
   { const zc = $('#zahloffen'); if (zc) zc.addEventListener('change', () => { ui.formDirty = true; }); }
+  ui.acts.ueberbelegen = el => { if (el.dataset.w === '1') o.ueberbelegt = true; else delete o.ueberbelegt; ui.formDirty = true; aktualisieren(); meldung(el.dataset.w === '1' ? 'Als bewusst überbelegt markiert – bitte speichern.' : 'Überbelegung aufgehoben – bitte speichern.'); };
   // Auf die verfügbare Menge kürzen (nur im Formular – erst „Speichern“ übernimmt es)
   ui.acts.kuerzen = () => {
     const fd = ui.fehlDetail; if (!fd || !fd.zeilen.length) return;
@@ -514,6 +543,8 @@ async function bestellungSpeichern(o) {
     if (S.bestellungen[i].tier !== o.tier) o.rang = nextRang(S);
     S.bestellungen[i] = o;
   }
+  // bewusst überbelegt: gilt nur für das Tier, bei dem es entschieden wurde, und nur solange es nicht reicht
+  if (o.ueberbelegt) { const fdS = fehlDetail(S, o); if (!fdS || fdS.ok) delete o.ueberbelegt; }
   // Bezahlung: nur bei „abgeholt“ (Haken „Bezahlung offen“ im Formular)
   if ((o.status || 'offen') === 'abgeholt') { o.abgeholtAm = o.abgeholtAm || todayISO(); const zc = $('#zahloffen'); if (zc) o.zahlungOffen = zc.checked; }
   else { delete o.abgeholtAm; delete o.zahlungOffen; }
@@ -527,9 +558,10 @@ async function bestellungSpeichern(o) {
   const gekippt = Object.keys(nachher).filter(nr => +nr !== o.nr && vorher[nr] === 'ok' && nachher[nr] !== 'ok').map(nr => S.bestellungen.find(x => x.nr === +nr)).filter(Boolean);
   const txt = `Bestellung Nr. ${o.nr} für ${o.name} ${neu ? 'gespeichert' : 'geändert'} – Tier: ${o.tier}${auto ? ' (automatisch)' : ''}${kundeNeu ? ' – neuer Kunde angelegt' : ''}`;
   const gekipptHtml = gekippt.length ? `<p class="warn"><b>Dadurch reicht es bei ${gekippt.length === 1 ? 'einer anderen Bestellung' : gekippt.length + ' anderen Bestellungen'} von ${esc(o.tier)} nicht mehr:</b><br>${gekippt.map(x => `Nr. ${x.nr} – ${esc(x.name)}: ${esc(nachher[x.nr])}`).join('<br>')}</p><p class="klein">Genusspakete haben Vorrang und nehmen den früheren Einzelbestellungen etwas weg. Bitte diese Bestellung oder die genannten auf ein anderes Tier umstellen (Mengenprüfung).</p>` : '';
-  if ((check && check !== 'ok' && !check.startsWith('Warteliste')) || gekippt.length) {
-    await dialog('Achtung – Mengencheck', `<p>${esc(txt)}</p>${check && check !== 'ok' && !check.startsWith('Warteliste') ? `<p class="warn">${esc(check)}</p><p>Die Bestellung ist gespeichert. Bitte prüfen, ob sie aufs nächste Tier umgestellt werden soll (Tier im Formular ändern).</p>` : ''}${gekipptHtml}`);
-  } else meldung(txt + (check ? ' – Mengencheck: ' + check : ''));
+  const warnSelbst = check && check !== 'ok' && !check.startsWith('Warteliste') && !o.ueberbelegt;
+  if (warnSelbst || gekippt.length) {
+    await dialog('Achtung – Mengencheck', `<p>${esc(txt)}</p>${warnSelbst ? `<p class="warn">${esc(check)}</p><p>Die Bestellung ist gespeichert. Bitte prüfen, ob sie aufs nächste Tier umgestellt werden soll (Tier im Formular ändern).</p>` : ''}${gekipptHtml}`);
+  } else meldung(txt + (check ? ' – Mengencheck: ' + (o.ueberbelegt && check !== 'ok' ? 'bewusst überbelegt' : check) : ''));
   if (neu) render(); else history.back();
 }
 
@@ -550,11 +582,11 @@ function viewBestellungen() {
       `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Eingang</th><th>Name</th><th>Tier</th><th class="r">Pakete</th><th>Bestellung</th><th class="r">Schätzpreis</th><th>Status</th><th>Mengencheck</th></tr></thead><tbody>` +
       os.map(o => {
         const ch = o.tier === 'Warteliste' ? 'Warteliste – noch kein Tier' : tier(S, o.tier) ? (checks[o.nr] || '') : 'Tier unbekannt';
-        return `<tr class="klick ${ch.startsWith('reicht') ? 'rot' : ''}" data-act="oeffnen" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${esc(o.name)}</td><td>${esc(o.tier)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein" style="max-width:380px">${esc(kurzText(o))}</td><td class="r">${fmtEur(schaetzpreis(S, o))}</td><td>${statusMarke(o.status)}${zahlMarke(o)}${o.lagerOrt ? `<div class="klein">${esc(lagerText(o))}</div>` : ''}</td><td>${checkMarke(ch)}</td></tr>`;
+        return `<tr class="klick ${rotZeile(ch, o) ? 'rot' : ''}" data-act="oeffnen" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${esc(o.name)}</td><td>${esc(o.tier)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein" style="max-width:380px">${esc(kurzText(o))}</td><td class="r">${fmtEur(schaetzpreis(S, o))}</td><td>${statusMarke(o.status)}${zahlMarke(o)}${o.lagerOrt ? `<div class="klein">${esc(lagerText(o))}</div>` : ''}</td><td>${checkMarke(ch, o)}</td></tr>`;
       }).join('') + '</tbody></table></div>';
     $('#anzahl').textContent = `${os.length} Bestellung${os.length === 1 ? '' : 'en'}`;
   };
-  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Bestellungen</h1><a class="btn" href="#/warteliste">Prüfliste Warteliste (${S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name).length})</a><a class="btn haupt" href="#/neu">+ Neue Bestellung</a></div>
+  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Bestellungen</h1><button class="btn" data-act="neuverteilen">Offene neu verteilen …</button><a class="btn" href="#/warteliste">Prüfliste Warteliste (${S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name).length})</a><a class="btn haupt" href="#/neu">+ Neue Bestellung</a></div>
     <div class="suchzeile">
       <input class="feld" type="search" placeholder="Suchen: Name, Telefon oder Nr." data-in="q" value="${esc(F.q)}">
       <select class="feld" data-ch="ft" style="max-width:260px">${opt('', 'alle Tiere', !F.tier)}${tiereSortiert().map(t => opt(t.name, t.name, F.tier === t.name)).join('')}${opt('Warteliste', 'Warteliste', F.tier === 'Warteliste')}</select>
@@ -642,7 +674,7 @@ function viewKunde(id) {
 // =====================================================================
 function viewTiere() {
   titel('Tiere');
-  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Tiere</h1><a class="btn" href="#/archiv">Archiv (${S.tiere.filter(t => t.archiv).length})</a><a class="btn haupt" href="#/tier/neu">+ Neues Tier</a></div>
+  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Tiere</h1><button class="btn" data-act="neuverteilen">Offene Bestellungen neu verteilen …</button><a class="btn" href="#/archiv">Archiv (${S.tiere.filter(t => t.archiv).length})</a><a class="btn haupt" href="#/tier/neu">+ Neues Tier</a></div>
     ${tiereSortiert().length ? '' : '<div class="karte">Keine aktiven Tiere angelegt.</div>'}
     <div class="tabwrap"><table class="tab"><thead><tr><th>Tier</th><th>Typ</th><th>Ohrmarke / Notiz</th><th>Schlachtung</th><th>Abholung</th><th class="r">SG (kg)</th><th class="r">Paket ca.</th><th class="r">Pakete bestellt / frei</th><th class="r">Bestellungen</th><th>Mengen</th></tr></thead><tbody>
     ${tiereSortiert().map(t => { const i = tierInfo(S, t); return `<tr class="klick ${i.reichtNicht ? 'rot' : ''}" data-act="oeffnen" data-t="${esc(t.name)}"><td class="fett">${esc(t.name)}</td><td>${esc(t.typ)}</td><td>${esc(t.notiz)}</td><td>${fmtDate(t.schlacht)}</td><td>${fmtDate(t.abhol) || 'offen'}</td><td class="r">${fmtNum(i.sg)}${num(t.sg) ? '' : ' <span class="klein">(Std.)</span>'}</td><td class="r">${fmtNum(i.paketKg, 1)} kg</td><td class="r">${fmtNum(i.pakete)} / <b class="${i.frei < 0 ? 'warn' : ''}">${fmtNum(i.frei)}</b></td><td class="r">${i.anzahl}</td><td>${i.reichtNicht ? `<span class="marke rot">${i.reichtNicht} reicht nicht</span>` : i.anzahl ? '<span class="marke gruen">ok</span>' : ''}</td></tr>`; }).join('')}
@@ -692,6 +724,7 @@ function viewTier(name) {
     t.name = String(t.name || '').trim();
     if (!t.name) return meldung('Bitte einen Namen für das Tier eintragen.', true);
     if (t.name === 'Warteliste') return meldung('„Warteliste“ ist als Name reserviert.', true);
+    const altAbhol = t0 ? t0.abhol : '';
     const anderes = S.tiere.find(x => sameText(x.name, t.name) && x !== t0);
     if (anderes) return meldung(`Ein Tier mit dem Namen „${t.name}“ gibt es schon.`, true);
     if (neu) S.tiere.push(t);
@@ -704,11 +737,9 @@ function viewTier(name) {
     }
     speichern();
     const tt = tier(S, t.name);
-    const wl = tt.archiv ? [] : wartelistePassend(S, tt);
-    if (wl.length && await frage('Warteliste', `${wl.length} Bestellung(en) auf der Warteliste passen zu <b>${esc(tt.name)}</b> (Abholung ${fmtDate(tt.abhol)}). Jetzt diesem Tier zuordnen?`, 'Zuordnen', 'Nein')) {
-      wl.forEach(o => { o.tier = tt.name; o.rang = nextRang(S); }); speichern();
-      meldung(`${wl.length} Bestellung(en) zugeordnet. Bitte die Mengenprüfung für ${tt.name} ansehen.`);
-    } else meldung('Tier gespeichert.');
+    meldung('Tier gespeichert.');
+    // neues Tier oder neuer Termin: offene Bestellungen (inkl. Warteliste) neu verteilen anbieten
+    if (!tt.archiv && tt.abhol && (neu || altAbhol !== tt.abhol)) await neuVerteilenDialog(true);
     history.replaceState(null, '', '#/tier/' + encodeURIComponent(tt.name)); letzterHash = location.hash; render();
   };
   ui.acts.loeschen = async () => {
@@ -758,7 +789,7 @@ function tierAusbeuteHtml(t) {
 }
 function tierBestellListe(name) {
   const os = ordersOfTier(S, name); const ch = mengencheckTier(S, name);
-  return `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th class="r">Pakete</th><th>Bestellung</th><th>Mengencheck</th></tr></thead><tbody>${os.map(o => `<tr class="klick ${(ch[o.nr] || '').startsWith('reicht') ? 'rot' : ''}" data-act="best" data-nr="${o.nr}"><td class="r">${o.nr}</td><td>${esc(o.name)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein">${esc(kurzText(o))}</td><td>${checkMarke(ch[o.nr])}</td></tr>`).join('') || '<tr><td colspan="5" class="klein">noch keine Bestellungen</td></tr>'}</tbody></table></div>`;
+  return `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th class="r">Pakete</th><th>Bestellung</th><th>Mengencheck</th></tr></thead><tbody>${os.map(o => `<tr class="klick ${rotZeile(ch[o.nr], o) ? 'rot' : ''}" data-act="best" data-nr="${o.nr}"><td class="r">${o.nr}</td><td>${esc(o.name)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein">${esc(kurzText(o))}</td><td>${checkMarke(ch[o.nr], o)}</td></tr>`).join('') || '<tr><td colspan="5" class="klein">noch keine Bestellungen</td></tr>'}</tbody></table></div>`;
 }
 
 // =====================================================================
