@@ -1733,13 +1733,28 @@ function hackZettel(S, tierName) {
       pakete: pak > 0 ? pak : null,
       ausPak,
       ausPakAls: ausPak ? hackPaketText(S, pak, pv) : '',
-      pakVak: pak > 0 ? (pv >= pak ? 'VAKUUM' : pv > 0 ? `${pv} Paket(e) VAKUUM, Rest Tüte` : 'Tüte') : ''
+      pakVak: pak > 0 ? (pv >= pak ? 'VAKUUM' : pv > 0 ? `${pv} Paket(e) VAKUUM, Rest Tüte` : 'Tüte') : '',
+      ok: !!o.hackOk
     });
   }
   return { tier: t, rows, sumEinzeln: rows.reduce((s, r) => s + num(r.einzeln), 0), sumPak: rows.reduce((s, r) => s + num(r.ausPak), 0) };
 }
 
 // ---------- Innereien ----------
+// Abhaken (seit 3.0.6): erledigt-Häkchen auf Hack-Zettel (o.hackOk) und Innereien (o.innOk, Rest je Tier t.innRestOk)
+// Topf: Rest-Häkchen stehen bei allen Tieren des Topfs gleich
+function innRestOk(S, t, art) { const t0 = t && t.glieder ? tier(S, t.glieder[0]) : t; return !!(t0 && t0.innRestOk && t0.innRestOk[art]); }
+function innRestUmschalten(S, tierName, art) {
+  const T = topfTier(S, tierName); if (!T) return;
+  const neu = !innRestOk(S, T, art);
+  for (const n of T.glieder || [T.name]) { const x = tier(S, n); if (!x) continue; x.innRestOk = x.innRestOk || {}; if (neu) x.innRestOk[art] = true; else delete x.innRestOk[art]; }
+}
+// Nach dem Zuschnitt (seit 3.0.6): tatsächlich vorhandene Innereien (Leber kg gewogen, sonst Stück) – Topf: gilt für alle Tiere zusammen
+function innIst(S, t) { const t0 = t && t.glieder ? tier(S, t.glieder[0]) : t; return (t0 && t0.innIst) || {}; }
+function innIstSetzen(S, tierName, art, wert) {
+  const T = topfTier(S, tierName); if (!T) return;
+  for (const n of T.glieder || [T.name]) { const x = tier(S, n); if (!x) continue; x.innIst = x.innIst || {}; if (wert === null) delete x.innIst[art]; else x.innIst[art] = wert; if (!Object.keys(x.innIst).length) delete x.innIst; }
+}
 function innereien(S, tierName) {
   const t = topfTier(S, tierName);
   if (!t) return null;
@@ -1747,7 +1762,9 @@ function innereien(S, tierName) {
   const ords = ordersOfTopf(S, t);
   const lp = num(st.leberPortionG) || 500;
   const nT = topfN(t);
-  const vorh = { Leber: num(st.leberKg) * nT, Nieren: num(st.nierenStk) * nT, Herz: num(st.herzStk) * nT, Zunge: num(st.zungeStk) * nT, 'Bäckle': (has(st.baeckleStk) ? num(st.baeckleStk) : 2) * nT };
+  const schaetz = { Leber: num(st.leberKg) * nT, Nieren: num(st.nierenStk) * nT, Herz: num(st.herzStk) * nT, Zunge: num(st.zungeStk) * nT, 'Bäckle': (has(st.baeckleStk) ? num(st.baeckleStk) : 2) * nT };
+  const ist = innIst(S, t), vorh = {};
+  for (const n of ORGANE) vorh[n] = has(ist[n]) ? num(ist[n]) : schaetz[n];
   const uebersicht = ORGANE.map(n => {
     const best = ords.reduce((s, o) => s + qty(S, o, n), 0);
     const rest = vorh[n] - best;
@@ -1759,15 +1776,19 @@ function innereien(S, tierName) {
     } else if (Math.abs(rest) < 1e-9) txt = '–';
     else if (n === 'Nieren') txt = `${fmtNum(rest)} × einzeln vakuumieren`;
     else txt = `${fmtNum(rest)} × vakuumieren`;
-    return { art: n, vorhanden: vorh[n], bestellt: best, rest, txt, einheit: n === 'Leber' ? 'kg' : 'Stk' };
+    return { art: n, vorhanden: vorh[n], schaetz: schaetz[n], gewogen: has(ist[n]), bestellt: best, rest, txt, einheit: n === 'Leber' ? 'kg' : 'Stk', ok: innRestOk(S, t, n) };
   });
+  // Zuteilung in Reihenfolge der Bestellungen: reicht es nicht (z. B. nach dem Zuschnitt), fehlt es den letzten
+  const pool = Object.assign({}, vorh);
   const rows = ords.filter(o => ORGANE.some(n => qty(S, o, n) > 0)).map(o => {
     const v = vakArtikel(S, o).filter(n => ORGANE.includes(n));
     const po = portionOf(S, o, 'Leber');
     const lq = qty(S, o, 'Leber');
-    return { nr: o.nr, name: o.name, leber: lq || null, leberAls: lq > 0 ? (po ? po.text : fmtNum(lq, 3) + ' kg') : '',
+    const fehlt = {};
+    for (const n of ORGANE) { const q = qty(S, o, n); if (!(q > 0)) continue; const a = Math.min(q, Math.max(0, pool[n])); pool[n] -= q; if (q - a > 0.001) fehlt[n] = q - a; }
+    return { nr: o.nr, name: o.name, fehlt, leber: lq || null, leberAls: lq > 0 ? (po ? po.text : fmtNum(lq, 3) + ' kg') : '',
       nieren: qty(S, o, 'Nieren') || null, herz: qty(S, o, 'Herz') || null, zunge: qty(S, o, 'Zunge') || null, baeckle: qty(S, o, 'Bäckle') || null,
-      vak: v.length ? v.join(' ') : 'nein' };
+      vak: v.length ? v.join(' ') : 'nein', ok: !!o.innOk };
   });
   return { tier: t, uebersicht, rows };
 }

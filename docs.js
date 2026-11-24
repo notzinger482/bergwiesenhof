@@ -85,7 +85,7 @@ function docCanvas(doc, breite = 1080) {
       };
       row(b.head, fonts.th, '#e3efd3', '#222');
       if (!b.rows.length) row([b.leer || '– keine –', ...b.head.slice(1).map(() => '')], fonts.td, null, '#777');
-      b.rows.forEach((r, i) => { const rc = (b.rowClass || [])[i] || ''; row(r.map(v => v === null || v === undefined ? '' : String(v)), rc.includes('fett') ? (fonts.tdB || fonts.textB || fonts.td) : fonts.td, rc.includes('rot') ? '#fde2e2' : rc.includes('fett') ? '#eef4e6' : (i % 2 ? '#f7f7f4' : null), '#111'); });
+      b.rows.forEach((r, i) => { const rc = (b.rowClass || [])[i] || ''; row(r.map(v => v === null || v === undefined ? '' : String(v)), rc.includes('fett') ? (fonts.tdB || fonts.textB || fonts.td) : fonts.td, rc.includes('rot') ? '#fde2e2' : rc.includes('erledigt') ? '#c9e6b3' : rc.includes('fett') ? '#eef4e6' : (i % 2 ? '#f7f7f4' : null), '#111'); });
       y += 14;
     }
   }

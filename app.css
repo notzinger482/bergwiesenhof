@@ -153,6 +153,10 @@ textarea.feld { min-height: 70px; }
 .doc-tab td { border-bottom: 1px solid #ddd; padding: 6px 8px; vertical-align: top; }
 .doc-tab tr.rot td { background: var(--rot-h); }
 .doc-tab tr.fett td { font-weight: 700; background: #eef4e6; }
+.doc-tab tr.erledigt td { background: #c9e6b3; color: #3d4d33; text-decoration: none; }
+.doc-tab tr.erledigt td:last-child { color: #2e7d1e; font-weight: 800; }
+.doc-tab tr.klick { cursor: pointer; }
+.doc-tab tr.klick td:last-child { font-size: 1.25em; text-align: center; }
 .doc-tab .r { text-align: right; }
 .doc-tab.fest { table-layout: fixed; }
 .doc-tab.fest td, .doc-tab.fest th { overflow-wrap: break-word; hyphens: auto; }

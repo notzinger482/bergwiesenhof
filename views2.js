@@ -106,17 +106,32 @@ function docHack(hz) {
   return { title: `Hackfleisch-Zettel – ${hz.tier.name}`, sub: [abholTxt(hz.tier), `Summe einzeln ${fmtNum(hz.sumEinzeln, 2)} kg · aus Paketen ${fmtNum(hz.sumPak, 1)} kg`],
     blocks: [{ type: 'text', text: 'Unabhängig von den Bestellungen vorab verpacken; Tüten mit Bestell-Nr. und Namen beschriften. Mageres Hack (Sonderfall) kommt separat vom Metzger.' },
       { type: 'table', head: ['Nr.', 'Name', 'EINZELN kg', 'verpacken als', 'vak.?', 'Pakete', 'aus PAKET kg', 'verpacken als', 'vak.?', '✓'], widths: [0.8, 2.6, 1.2, 2, 1.2, 0.9, 1.2, 1.6, 2, 0.6], align: ['r', '', 'r', '', '', 'r', 'r', '', '', ''],
-        rows: hz.rows.map(r => [r.nr, r.name, fmtNum(r.einzeln, 3), r.einzelnAls, r.einzelnVak, r.pakete || '', fmtNum(r.ausPak, 1), r.ausPakAls, r.pakVak, '☐']) }], footer: fussZeile() };
+        rows: hz.rows.map(r => [r.nr, r.name, fmtNum(r.einzeln, 3), r.einzelnAls, r.einzelnVak, r.pakete || '', fmtNum(r.ausPak, 1), r.ausPakAls, r.pakVak, r.ok ? '✓' : '☐']), rowClass: hz.rows.map(r => r.ok ? 'erledigt' : ''), abhaken: 'hack' }], footer: fussZeile() };
+}
+// Eingabe „Nach dem Zuschnitt“ über dem Innereien-Zettel (leer = Schätzwert)
+function innZuschnittKarte(ii) {
+  return `<div class="karte"><h3 style="margin-top:0">Nach dem Zuschnitt <span class="klein">– was wirklich da ist (leer lassen = Schätzwert)</span></h3><div class="zeile oben">
+    ${ii.uebersicht.map(u => `<label class="f" style="width:150px">${esc(u.art)} (${u.einheit === 'kg' ? 'kg gewogen' : 'Stück'})<input class="feld zahl" inputmode="decimal" data-ch="innist" data-f="${esc(u.art)}" value="${u.gewogen ? fmtIn(u.vorhanden, 2) : ''}" placeholder="ca. ${fmtNum(u.schaetz, 2)}"></label>`).join('')}
+    </div><p class="klein" style="margin:4px 0 0">Unbrauchbares (z. B. eine ganze Leber) einfach weglassen. Beim Herz zählt nur die Stückzahl – abgerechnet wird beim Abholen nach Gewicht.</p></div>`;
+}
+// Tabellen eines Zettels zum Abhaken klickbar machen: listen = { hack|inn|innrest: [Schlüssel je Zeile] }
+function abhakenAn(ziel, listen) {
+  const tabs = [...ziel.querySelectorAll('table.doc-tab')];
+  const reihen = { innrest: tabs.length > 1 ? tabs[0] : null, inn: tabs[tabs.length - 1], hack: tabs[tabs.length - 1] };
+  for (const [art, keys] of Object.entries(listen)) {
+    const tab = reihen[art]; if (!tab) continue;
+    [...tab.querySelectorAll('tbody tr')].forEach((tr, i) => { if (keys[i] === undefined) return; tr.classList.add('klick'); tr.dataset.act = 'abhaken'; tr.dataset.abh = art; tr.dataset.key = keys[i]; tr.title = 'antippen = erledigt / wieder offen'; });
+  }
 }
 function docInnereien(ii) {
   return { title: `Innereien – ${ii.tier.name}`, sub: [abholTxt(ii.tier)],
     blocks: [{ type: 'text', text: 'Erst die Bestellungen bedienen, dann den Rest verarbeiten. Tüten mit Bestell-Nr. und Namen beschriften.' },
-      { type: 'table', head: ['Innerei', 'vorhanden ca.', 'bestellt', 'Rest', 'Rest verarbeiten'], widths: [2, 1.5, 1.3, 1.2, 4], align: ['', 'r', 'r', 'r', ''],
-        rows: ii.uebersicht.map(u => [u.art, fmtNum(u.vorhanden) + ' ' + u.einheit, fmtNum(u.bestellt, 3), fmtNum(u.rest, 3), u.txt]), rowClass: ii.uebersicht.map(u => u.rest < -1e-9 ? 'rot' : '') },
+      { type: 'table', head: ['Innerei', 'vorhanden', 'bestellt', 'Rest', 'Rest verarbeiten', '✓'], widths: [2, 1.8, 1.2, 1.1, 3.9, 0.5], align: ['', 'r', 'r', 'r', '', ''],
+        rows: ii.uebersicht.map(u => [u.art, (u.gewogen ? '' : 'ca. ') + fmtNum(u.vorhanden, 2) + ' ' + u.einheit + (u.gewogen ? (u.einheit === 'kg' ? ' gewogen' : ' gezählt') : ''), fmtNum(u.bestellt, 3), fmtNum(u.rest, 3), u.txt, u.ok ? '✓' : '☐']), rowClass: ii.uebersicht.map(u => u.rest < -1e-9 ? 'rot' : u.ok ? 'erledigt' : ''), abhaken: 'innrest' },
       { type: 'h', text: 'Bestellungen' },
       { type: 'table', head: ['Nr.', 'Name', 'Leber kg', 'Leber verpacken', 'Nieren', 'Herz', 'Zunge', 'Bäckle', 'vakuumieren', '✓'], widths: [0.8, 2.6, 1, 1.7, 0.9, 0.8, 0.8, 0.9, 1.7, 0.5], align: ['r', '', 'r', '', 'r', 'r', 'r', 'r', '', ''],
-        rows: ii.rows.map(r => [r.nr, r.name, fmtNum(r.leber, 3), r.leberAls, r.nieren || '', r.herz || '', r.zunge || '', r.baeckle || '', r.vak, '☐']) },
-      { type: 'text', text: '„vorhanden“ = Schätzwerte aus den Einstellungen (Innereien je Tier).' }], footer: fussZeile() };
+        rows: ii.rows.map(r => [r.nr, r.name + (Object.keys(r.fehlt).length ? '\nfehlt: ' + Object.entries(r.fehlt).map(([n, q]) => n + ' ' + (n === 'Leber' ? fmtNum(q, 2) + ' kg' : fmtNum(q) + ' Stk')).join(', ') : ''), fmtNum(r.leber, 3), r.leberAls, r.nieren || '', r.herz || '', r.zunge || '', r.baeckle || '', r.vak, r.ok ? '✓' : '☐']), rowClass: ii.rows.map(r => r.ok ? 'erledigt' : Object.keys(r.fehlt).length ? 'rot' : ''), abhaken: 'inn' },
+      { type: 'text', text: '„ca.“ = Schätzwert aus den Einstellungen (Innereien je Tier); „gewogen/gezählt“ = nach dem Zuschnitt eingetragen. Reicht es nicht, fehlt es den zuletzt zugeordneten Bestellungen.' }], footer: fussZeile() };
 }
 function docPackliste(pl) {
   return { title: `Packliste Kühlhaus – ${pl.tier.name}`, sub: [abholTxt(pl.tier)], quer: true,
@@ -155,9 +170,17 @@ function viewSchlachttag(tab, q) {
   if (tab === 'menge') zeige(docMenge(mengenpruefung(S, tn)));
   else if (tab === 'metzger') tabMetzger(tn, ziel, zeige);
   else if (tab === 'kisten' || tab === 'packplan') tabKisten(tn, ziel);
-  else if (tab === 'hack') zeige(docHack(hackZettel(S, tn)));
-  else if (tab === 'innereien') zeige(docInnereien(innereien(S, tn)));
+  else if (tab === 'hack') { const hz = hackZettel(S, tn); zeige(docHack(hz)); abhakenAn(ziel, { hack: hz.rows.map(r => r.nr) }); }
+  else if (tab === 'innereien') { const ii = innereien(S, tn); zeige(docInnereien(ii), '', innZuschnittKarte(ii)); abhakenAn(ziel, { inn: ii.rows.map(r => r.nr), innrest: ii.uebersicht.map(u => u.art) }); }
   else if (tab === 'packliste') tabPackliste(tn, ziel);
+  ui.acts.innist = el => { const v = el.value.trim(); innIstSetzen(S, tn, el.dataset.f, v === '' ? null : Math.max(0, num(v))); speichern(); render(); };
+  // Abhaken (seit 3.0.6): Zeile antippen → erledigt (grün, ✓), nochmal antippen → wieder offen
+  ui.acts.abhaken = el => {
+    const art = el.dataset.abh, key = el.dataset.key;
+    if (art === 'innrest') innRestUmschalten(S, tn, key);
+    else { const o = S.bestellungen.find(x => x.nr === +key); if (!o) return; const f = art === 'hack' ? 'hackOk' : 'innOk'; if (o[f]) delete o[f]; else o[f] = true; }
+    speichern(); render();
+  };
 }
 
 function tabMetzger(tn, ziel, zeige) {
