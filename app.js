@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.6.2';
+const APP_VERSION = '1.6.3';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -275,7 +275,8 @@ function viewBestellung(nr, q, vorlage) {
         mF.classList.remove('auto', 'schaetz', 'fehlt'); mF.readOnly = false;
         if (an > 0 && g > 0) { mF.value = fmtNum(an * g / 1000, 3); mF.classList.add('auto'); mF.readOnly = true; }
         else if (an > 0 && !(num(p.menge) > 0)) {
-          if (num(a.stueckG) > 0) { mF.value = fmtNum(an * a.stueckG / 1000, 3); mF.classList.add('schaetz'); mF.readOnly = true; }
+          const sg = posStueckG(S, a, p, Object.assign({}, o, { tier: o.tier || tierVorschlag(S, o.wunsch, o.pakete, o.nr) }));
+          if (sg > 0) { mF.value = fmtNum(an * sg / 1000, 3); mF.classList.add('schaetz'); mF.readOnly = true; }
           else { mF.value = ''; mF.classList.add('fehlt'); }
         } else if (warAuto) mF.value = has(p.menge) ? fmtNum(p.menge, 3) : ''; // Anzahl/g gelöscht → berechneten Wert entfernen
       }

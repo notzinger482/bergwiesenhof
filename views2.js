@@ -18,10 +18,11 @@ function docMenge(mp) {
 function docMetzger(ma) {
   const t = ma.tier;
   const bl = [{ type: 'h', text: 'Gesamtmengen' },
-    { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.kistenText ? `(${ma.hack.kistenText})` : ''], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', '']] }];
+    { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.kistenText ? `(${ma.hack.kistenText})` : ''], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', '']]
+      .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Namen siehe unten']] : []) }];
   if (ma.hack.ueberAusbeute) bl.push({ type: 'text', bold: true, text: 'Mehr Hackfleisch als üblich: zuerst Schulterstücke (Bug) auflösen, Keulenstücke als Braten behalten.' });
   if (ma.gulasch.insHack > 0.05) bl.push({ type: 'text', text: `Kein Gulasch bestellt: ca. ${fmtNum(ma.gulasch.insHack, 0)} kg Kamm/Hals ins Hackfleisch.` });
-  bl.push({ type: 'text', text: 'Hesse wie immer als Beinscheiben. Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
+  bl.push({ type: 'text', text: (ma.waden > 0 ? 'Übrige Hesse als Beinscheiben. ' : 'Hesse wie immer als Beinscheiben. ') + 'Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
     { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit Namen beschriften' },
     { type: 'table', head: ['Nr.', 'Name', 'Artikel', 'Menge', 'Hinweis'], widths: [1, 3.2, 3, 1.6, 3.6], align: ['r', '', '', 'r', ''], rows: ma.separat.map(s => [s.nr, s.name, s.art, s.menge, s.hinweis]), leer: '– keine –' });
   return { title: `Auftrag Metzger – ${t.name}`, sub: [abholTxt(t)], blocks: bl, footer: fussZeile() };
@@ -53,8 +54,8 @@ function docInnereien(ii) {
       { type: 'table', head: ['Innerei', 'vorhanden ca.', 'bestellt', 'Rest', 'Rest verarbeiten'], widths: [2, 1.5, 1.3, 1.2, 4], align: ['', 'r', 'r', 'r', ''],
         rows: ii.uebersicht.map(u => [u.art, fmtNum(u.vorhanden) + ' ' + u.einheit, fmtNum(u.bestellt, 3), fmtNum(u.rest, 3), u.txt]), rowClass: ii.uebersicht.map(u => u.rest < -1e-9 ? 'rot' : '') },
       { type: 'h', text: 'Bestellungen' },
-      { type: 'table', head: ['Nr.', 'Name', 'Leber kg', 'Leber verpacken', 'Nieren', 'Herz', 'Zunge', 'Ochsenschw.', 'vakuumieren', '✓'], widths: [0.8, 2.6, 1, 1.7, 0.9, 0.8, 0.8, 1.2, 1.7, 0.5], align: ['r', '', 'r', '', 'r', 'r', 'r', 'r', '', ''],
-        rows: ii.rows.map(r => [r.nr, r.name, fmtNum(r.leber, 3), r.leberAls, r.nieren || '', r.herz || '', r.zunge || '', r.ochs || '', r.vak, '☐']) },
+      { type: 'table', head: ['Nr.', 'Name', 'Leber kg', 'Leber verpacken', 'Nieren', 'Herz', 'Zunge', 'Bäckle', 'Ochsenschw.', 'vakuumieren', '✓'], widths: [0.8, 2.6, 1, 1.7, 0.9, 0.8, 0.8, 0.8, 1.2, 1.7, 0.5], align: ['r', '', 'r', '', 'r', 'r', 'r', 'r', 'r', '', ''],
+        rows: ii.rows.map(r => [r.nr, r.name, fmtNum(r.leber, 3), r.leberAls, r.nieren || '', r.herz || '', r.zunge || '', r.baeckle || '', r.ochs || '', r.vak, '☐']) },
       { type: 'text', text: '„vorhanden“ = Schätzwerte aus den Einstellungen (Innereien je Tier).' }], footer: fussZeile() };
 }
 function docPackliste(pl) {
@@ -448,6 +449,7 @@ function tabAusbeute(z) {
    <tr><td class="fett">Summe</td><td class="r fett">${fmtNum(sB * 100, 1)} %</td><td class="r fett">${fmtNum(sR * 100, 1)} %</td><td colspan="3"></td></tr></tbody></table></div>
    <p class="klein">Gilt für alle Tiere dieses Typs ohne eingetragenes Schlachtgewicht wie mit. Änderungen wirken sofort auf Mengenprüfung, Paketgewicht und Packplan.</p></div>
    <div class="karte"><h3 style="margin-top:0">Einzelgewichte <span class="klein">– Schätzwerte, bitte nachwiegen</span></h3>
+    <div class="zeile oben" style="margin-bottom:8px">${feld('maxWaden', 'Waden am Stück höchstens je Tier')}<p class="klein" style="max-width:420px;margin:22px 0 0">Gewicht einer Wade = Beinscheiben-Ausbeute ÷ Anzahl Waden: Rind ${fmtNum(wadeKg(S, null), 1)} kg, Bulle ${fmtNum(yieldArt(S, { typ: 'Bulle', sg: null }, 'Beinscheiben') / (num(st.maxWaden) || 4), 1)} kg.</p></div>
     <p class="klein">Damit wird überall gerechnet: Bestellungen nach Stück (z. B. „Steak 3“ = 3 × Stückgewicht), Genusspaket, Beutelgrößen der Knochen. Leer = Artikel wird nur nach kg bestellt.</p>
     <div class="tabwrap" style="max-width:640px"><table class="tab"><tbody>${S.artikel.map((a, i) => ({ a, i })).filter(({ a }) => !istOrgan(a.name)).map(({ a, i }) => { const btl = num(a.beutelG) > 0; return `<tr data-i="${i}"><td class="fett">${esc(a.name)}</td>
       <td style="width:130px"><input class="feld zahl" inputmode="numeric" data-ch="eg" data-f="${btl ? 'beutelG' : 'stueckG'}" value="${btl ? fmtNum(a.beutelG) : num(a.stueckG) > 0 ? fmtNum(a.stueckG) : ''}" placeholder="–"></td>
@@ -460,7 +462,7 @@ function tabAusbeute(z) {
    <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">
     ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Innereien je Tier (werden vorab separat geholt)</h3><div class="zeile oben">
-    ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('ochsStk', 'Ochsenschwanz ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>`;
+    ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('baeckleStk', 'Bäckle ca. (Stk)')}${feld('ochsStk', 'Ochsenschwanz ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>`;
   ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
   ui.acts.eg = el => {
     const a = S.artikel[+el.closest('tr').dataset.i], f = el.dataset.f, v = num(el.value);

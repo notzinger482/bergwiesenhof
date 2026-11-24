@@ -3,7 +3,8 @@
 // Reine Funktionen auf dem Datenstand "S" (state) – keine Oberfläche.
 'use strict';
 
-const ORGANE = ['Leber', 'Nieren', 'Herz', 'Zunge', 'Ochsenschwanz'];
+const ORGANE = ['Leber', 'Nieren', 'Herz', 'Zunge', 'Bäckle', 'Ochsenschwanz'];
+const BEIN = 'Beinscheiben';
 const HACK = 'Hackfleisch';
 const GULASCH = 'Gulasch geschnitten';
 const BRATEN = 'Braten';
@@ -65,6 +66,15 @@ const paketListe = S => Array.isArray(S.settings.paket) ? S.settings.paket.filte
 // Einzelgewicht eines Artikels (Stückgewicht bzw. Beutelgröße aus der Preisliste) – gilt auch im Genusspaket
 const einzelGewicht = (S, name) => { const a = art(S, name); return !a ? 0 : num(a.beutelG) > 0 ? num(a.beutelG) : num(a.stueckG) > 0 ? num(a.stueckG) : 0; };
 const paketG = (S, p) => einzelGewicht(S, p.art) || num(p.g);
+// Beinscheiben „am Stück“ = ganze Wade (Anzahl = Waden)
+const istWade = (a, p) => a && a.name === BEIN && a.amStueck && p && p.amStueck;
+// Gewicht einer Wade = Beinscheiben-Ausbeute des Tiers ÷ Waden je Tier (ohne Tier: Standard-Rind)
+const wadeKg = (S, tierName) => {
+  const t = (tierName && S.tiere.find(x => sameText(x.name, tierName))) || { typ: 'Rind', sg: null };
+  const n = has(S.settings.maxWaden) && num(S.settings.maxWaden) > 0 ? num(S.settings.maxWaden) : 4;
+  return yieldArt(S, t, BEIN) / n;
+};
+const posStueckG = (S, a, p, o) => istWade(a, p) ? wadeKg(S, o && o.tier) * 1000 : num(a.stueckG);
 const gText = g => g >= 1000 ? fmtNum(g / 1000, 2) + ' kg' : fmtNum(g) + ' g';
 const paketKgArt = (S, name) => paketListe(S).filter(p => p.art === name).reduce((s, p) => s + num(p.anzahl) * paketG(S, p) / 1000, 0);
 const paketGewicht = S => paketListe(S).reduce((s, p) => s + num(p.anzahl) * paketG(S, p) / 1000, 0);
@@ -93,7 +103,7 @@ function qty(S, o, name) {
   if (a.einheit === 'Stk') return num(p.menge);
   if (num(p.menge) > 0) return num(p.menge);
   if (num(p.anzahl) > 0) {
-    const g = num(p.g) > 0 ? num(p.g) : num(a.stueckG);
+    const g = num(p.g) > 0 ? num(p.g) : posStueckG(S, a, p, o);
     if (g > 0) return r3(num(p.anzahl) * g / 1000);
   }
   return 0;
@@ -105,8 +115,9 @@ function sonderOf(S, o) {
     const p = o.pos && o.pos[a.name];
     if (p && p.amStueck && a.amStueck) {
       const q = qty(S, o, a.name);
-      let w = 'am Stück';
-      if (num(p.anzahl) > 0) w += ` (${fmtNum(p.anzahl)} Stück${num(p.g) > 0 ? ' à ' + fmtNum(p.g) + ' g' : ''})`;
+      let w = istWade(a, p) ? 'Wade am Stück' : 'am Stück';
+      if (istWade(a, p)) { if (num(p.anzahl) > 0) w = `${fmtNum(p.anzahl)} ${num(p.anzahl) > 1 ? 'Waden' : 'Wade'} am Stück`; }
+      else if (num(p.anzahl) > 0) w += ` (${fmtNum(p.anzahl)} Stück${num(p.g) > 0 ? ' à ' + fmtNum(p.g) + ' g' : ''})`;
       out.push({ art: a.name, menge: q > 0 ? q : null, wunsch: w, auto: true });
     }
   }
@@ -128,8 +139,8 @@ function portionenOf(S, o) {
       out.push({ art: a.name, anzahl: num(p.menge), g: a.beutelG, text: `${fmtNum(p.menge)} × ${fmtNum(a.beutelG)} g`, kg: r3(num(p.menge) * a.beutelG / 1000) });
     } else if (a.einheit !== 'Stk' && num(p.anzahl) > 0) {
       const g = num(p.g);
-      const kgG = g > 0 ? g : num(a.stueckG);
-      out.push({ art: a.name, anzahl: num(p.anzahl), g: g || null, text: g > 0 ? `${fmtNum(p.anzahl)} × ${fmtNum(g)} g` : `${fmtNum(p.anzahl)} Stück`, kg: kgG > 0 ? r3(num(p.anzahl) * kgG / 1000) : 0 });
+      const kgG = g > 0 ? g : posStueckG(S, a, p, o);
+      out.push({ art: a.name, anzahl: num(p.anzahl), g: g || null, text: g > 0 ? `${fmtNum(p.anzahl)} × ${fmtNum(g)} g` : istWade(a, p) ? `${fmtNum(p.anzahl)} ${num(p.anzahl) > 1 ? 'Waden' : 'Wade'} am Stück` : `${fmtNum(p.anzahl)} Stück`, kg: kgG > 0 ? r3(num(p.anzahl) * kgG / 1000) : 0 });
     }
   }
   return out;
@@ -189,7 +200,8 @@ function formFehler(S, o) {
     const m = num(p.menge), an = num(p.anzahl), g = num(p.g);
     if (m > 0 && an > 0 && g > 0 && Math.abs(an * g / 1000 - m) > 0.01)
       f.push(`${a.name}: ${fmtNum(an)} × ${fmtNum(g)} g = ${fmtNum(an * g / 1000, 3)} kg, eingetragen sind aber ${fmtNum(m, 3)} kg`);
-    if (!(m > 0) && !(g > 0) && an > 0 && !(num(a.stueckG) > 0))
+    if (istWade(a, p) && !(an > 0)) f.push(`${a.name} am Stück (Wade): bitte die Anzahl Waden eintragen`);
+    if (!(m > 0) && !(g > 0) && an > 0 && !(posStueckG(S, a, p, o) > 0))
       f.push(`${a.name}: ${fmtNum(an)} Stück, aber kein Stückgewicht in der Preisliste – bitte g je Stück oder Menge in kg eintragen`);
   }
   // Sonderwünsche müssen durch die Bestellung gedeckt sein (die Menge gehört auch rechts in die Bestellung)
@@ -419,8 +431,13 @@ function mengencheckTier(S, tierName) {
   const nen = num(S.settings.nenner) || 16;
   const ords = ordersOfTier(S, t.name);
   const bil = fleischBilanz(S, t, ords);
+  const maxW = has(S.settings.maxWaden) ? num(S.settings.maxWaden) : 4;
+  let waden = 0;
   for (const o of ords) {
     const f = Object.keys(bil.fehlt[o.nr] || {});
+    const pw = o.pos && o.pos[BEIN], w = istWade(art(S, BEIN), pw) ? num(pw.anzahl) : 0;
+    waden += w;
+    if (w > 0 && waden > maxW) f.push(`Wade am Stück (max. ${maxW} je Tier)`);
     if (bil.pakUeber[o.nr]) f.unshift('Genusspakete (' + bil.pakUeber[o.nr].join(', ') + ')');
     out[o.nr] = f.length ? 'reicht nicht: ' + f.join(', ') : 'ok';
   }
@@ -533,7 +550,8 @@ function metzgerauftrag(S, tierName) {
     const a = art(S, s.art);
     separat.push({ nr: o.nr, name: o.name, art: s.art, menge: has(s.menge) ? fmtNum(s.menge, 3) + ' ' + (a ? a.einheit : '') : '', hinweis: s.wunsch });
   }
-  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat };
+  const waden = ords.reduce((s, o) => { const p = o.pos && o.pos[BEIN]; return s + (istWade(art(S, BEIN), p) ? num(p.anzahl) : 0); }, 0);
+  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, waden };
 }
 
 // ---------- Packplan (Makro PackplanFuer) ----------
@@ -862,7 +880,7 @@ function innereien(S, tierName) {
   const st = S.settings;
   const ords = ordersOfTier(S, t.name);
   const lp = num(st.leberPortionG) || 500;
-  const vorh = { Leber: num(st.leberKg), Nieren: num(st.nierenStk), Herz: num(st.herzStk), Zunge: num(st.zungeStk), Ochsenschwanz: num(st.ochsStk) };
+  const vorh = { Leber: num(st.leberKg), Nieren: num(st.nierenStk), Herz: num(st.herzStk), Zunge: num(st.zungeStk), 'Bäckle': has(st.baeckleStk) ? num(st.baeckleStk) : 2, Ochsenschwanz: num(st.ochsStk) };
   const uebersicht = ORGANE.map(n => {
     const best = ords.reduce((s, o) => s + qty(S, o, n), 0);
     const rest = vorh[n] - best;
@@ -882,7 +900,7 @@ function innereien(S, tierName) {
     const po = portionOf(S, o, 'Leber');
     const lq = qty(S, o, 'Leber');
     return { nr: o.nr, name: o.name, leber: lq || null, leberAls: lq > 0 ? (po ? po.text : fmtNum(lq, 3) + ' kg') : '',
-      nieren: qty(S, o, 'Nieren') || null, herz: qty(S, o, 'Herz') || null, zunge: qty(S, o, 'Zunge') || null, ochs: qty(S, o, 'Ochsenschwanz') || null,
+      nieren: qty(S, o, 'Nieren') || null, herz: qty(S, o, 'Herz') || null, zunge: qty(S, o, 'Zunge') || null, baeckle: qty(S, o, 'Bäckle') || null, ochs: qty(S, o, 'Ochsenschwanz') || null,
       vak: v.length ? v.join(' ') : 'nein' };
   });
   return { tier: t, uebersicht, rows };
@@ -961,6 +979,13 @@ function standPruefen(x) {
     }
     x.schema = 4;
   }
+  // Version 1.6.3: Bäckle als Innerei (wie Zunge), ca. 2 Stück je Tier
+  if (!(x.artikel || []).some(a => a.name === 'Bäckle')) {
+    const i = x.artikel.findIndex(a => a.name === 'Zunge');
+    const neu = { name: 'Bäckle', einheit: 'Stk', preis: 0, inPaket: false, stueckG: 0, amStueck: false, beutelG: 0, anteil: 0, teile: '', anteilRind: 0 };
+    x.artikel.splice(i >= 0 ? i + 1 : x.artikel.length, 0, neu);
+  }
+  if (!has(x.settings.baeckleStk)) x.settings.baeckleStk = 2;
   return x;
 }
 

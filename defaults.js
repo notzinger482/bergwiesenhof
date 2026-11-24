@@ -103,7 +103,7 @@ const DEFAULTS = {
    "preis": 10,
    "inPaket": true,
    "stueckG": 400,
-   "amStueck": false,
+   "amStueck": true,
    "beutelG": 0,
    "anteil": 0.041,
    "teile": "Vorder- und Hinterhesse",
@@ -194,6 +194,18 @@ const DEFAULTS = {
    "anteilRind": 0
   },
   {
+   "name": "Bäckle",
+   "einheit": "Stk",
+   "preis": 0,
+   "inPaket": false,
+   "stueckG": 0,
+   "amStueck": false,
+   "beutelG": 0,
+   "anteil": 0,
+   "teile": "",
+   "anteilRind": 0
+  },
+  {
    "name": "Ochsenschwanz",
    "einheit": "Stk",
    "preis": 12,
@@ -238,6 +250,8 @@ const DEFAULTS = {
   "nierenStk": 2,
   "herzStk": 1,
   "zungeStk": 1,
+  "baeckleStk": 2,
+  "maxWaden": 4,
   "ochsStk": 1,
   "leberPortionG": 500,
   "hofZeile": "Bergwiesenhof Bempflingen · Bernd & Claudia Huber · Tel. 07123 / 31543",
