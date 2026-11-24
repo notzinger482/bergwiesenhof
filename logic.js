@@ -249,10 +249,55 @@ function sonderOf(S, o) {
       out.push({ art: a.name, menge: q > 0 ? q : null, wunsch: w, auto: true });
     }
   }
-  for (const s of (o.sonder || [])) if (s && s.art) out.push({ art: s.art, menge: has(s.menge) ? num(s.menge) : null, sorte: s.art === HACK && HACK_SORTEN[s.sorte] ? s.sorte : '',
-    wunsch: [s.art === HACK && HACK_SORTEN[s.sorte] ? HACK_SORTEN[s.sorte] : '', s.wunsch || ''].filter(Boolean).join(' – ') });
+  for (const s of (o.sonder || [])) if (s && s.art) {
+    const teil = s.art === BRATEN && s.teil && bratenTeile(S).some(x => x.name === s.teil) ? s.teil : '';
+    const nG = num(s.ganz) > 0 && ganzArt(S, s.art) && (s.art !== BRATEN || teil) ? Math.round(num(s.ganz)) : 0;
+    let menge = has(s.menge) ? num(s.menge) : null, ca = false;
+    if (nG) { const g = ganzStueckKg(S, o.tier, s.art, teil); if (g) { menge = r3(nG * g.kg); ca = true; } }
+    const teilTxt = nG ? (s.art === BRATEN ? `${nG === 1 ? '1 ganzes Stück' : nG + '× ganzes Stück'} ${teil}` : `${nG === 1 ? '1 ganzes' : nG + '× ganzes'} ${s.art}`) : teil ? 'aus ' + teil : '';
+    out.push({ art: s.art, menge, ca, teil, ganz: nG, sorte: s.art === HACK && HACK_SORTEN[s.sorte] ? s.sorte : '',
+      wunsch: [s.art === HACK && HACK_SORTEN[s.sorte] ? HACK_SORTEN[s.sorte] : '', teilTxt, s.wunsch || ''].filter(Boolean).join(' – ') });
+  }
   return out;
 }
+// Braten-Teilstück / ganzes Stück beim Sonderwunsch (seit 3.2, Wunsch Nutzer): Braten aus einem bestimmten Teilstück (kg oder
+// ganzes Stück), dazu ganze Stücke bei Artikeln mit „ganzeStuecke“ (Filet, Tafelspitz). Gewicht eines ganzen Stücks geschätzt.
+const ganzArt = (S, name) => { const a = art(S, name); return !!a && (name === BRATEN ? bratenTeile(S).length > 0 : num(a.ganzeStuecke) > 0); };
+function ganzStueckKg(S, tierName, artName, teil) {
+  const t0 = tierName && tierName !== 'Warteliste' ? tier(S, tierName) : null, typ = t0 && t0.typ ? t0.typ : 'Rind';
+  if (artName === BRATEN) {
+    const x = bratenTeile(S).find(x => x.name === teil); if (!x) return null;
+    const g = bratenTeileKg(S, typ), f = t0 && g > 0 ? yieldArt(S, t0, BRATEN) / g : 1;
+    const kg = teilKg(x, typ, S) * (f > 0 ? f : 1);
+    return { kg, min: num(x.kgMin) > 0 ? Math.min(num(x.kgMin), kg) : kg * 0.75 };
+  }
+  const a = art(S, artName); if (!a || !(num(a.ganzeStuecke) > 0)) return null;
+  let kg = t0 ? yieldArt(S, t0, artName) / num(a.ganzeStuecke) : 0;
+  if (!(kg > 0)) kg = num(a.stkMin) > 0 && num(a.stkMax) > 0 ? (num(a.stkMin) + num(a.stkMax)) / 2 : 1;
+  return { kg, min: num(a.stkMin) > 0 ? Math.min(num(a.stkMin), kg) : kg * 0.75 };
+}
+// Teilstück-/Ganz-Wünsche gegen das, was das Tier (der Topf) hergibt – der Reihe nach: {nr: [Text]}
+function ganzWunschFehlt(S, t, ords) {
+  const out = {}, nT = topfN(t), typ = t.typ || 'Rind', used = {};
+  const g = bratenTeileKg(S, typ) * nT, fB = g > 0 ? yieldArt(S, t, BRATEN) / g : 1;
+  for (const o of ords) for (const s of sonderOf(S, o)) {
+    let key, maxN, stKg, txt;
+    if (s.art === BRATEN && s.teil) {
+      const x = bratenTeile(S).find(x => x.name === s.teil); if (!x) continue;
+      key = 'B|' + x.name; maxN = num(x.stueck) * nT; stKg = teilKg(x, typ, S) * fB;
+      txt = s.ganz ? `ganzes Stück ${x.name} (max. ${fmtNum(maxN)} Stück)` : `Braten aus ${x.name} (max. ca. ${fmtNum(maxN * stKg, 1)} kg)`;
+    } else if (s.ganz) {
+      const a = art(S, s.art); key = 'G|' + s.art; maxN = num(a.ganzeStuecke) * nT; stKg = maxN > 0 ? yieldArt(S, t, s.art) / maxN : 0;
+      txt = `ganzes ${s.art} (max. ${fmtNum(maxN)} Stück)`;
+    } else continue;
+    const u = used[key] = used[key] || { n: 0, kg: 0 };
+    if (s.ganz) { u.n += s.ganz; u.kg += s.ganz * stKg; } else u.kg += num(s.menge);
+    if (u.n > maxN || u.kg > maxN * stKg + 0.001) { const l = out[o.nr] = out[o.nr] || []; if (!l.includes(txt)) l.push(txt); }
+  }
+  return out;
+}
+// kg Braten, die eine Bestellung ausdrücklich aus dem Bug (Bug-Teilstück) wünscht
+const bugWunsch = (S, o) => sonderOf(S, o).filter(s => s.art === BRATEN && s.teil && (bratenTeile(S).find(x => x.name === s.teil) || {}).bug).reduce((t, s) => t + num(s.menge), 0);
 const specSum = (S, o, name) => sonderOf(S, o).filter(s => s.art === name).reduce((t, s) => t + num(s.menge), 0);
 // Hack-Sorte beim Sonderwunsch (seit 3.0.5, Regel Nutzer): „fettig“ = Siedfleisch-Anteil (Standard 50 %) + Rest Hack-Material,
 // „mager“ = reines Bugstück (aus dem Bug des Bratens). Die Menge bleibt Hackfleisch in der Bestellung (Preis, Sonderfall),
@@ -275,7 +320,7 @@ function sortenAdj(S, o, name) {
 }
 const sonderText = (S, s) => {
   const a = art(S, s.art);
-  return (has(s.menge) ? fmtNum(s.menge, 3) + ' ' + (a ? a.einheit : '') + ' ' : '') + s.art + (s.wunsch ? ' – ' + s.wunsch : '');
+  return (has(s.menge) ? (s.ca ? 'ca. ' + fmtNum(s.menge, 1) : fmtNum(s.menge, 3)) + ' ' + (a ? a.einheit : '') + ' ' : '') + s.art + (s.wunsch ? ' – ' + s.wunsch : '');
 };
 // Packungen frei eingeben (seit 2.3): „2x500+2x700“ (g), „1500+1700“, „1,5kg+1,7kg“, „4+4 Stk“ oder „2x4 Stk“ (Stück je Packung).
 // Ganze Zahlen unter 20 ohne Einheit gelten als Stück, ab 20 als Gramm, Kommazahlen unter 20 als kg.
@@ -437,6 +482,7 @@ function formFehler(S, o) {
   const geprueft = new Set();
   for (const s of (o.sonder || [])) {
     if (!s || !s.art) continue;
+    if (s.art === BRATEN && num(s.ganz) > 0 && !s.teil) f.push('Sonderwunsch Braten „ganzes Stück“: bitte das Teilstück wählen');
     const a = art(S, s.art);
     if (!a) { f.push(`Sonderwunsch: Artikel „${s.art}“ unbekannt`); continue; }
     if (geprueft.has(s.art)) continue;
@@ -444,11 +490,13 @@ function formFehler(S, o) {
     const q = qty(S, o, s.art);
     const eh = a.beutelG > 0 ? 'kg' : a.einheit;
     if (!(q > 0)) { f.push(`Sonderwunsch ${s.art}: der Artikel ist in der Bestellung nicht eingetragen – bitte die Menge auch rechts bei „${s.art}“ eintragen`); continue; }
-    const sum = specSum(S, o, s.art); // eingetragene Sonderwünsche + „am Stück“
+    // eingetragene Sonderwünsche + „am Stück“; ganze Stücke zählen mit ihrem Mindestgewicht
+    const L = sonderOf(S, o).filter(x => x.art === s.art), mitGanz = L.some(x => x.ganz);
+    const sum = L.reduce((t, x) => t + (x.ganz ? x.ganz * ((ganzStueckKg(S, o.tier, x.art, x.teil) || {}).min || 0) : num(x.menge)), 0);
     if (sum > q + 0.001) {
       const amSt = o.pos && o.pos[s.art] && o.pos[s.art].amStueck && a.amStueck;
-      f.push(`Sonderwunsch ${s.art}: ${fmtNum(sum, 3)} ${eh} als Sonderfall, bestellt sind aber nur ${fmtNum(q, 3)} ${eh}` +
-        (amSt ? ' („am Stück“ zählt schon die ganze Menge als Sonderfall)' : ''));
+      f.push(`Sonderwunsch ${s.art}: ${fmtNum(sum, mitGanz ? 1 : 3)} ${eh} als Sonderfall${mitGanz ? ' (ganze Stücke mit Mindestgewicht)' : ''}, bestellt sind aber nur ${fmtNum(q, 3)} ${eh}` +
+        (amSt ? ' („am Stück“ zählt schon die ganze Menge als Sonderfall)' : '') + (mitGanz ? ` – bitte rechts bei „${s.art}“ mindestens ${fmtNum(Math.ceil(sum * 10) / 10, 1)} kg eintragen` : ''));
     }
   }
   if (num(o.pakVak) > num(o.pakete)) f.push('Mehr vakuumierte Pakete als Genusspakete');
@@ -649,6 +697,10 @@ function fleischBilanz(S, t, ords) {
     // mageres Hack: reines Bugstück – kommt zuerst aus dem Bug
     const hs = hackSorten(S, o);
     if (hs.mager > 0) { const b = Math.min(hs.mager, Math.max(0, bug)); bug -= b; bugMager += b; if (hs.mager - b > 0.001) f[HACK] = (f[HACK] || 0) + hs.mager - b; }
+    // Braten ausdrücklich aus dem Bug (Teilstück-Wunsch): kommt aus dem Bug, nicht aus der Keule
+    let bratenBug = 0;
+    const bw = Math.min(bugWunsch(S, o), qty(S, o, BRATEN));
+    if (bw > 0) { bratenBug = Math.min(bw, Math.max(0, bug)); bug -= bratenBug; bugFuerBraten += bratenBug; }
     for (const name of Object.keys(topf)) {
       let q = qty(S, o, name) + (name === HACK ? -(hs.sied + hs.mager) : name === SIED ? hs.sied : 0);
       if (!(q > 0)) continue;
@@ -656,6 +708,7 @@ function fleischBilanz(S, t, ords) {
         const a = Math.min(q, Math.max(0, hackTopf)); hackTopf -= a; q -= a;
         const b = Math.min(q, Math.max(0, bug)); bug -= b; bugInsHack += b; q -= b;
       } else if (name === BRATEN) {
+        q -= bratenBug;
         const a = Math.min(q, Math.max(0, keule)); keule -= a; q -= a;
         const b = Math.min(q, Math.max(0, bug)); bug -= b; bugFuerBraten += b; q -= b;
       } else {
@@ -703,11 +756,12 @@ function mengencheckTier(S, tierName) {
 function mengencheckT(S, t) {
   const out = {};
   const ords = ordersOfTopf(S, t);
-  const bil = fleischBilanz(S, t, ords);
+  const bil = fleischBilanz(S, t, ords), gw = ganzWunschFehlt(S, t, ords);
   const maxW = (has(S.settings.maxWaden) ? num(S.settings.maxWaden) : 4) * topfN(t);
   let waden = 0;
   for (const o of ords) {
     const f = Object.keys(bil.fehlt[o.nr] || {});
+    if (gw[o.nr]) f.push(...gw[o.nr]);
     const pw = o.pos && o.pos[BEIN], w = istWade(art(S, BEIN), pw) ? num(pw.anzahl) : 0;
     waden += w;
     if (w > 0 && waden > maxW) f.push(`Wade am Stück (max. ${maxW}${t.glieder ? ' bei ' + t.name : ' je Tier'})`);
@@ -754,6 +808,7 @@ function fehlDetail(S, o) {
   // Fehlmengen ohne eigene Zeile (z. B. Siedfleisch für fettiges Hack)
   for (const [k, fe] of Object.entries(f)) if (fe > 0.001 && !zeilen.some(z => z.art === k)) sonst.push(`${k} −${fmtNum(fe, 1)} kg${k === SIED ? ' (für fettiges Hack)' : ''}`);
   if (bil.pakUeber[key]) sonst.push('Genusspakete (' + bil.pakUeber[key].join(', ') + ')');
+  sonst.push(...(ganzWunschFehlt(S, t, ords)[key] || []));
   const maxW = (has(S.settings.maxWaden) ? num(S.settings.maxWaden) : 4) * topfN(t);
   let waden = 0;
   for (const x of ords) {
@@ -1127,7 +1182,7 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   const separat = [];
   for (const o of ords) for (const s of sonderOf(S, o)) {
     const a = art(S, s.art);
-    separat.push({ nr: o.nr, name: o.name, art: s.art, menge: has(s.menge) ? fmtNum(s.menge, 3) + ' ' + (a ? a.einheit : '') : '', hinweis: s.wunsch });
+    separat.push({ nr: o.nr, name: o.name, art: s.art, menge: has(s.menge) ? (s.ca ? 'ca. ' + fmtNum(s.menge, 1) : fmtNum(s.menge, 3)) + ' ' + (a ? a.einheit : '') : '', hinweis: s.wunsch });
   }
   const waden = ords.reduce((s, o) => { const p = o.pos && o.pos[BEIN]; return s + (istWade(art(S, BEIN), p) ? num(p.anzahl) : 0); }, 0);
   const ochsB = ords.reduce((s, o) => s + qty(S, o, OCHS), 0);
@@ -1397,6 +1452,18 @@ function packplanKisten(S, tierName, f = 1) {
         const y = yieldArt(S, t, a.art), gz = ganze * nT0;
         for (let n = 0; n < gz; n++) stuecke.push({ name: a.art, kg: y / gz, bug: false });
       }
+      // Sonderwünsche: ganze Stücke und kg aus einem Teilstück liegen beim Sonderfall – diese Stücke gehen hier ab
+      for (const o of ords) for (const s of sonderOf(S, o)) {
+        if (s.art !== a.art) continue;
+        const nm = a.art === BRATEN ? s.teil : a.art;
+        if (!nm) continue;
+        if (s.ganz) { for (let n = 0; n < s.ganz; n++) { const x = stuecke.find(x => x.name === nm && !x.weg); if (x) x.weg = true; } }
+        else if (a.art === BRATEN) {
+          let r = num(s.menge);
+          for (const x of stuecke.filter(x => x.name === nm && !x.weg).sort((p, q) => p.kg - q.kg)) { if (r <= 0) break; const d = Math.min(r, x.kg); x.kg -= d; r -= d; if (x.kg < 0.3) x.weg = true; }
+        }
+      }
+      stuecke = stuecke.filter(s => !s.weg);
       let insHack = ma.hack.ausBug;
       for (const s of stuecke.filter(s => s.bug).sort((p, q) => q.kg - p.kg)) if (insHack > s.kg / 2) { s.weg = true; insHack -= s.kg; }
       stuecke = stuecke.filter(s => !s.weg);
@@ -2049,7 +2116,7 @@ function standPruefen(x) {
 
 if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
-  art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
+  art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, topfTier, topfAus, topfN, ordersOfTopf, tierAnzeige, kistenKontext, abschlussNamen, mengencheckT, TOPF_SEP, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,
