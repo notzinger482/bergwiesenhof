@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.7.0';
+const APP_VERSION = '1.8.0';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -90,11 +90,11 @@ function render() {
   const seite = teile[0] || 'start';
   ui.acts = {}; ui.ins = {};
   if (seite !== 'neu' && seite !== 'bestellung') ui.formDirty = false;
-  const navKey = seite === 'bestellung' ? 'bestellungen' : seite === 'kunde' ? 'kunden' : seite === 'tier' ? 'tiere' : seite === 'warteliste' ? 'bestellungen' : seite;
+  const navKey = seite === 'bestellung' ? 'bestellungen' : seite === 'kunde' ? 'kunden' : seite === 'tier' || seite === 'archiv' ? 'tiere' : seite === 'warteliste' ? 'bestellungen' : seite;
   navRender(navKey);
   const V = {
     start: viewStart, neu: () => viewBestellung(null, q), bestellung: () => viewBestellung(+teile[1], q), bestellungen: viewBestellungen,
-    kunden: viewKunden, kunde: () => viewKunde(teile[1]), tiere: viewTiere, tier: () => viewTier(teile[1]),
+    kunden: viewKunden, kunde: () => viewKunde(teile[1]), tiere: viewTiere, archiv: viewArchiv, tier: () => viewTier(teile[1]),
     schlachttag: () => viewSchlachttag(teile[1] || 'menge', q), kommissionierung: () => viewKommissionierung(q),
     hofladen: viewHofladen, warteliste: viewWarteliste, einstellungen: () => viewEinstellungen(teile[1] || 'daten')
   };
@@ -113,12 +113,13 @@ document.addEventListener('change', e => { const el = e.target.closest('[data-ch
 
 // ---------- Hilfen für Formulare ----------
 const opt = (v, t, sel) => `<option value="${esc(v)}"${sel ? ' selected' : ''}>${esc(t)}</option>`;
-const tiereSortiert = () => S.tiere.slice().sort((a, b) => (a.abhol || '9999').localeCompare(b.abhol || '9999') || a.name.localeCompare(b.name));
+const tiereSortiert = () => S.tiere.filter(t => !t.archiv).sort((a, b) => (a.abhol || '9999').localeCompare(b.abhol || '9999') || a.name.localeCompare(b.name));
 function standardTier() {
   if (ui.tierWahl && tier(S, ui.tierWahl)) return ui.tierWahl;
   const heute = todayISO();
   const t = tiereSortiert().find(t => t.abhol && t.abhol >= isoOf(new Date(Date.now() - 10 * 864e5)));
-  return t ? t.name : (S.tiere[0] ? S.tiere[0].name : '');
+  const aktiv = tiereSortiert();
+  return t ? t.name : (aktiv[0] ? aktiv[0].name : '');
 }
 const statusMarke = s => s === 'abgeholt' ? '<span class="marke blau">abgeholt</span>' : s === 'gepackt' ? '<span class="marke gruen">gepackt</span>' : '<span class="marke">offen</span>';
 function checkMarke(txt) {
@@ -132,6 +133,7 @@ function tierOptionen(gewaehlt, mitAuto, vorschlag) {
   for (const t of tiereSortiert()) h += opt(t.name, `${t.name}${t.abhol ? ' – Abholung ' + fmtDate(t.abhol) : ''}`, gewaehlt === t.name);
   h += opt('Warteliste', 'Warteliste', gewaehlt === 'Warteliste');
   if (gewaehlt && gewaehlt !== 'Warteliste' && !tier(S, gewaehlt)) h += opt(gewaehlt, gewaehlt + ' (unbekannt)', true);
+  else if (gewaehlt && tier(S, gewaehlt) && tier(S, gewaehlt).archiv) h += opt(gewaehlt, gewaehlt + ' (Archiv)', true);
   return h;
 }
 
@@ -528,8 +530,8 @@ function viewKunde(id) {
 // =====================================================================
 function viewTiere() {
   titel('Tiere');
-  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Tiere</h1><a class="btn haupt" href="#/tier/neu">+ Neues Tier</a></div>
-    ${S.tiere.length ? '' : '<div class="karte">Noch keine Tiere angelegt.</div>'}
+  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Tiere</h1><a class="btn" href="#/archiv">Archiv (${S.tiere.filter(t => t.archiv).length})</a><a class="btn haupt" href="#/tier/neu">+ Neues Tier</a></div>
+    ${tiereSortiert().length ? '' : '<div class="karte">Keine aktiven Tiere angelegt.</div>'}
     <div class="tabwrap"><table class="tab"><thead><tr><th>Tier</th><th>Typ</th><th>Ohrmarke / Notiz</th><th>Schlachtung</th><th>Abholung</th><th class="r">SG (kg)</th><th class="r">Paket ca.</th><th class="r">Pakete bestellt / frei</th><th class="r">Bestellungen</th><th>Mengen</th></tr></thead><tbody>
     ${tiereSortiert().map(t => { const i = tierInfo(S, t); return `<tr class="klick ${i.reichtNicht ? 'rot' : ''}" data-act="oeffnen" data-t="${esc(t.name)}"><td class="fett">${esc(t.name)}</td><td>${esc(t.typ)}</td><td>${esc(t.notiz)}</td><td>${fmtDate(t.schlacht)}</td><td>${fmtDate(t.abhol) || 'offen'}</td><td class="r">${fmtNum(i.sg)}${num(t.sg) ? '' : ' <span class="klein">(Std.)</span>'}</td><td class="r">${fmtNum(i.paketKg, 1)} kg</td><td class="r">${fmtNum(i.pakete)} / <b class="${i.frei < 0 ? 'warn' : ''}">${fmtNum(i.frei)}</b></td><td class="r">${i.anzahl}</td><td>${i.reichtNicht ? `<span class="marke rot">${i.reichtNicht} reicht nicht</span>` : i.anzahl ? '<span class="marke gruen">ok</span>' : ''}</td></tr>`; }).join('')}
     </tbody></table></div>`;
@@ -539,14 +541,14 @@ function viewTier(name) {
   const neu = name === 'neu';
   const t0 = neu ? null : tier(S, name);
   if (!neu && !t0) { inhalt().innerHTML = '<div class="fehlerbox">Tier nicht gefunden.</div>'; return; }
-  const t = t0 ? { ...t0 } : { name: '', notiz: '', typ: 'Rind', sg: null, schlacht: '', abhol: '' };
-  titel(neu ? 'Neues Tier' : 'Tier ' + t.name);
+  const t = t0 ? { ...t0 } : { name: '', notiz: '', typ: 'Rind', sg: null, schlacht: '', abhol: '', kommentar: '' };
+  titel(neu ? 'Neues Tier' : (t0.archiv ? 'Archiv – ' : 'Tier ') + t.name);
   const info = () => {
     if (neu) return 'Neues Tier – Name eintragen und speichern.';
     const i = tierInfo(S, t0);
     return `Rechnung mit <b>${fmtNum(i.sg)} kg</b> Schlachtgewicht · Paket ca. <b>${fmtNum(i.paketKg, 1)} kg</b><br>Pakete bestellt: <b>${fmtNum(i.pakete)}</b> · noch frei: <b class="${i.frei < 0 ? 'warn' : ''}">${fmtNum(i.frei)}</b><br>Bestellungen: <b>${i.anzahl}</b> · davon reicht nicht: <b class="${i.reichtNicht ? 'warn' : ''}">${i.reichtNicht}</b>`;
   };
-  inhalt().innerHTML = `<h1>${neu ? 'Neues Tier' : 'Tier ' + esc(t.name)}</h1>
+  inhalt().innerHTML = `<h1>${neu ? 'Neues Tier' : 'Tier ' + esc(t.name)}${t0 && t0.archiv ? ` <span class="marke blau" style="font-size:15px">Archiv seit ${fmtDate(t0.archiv)}</span>` : ''}</h1>
    <div class="spalten2"><div class="karte"><div class="formraster">
     <label class="f ganz">Name / Nr.<input class="feld" data-in="t" data-f="name" value="${esc(t.name)}"></label>
     <label class="f ganz">Ohrmarke / Notiz<input class="feld" data-in="t" data-f="notiz" value="${esc(t.notiz || '')}"></label>
@@ -554,10 +556,25 @@ function viewTier(name) {
     <label class="f">Schlachtgewicht (kg, leer = Standard ${fmtNum(t.typ === 'Bulle' ? S.settings.sgBulle : S.settings.sgRind)})<input class="feld zahl" inputmode="decimal" data-in="t" data-f="sg" value="${has(t.sg) ? fmtIn(t.sg, 1) : ''}"></label>
     <label class="f">Schlachttermin<input class="feld" type="date" data-in="t" data-f="schlacht" value="${esc(t.schlacht || '')}"></label>
     <label class="f">Abholtermin<input class="feld" type="date" data-in="t" data-f="abhol" value="${esc(t.abhol || '')}"></label>
+    <label class="f ganz">Kommentar / Notizen<textarea class="feld" rows="3" data-in="t" data-f="kommentar" placeholder="z. B. sehr fett, Bug klein ausgefallen">${esc(t.kommentar || '')}</textarea></label>
+    ${neu ? '' : `<label class="zeile ganz" style="gap:10px"><input type="checkbox" data-in="t" data-f="ohneStatistik" style="width:24px;height:24px"${t.ohneStatistik ? ' checked' : ''}> nicht in die Ausbeute-Statistik übernehmen <span class="klein">(z. B. Ausreißer)</span></label>`}
    </div><div class="hinweis" style="margin-top:14px;margin-bottom:0">${info()}</div>
-   <div class="knopfleiste" style="margin-top:14px"><button class="btn haupt" data-act="speichern">Speichern</button>${neu ? '' : `<a class="btn" href="#/schlachttag/menge?tier=${encodeURIComponent(t.name)}">Mengenprüfung</a><a class="btn" href="#/neu?tier=${encodeURIComponent(t.name)}">+ Bestellung für dieses Tier</a><button class="btn rot" data-act="loeschen">Löschen</button>`}</div></div>
-   <div>${neu ? '' : tierBestellListe(t.name)}</div></div>`;
-  ui.ins.t = el => { const f = el.dataset.f; t[f] = f === 'sg' ? (el.value.trim() ? num(el.value) : null) : el.value; };
+   <div class="knopfleiste" style="margin-top:14px"><button class="btn haupt" data-act="speichern">Speichern</button>${neu ? '' : t0.archiv ? `<button class="btn" data-act="zurueck">Aus dem Archiv holen</button><button class="btn rot" data-act="loeschen">Löschen</button>` : `<a class="btn" href="#/schlachttag/menge?tier=${encodeURIComponent(t.name)}">Mengenprüfung</a><a class="btn" href="#/neu?tier=${encodeURIComponent(t.name)}">+ Bestellung für dieses Tier</a><button class="btn" data-act="archiv">Ins Archiv</button><button class="btn rot" data-act="loeschen">Löschen</button>`}</div></div>
+   <div>${neu ? '' : tierBestellListe(t.name)}</div></div>
+   ${neu ? '' : tierAusbeuteHtml(t0)}`;
+  ui.ins.t = el => { const f = el.dataset.f; t[f] = el.type === 'checkbox' ? el.checked : f === 'sg' ? (el.value.trim() ? num(el.value) : null) : el.value; };
+  ui.acts.archiv = async () => {
+    if (!(num(t0.sg) > 0)) return dialog('Schlachtgewicht fehlt', '<p>Bitte zuerst das echte Schlachtgewicht eintragen und speichern – es wird für die Ausbeute-Statistik gebraucht.</p>');
+    if (S.kisten.some(k => k.tier === t0.name)) return dialog('Noch Kisten offen', '<p>Für dieses Tier sind noch Kisten eingetragen. Bitte unter Schlachttag → Kisten & Ladeplan „Tier abgeschlossen“ verwenden (Reste gehen dann an den Hofladen).</p>');
+    const offen = ordersOfTier(S, t0.name).filter(o => (o.status || 'offen') === 'offen');
+    if (offen.length && !(await frage('Ins Archiv', `${offen.length} Bestellung(en) sind noch offen. Trotzdem ins Archiv?`, 'Ins Archiv', 'Abbrechen'))) return;
+    t0.archiv = todayISO(); speichern(); meldung(`${t0.name} ist im Archiv.`); render();
+  };
+  ui.acts.zurueck = async () => {
+    if (!(await frage('Aus dem Archiv holen', `${esc(t0.name)} wieder zu den aktiven Tieren nehmen? Es zählt dann nicht mehr für die Ausbeute-Statistik.`, 'Zurückholen', 'Abbrechen'))) return;
+    t0.archiv = null; speichern(); meldung(`${t0.name} ist wieder aktiv.`); render();
+  };
+  ui.acts.erfWeg = async el => { if (!(await frage('Gewogenes Teil löschen', 'Diesen Eintrag löschen?', 'Löschen', 'Abbrechen', 'rot'))) return; t0.erfassung.splice(+el.dataset.i, 1); speichern(); render(); };
   ui.acts.best = el => gehe('#/bestellung/' + el.dataset.nr);
   ui.acts.speichern = async () => {
     t.name = String(t.name || '').trim();
@@ -575,7 +592,7 @@ function viewTier(name) {
     }
     speichern();
     const tt = tier(S, t.name);
-    const wl = wartelistePassend(S, tt);
+    const wl = tt.archiv ? [] : wartelistePassend(S, tt);
     if (wl.length && await frage('Warteliste', `${wl.length} Bestellung(en) auf der Warteliste passen zu <b>${esc(tt.name)}</b> (Abholung ${fmtDate(tt.abhol)}). Jetzt diesem Tier zuordnen?`, 'Zuordnen', 'Nein')) {
       wl.forEach(o => { o.tier = tt.name; o.rang = nextRang(S); }); speichern();
       meldung(`${wl.length} Bestellung(en) zugeordnet. Bitte die Mengenprüfung für ${tt.name} ansehen.`);
@@ -590,6 +607,42 @@ function viewTier(name) {
     delete S.packplaene[t0.name]; delete S.metzgerManuell[t0.name];
     S.tiere = S.tiere.filter(x => x !== t0); speichern(); gehe('#/tiere');
   };
+}
+function viewArchiv() {
+  titel('Tier-Archiv');
+  const liste = S.tiere.filter(t => t.archiv).sort((a, b) => String(b.archiv).localeCompare(String(a.archiv)) || a.name.localeCompare(b.name));
+  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Tier-Archiv</h1><a class="btn" href="#/tiere">◀ aktive Tiere</a></div>
+    <p class="klein">Abgeschlossene Tiere mit ihren Bestellungen, der gewogenen Ausbeute und dem Kistenstand am Ende. Tiere mit echtem Schlachtgewicht und gewogenen Teilen fließen in die Ausbeute (Einstellungen), sobald ${STAT_MIN_TIERE} Tiere eines Typs erfasst sind – außer „nicht in die Statistik“.</p>
+    ${liste.length ? '' : '<div class="karte">Noch keine Tiere im Archiv. Tiere kommen hierher über Schlachttag → Kisten & Ladeplan → „Tier abgeschlossen“ oder über „Ins Archiv“ beim Tier.</div>'}
+    ${liste.length ? `<div class="tabwrap"><table class="tab"><thead><tr><th>Tier</th><th>Typ</th><th>Abholung</th><th>Archiv seit</th><th class="r">SG (kg)</th><th class="r">Bestellungen</th><th class="r">gewogen</th><th>Statistik</th><th>Kommentar</th></tr></thead><tbody>
+    ${liste.map(t => { const su = erfassungSumme(t); return `<tr class="klick" data-act="oeffnen" data-t="${esc(t.name)}"><td class="fett">${esc(t.name)}</td><td>${esc(t.typ)}</td><td>${fmtDate(t.abhol)}</td><td>${fmtDate(t.archiv)}</td><td class="r">${num(t.sg) > 0 ? fmtNum(t.sg) : '<span class="warn">fehlt</span>'}</td><td class="r">${ordersOfTier(S, t.name).length}</td><td class="r">${su.teile ? `${fmtNum(su.kg, 1)} kg · ${su.teile} ${su.teile === 1 ? 'Teil' : 'Teile'}` : '–'}</td><td>${zaehltStatistik(t) ? '<span class="marke gruen">zählt</span>' : t.ohneStatistik ? '<span class="marke">ausgeblendet</span>' : '<span class="marke gelb">zählt nicht</span>'}</td><td class="klein">${esc(t.kommentar || '')}</td></tr>`; }).join('')}
+    </tbody></table></div>` : ''}`;
+  ui.acts.oeffnen = el => gehe('#/tier/' + encodeURIComponent(el.dataset.t));
+}
+// Ausbeute (gewogen) und Kistenstand am Ende – im Tier-Detail und im Archiv
+function tierAusbeuteHtml(t) {
+  const au = ausbeuteTier(S, t);
+  const er = (t.erfassung || []).map((e, i) => ({ e, i }));
+  const grund = !t.archiv ? 'zählt erst nach dem Archivieren' : t.ohneStatistik ? 'aus der Statistik ausgeblendet' : !(num(t.sg) > 0) ? 'zählt nicht – echtes Schlachtgewicht fehlt' : !au.anzahl ? 'zählt nicht – nichts gewogen' : 'zählt für die Ausbeute-Statistik';
+  let h = `<div class="karte"><h3 style="margin-top:0">Ausbeute gewogen <span class="klein">– ${au.anzahl} Teile, ${fmtNum(au.kg, 2)} kg${au.sg > 0 ? ` · ${fmtNum(au.kg / au.sg * 100, 1)} % vom SG ${fmtNum(au.sg)} kg` : ''} · ${grund}</span></h3>
+    <p class="klein">Gewogen wird beim Kommissionieren (jedes Teil antippen), Reste mit „Rest (Hofladen)“. Ein Artikel zählt für die Statistik nur, wenn bei diesem Tier etwas davon gewogen wurde.</p>
+    <div class="spalten2"><div class="tabwrap"><table class="tab"><thead><tr><th>Artikel</th><th class="r">Teile</th><th class="r">kg</th><th class="r">% vom SG</th><th class="r">Einstellung</th><th class="r">Plan kg</th></tr></thead><tbody>
+    ${au.rows.map(r => `<tr><td>${esc(r.art)}</td><td class="r">${r.teile || ''}</td><td class="r">${r.kg ? fmtNum(r.kg, 2) : '–'}</td><td class="r">${r.anteil !== null ? fmtNum(r.anteil * 100, 2) + ' %' : ''}</td><td class="r klein">${r.ref !== null ? fmtNum(r.ref * 100, 2) + ' %' : ''}</td><td class="r klein">${r.plan !== null ? fmtNum(r.plan, 1) : ''}</td></tr>`).join('')}
+    </tbody></table></div>
+    <div class="tabwrap"><table class="tab"><thead><tr><th>Braten-Teilstück</th><th class="r">Teile</th><th class="r">kg</th><th class="r">kg je gewachsenes Stück</th><th class="r">Einstellung</th></tr></thead><tbody>
+    ${au.teile.map(r => `<tr><td>${esc(r.teil)}</td><td class="r">${r.teile || ''}</td><td class="r">${r.kg ? fmtNum(r.kg, 2) : '–'}</td><td class="r">${r.jeStueck !== null ? `${fmtNum(r.jeStueck, 2)} <span class="klein">(÷ ${r.stueck})</span>` : ''}</td><td class="r klein">${fmtNum(r.ref, 2)}</td></tr>`).join('') || '<tr><td colspan="5" class="klein">keine Braten-Teilstücke in den Einstellungen</td></tr>'}
+    </tbody></table></div></div>
+    ${er.length ? `<details style="margin-top:10px"><summary class="fett">Alle gewogenen Teile (${er.length})</summary><div class="tabwrap" style="margin-top:8px"><table class="tab"><thead><tr><th>Artikel</th><th class="r">kg</th><th>für</th><th></th></tr></thead><tbody>
+      ${er.map(({ e, i }) => `<tr><td>${esc(e.teil ? e.art + ': ' + e.teil : e.art)}</td><td class="r">${fmtNum(e.kg, 3)}</td><td>${num(e.nr) ? 'Nr. ' + e.nr + ' ' + esc((S.bestellungen.find(o => o.nr === num(e.nr)) || {}).name || '') : 'Rest (Hofladen)'}</td><td style="width:44px"><button class="btn klein rot" data-act="erfWeg" data-i="${i}">✕</button></td></tr>`).join('')}
+    </tbody></table></div></details>` : ''}</div>`;
+  if (t.abschluss && t.abschluss.kisten && t.abschluss.kisten.length) {
+    const ks = t.abschluss.kisten, stk = k => k.einheit === 'Stk';
+    h += `<div class="karte"><h3 style="margin-top:0">Kisten am Ende <span class="klein">– Stand beim Abschluss am ${fmtDate(t.abschluss.datum)} (Rest ging an den Hofladen)</span></h3>
+      <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Kiste</th><th>Inhalt</th><th class="r">kg</th><th class="r">Plan</th><th class="r">an Bestellungen</th><th class="r">Rest</th><th>Teilstücke</th></tr></thead><tbody>
+      ${ks.map(k => `<tr><td class="r">${k.nr}</td><td>${esc(k.art)}</td><td class="r">${stk(k) ? fmtNum(k.kg, 0) + ' Stk' + (has(k.gew) ? ' · ' + fmtNum(k.gew, 2) + ' kg' : '') : fmtNum(k.kg, 1)}</td><td class="r klein">${has(k.plan) ? fmtNum(k.plan, 1) : ''}</td><td class="r">${fmtNum(k.verplant, stk(k) ? 0 : 1)}</td><td class="r fett">${fmtNum(k.rest, stk(k) ? 0 : 1)}</td><td class="klein">${esc(k.info || '')}</td></tr>`).join('')}
+      </tbody></table></div></div>`;
+  }
+  return h;
 }
 function tierBestellListe(name) {
   const os = ordersOfTier(S, name); const ch = mengencheckTier(S, name);

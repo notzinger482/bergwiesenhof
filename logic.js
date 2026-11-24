@@ -100,15 +100,76 @@ function hackPaketText(S, pakete, pakVak) {
 // ---------- Braten: gewachsene Stücke (Einstellungen → Ausbeute & Kisten) ----------
 const bratenTeile = S => Array.isArray(S.settings.bratenTeile) ? S.settings.bratenTeile.filter(x => x && x.name && num(x.stueck) > 0 && num(x.kg) > 0) : [];
 // kg je Stück nach Tiertyp (Bulle: eigene Werte, sonst Rind-Werte)
-const teilKg = (x, typ) => typ === 'Bulle' && num(x.kgBulle) > 0 ? num(x.kgBulle) : num(x.kg);
-const bratenTeileKg = (S, typ) => bratenTeile(S).reduce((s, x) => s + num(x.stueck) * teilKg(x, typ), 0);
+const teilKgRef = (x, typ) => typ === 'Bulle' && num(x.kgBulle) > 0 ? num(x.kgBulle) : num(x.kg);
+// gemessener Wert aus dem Archiv (ab 3 Tieren) geht vor
+const teilKg = (x, typ, S) => { const g = S ? gemessen(S, typ, 'teil', x.name) : null; return g ? g.wert : teilKgRef(x, typ); };
+const bratenTeileKg = (S, typ) => bratenTeile(S).reduce((s, x) => s + num(x.stueck) * teilKg(x, typ, S), 0);
 // Schulter-Anteil (Bug, falsches Filet) am Braten – darf bei Bedarf ins Hack
-const bugAnteilVon = (S, typ) => { const g = bratenTeileKg(S, typ); return g > 0 ? bratenTeile(S).filter(x => x.bug).reduce((s, x) => s + num(x.stueck) * teilKg(x, typ), 0) / g : (has(S.settings.bugAnteilBraten) ? num(S.settings.bugAnteilBraten) : 0.5); };
+const bugAnteilVon = (S, typ) => { const g = bratenTeileKg(S, typ); return g > 0 ? bratenTeile(S).filter(x => x.bug).reduce((s, x) => s + num(x.stueck) * teilKg(x, typ, S), 0) / g : (has(S.settings.bugAnteilBraten) ? num(S.settings.bugAnteilBraten) : 0.5); };
 // Referenzspannen (Anteil am Schlachtgewicht, Stückgewicht) – nur zur Prüfung beim Eintragen
 const ausserhalb = (v, min, max) => has(min) && has(max) && num(max) > 0 && (v < num(min) - 1e-6 || v > num(max) + 1e-6);
 const refText = (min, max, f = 100, dec = 1, eh = '%') => has(min) && has(max) && num(max) > 0 ? `${fmtNum(num(min) * f, dec)}–${fmtNum(num(max) * f, dec)} ${eh}` : '';
 const rindEigene = S => S.settings.rindWieBulle === false;
-const anteilVon = (S, a, typ) => num(typ === 'Bulle' || !rindEigene(S) ? a.anteil : a.anteilRind);
+// Anteil laut Einstellungen (Referenz) – und wirksamer Anteil: gemessener Durchschnitt aus dem Archiv, sobald genug Tiere erfasst sind
+const anteilRef = (S, a, typ) => num(typ === 'Bulle' || !rindEigene(S) ? a.anteil : a.anteilRind);
+const anteilVon = (S, a, typ) => { const g = S && S.tiere ? gemessen(S, typ, 'art', a.name) : null; return g ? g.wert : anteilRef(S, a, typ); };
+
+// ---------- Gemessene Ausbeute (Wiegen beim Kommissionieren, Statistik aus dem Tier-Archiv) ----------
+// tier.erfassung = [{ art, teil (Braten-Teilstück oder ''), kg, nr (Bestell-Nr. oder 0 = Rest/Hofladen), zeit }]
+const STAT_MIN_TIERE = 3;
+const statCache = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
+function erfassungSumme(t) {
+  const art = {}, teil = {};
+  let kg = 0, teile = 0;
+  for (const e of (t && t.erfassung) || []) {
+    const w = num(e.kg); if (!(w > 0)) continue;
+    const a = art[e.art] = art[e.art] || { kg: 0, teile: 0 }; a.kg += w; a.teile++;
+    if (e.teil) { const x = teil[e.teil] = teil[e.teil] || { kg: 0, teile: 0 }; x.kg += w; x.teile++; }
+    kg += w; teile++;
+  }
+  return { art, teil, kg, teile };
+}
+// zählt für die Statistik: archiviert, nicht ausgeblendet, echtes Schlachtgewicht, etwas gewogen
+const zaehltStatistik = t => !!(t && t.archiv) && !t.ohneStatistik && num(t.sg) > 0 && ((t.erfassung || []).length > 0);
+function ausbeuteStatistik(S) {
+  const tiere = (S.tiere || []).filter(zaehltStatistik);
+  const sig = tiere.map(t => [t.name, t.typ, t.sg, t.erfassung.length, t.erfassung.reduce((s, e) => s + num(e.kg), 0)].join('|')).join(';') + '#' + (S.settings.bratenTeile || []).map(x => x && x.name + ':' + x.stueck).join(',');
+  const c = statCache && statCache.get(S);
+  if (c && c.sig === sig) return c.stat;
+  const roh = { Rind: { art: {}, teil: {} }, Bulle: { art: {}, teil: {} } };
+  for (const t of tiere) {
+    const typ = t.typ === 'Bulle' ? 'Bulle' : 'Rind', sg = num(t.sg), su = erfassungSumme(t);
+    for (const [n, v] of Object.entries(su.art)) (roh[typ].art[n] = roh[typ].art[n] || []).push({ tier: t.name, wert: v.kg / sg });
+    for (const x of bratenTeile(S)) { const v = su.teil[x.name]; if (v) (roh[typ].teil[x.name] = roh[typ].teil[x.name] || []).push({ tier: t.name, wert: v.kg / num(x.stueck) }); }
+  }
+  const stat = { Rind: { art: {}, teil: {} }, Bulle: { art: {}, teil: {} } };
+  for (const typ of ['Rind', 'Bulle']) for (const k of ['art', 'teil']) for (const [n, l] of Object.entries(roh[typ][k]))
+    stat[typ][k][n] = { n: l.length, wert: l.reduce((s, v) => s + v.wert, 0) / l.length, tiere: l.map(v => v.tier) };
+  if (statCache) statCache.set(S, { sig, stat });
+  return stat;
+}
+// Messwert, der verwendet wird (erst ab STAT_MIN_TIERE Tieren), sonst null
+const gemessen = (S, typ, kind, name) => { const s = ausbeuteStatistik(S)[typ === 'Bulle' ? 'Bulle' : 'Rind'][kind][name]; return s && s.n >= STAT_MIN_TIERE ? s : null; };
+const gemessenRoh = (S, typ, kind, name) => ausbeuteStatistik(S)[typ === 'Bulle' ? 'Bulle' : 'Rind'][kind][name] || null;
+// Wiege-Knöpfe beim Kommissionieren: Ausbeute-Artikel, Braten nach Teilstück
+function wiegeArten(S) {
+  const out = [];
+  for (const a of ausbeuteArtikel(S)) {
+    if (a.name === BRATEN && bratenTeile(S).length) bratenTeile(S).forEach(x => out.push({ art: BRATEN, teil: x.name }));
+    else out.push({ art: a.name, teil: '' });
+  }
+  return out;
+}
+// Teile, die am Ende je Artikel zur Verfügung standen (für das Archiv)
+function ausbeuteTier(S, t) {
+  const su = erfassungSumme(t), sg = num(t.sg);
+  const rows = ausbeuteArtikel(S).map(a => {
+    const v = su.art[a.name];
+    return { art: a.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, anteil: v && sg > 0 ? v.kg / sg : null, ref: anteilRef(S, a, t.typ), plan: yieldArt(S, t, a.name) };
+  }).concat(Object.keys(su.art).filter(n => !ausbeuteArtikel(S).some(a => a.name === n)).map(n => ({ art: n, kg: su.art[n].kg, teile: su.art[n].teile, anteil: sg > 0 ? su.art[n].kg / sg : null, ref: null, plan: null })));
+  const teile = bratenTeile(S).map(x => { const v = su.teil[x.name]; return { teil: x.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, jeStueck: v ? v.kg / num(x.stueck) : null, stueck: num(x.stueck), ref: teilKgRef(x, t.typ) }; });
+  return { rows, teile, kg: su.kg, anzahl: su.teile, sg };
+}
 const ausbeuteArtikel = S => S.artikel.filter(a => num(a.anteil) > 0 || (rindEigene(S) && num(a.anteilRind) > 0));
 
 // ---------- Bestellung: Mengen ----------
@@ -478,6 +539,7 @@ function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
   const pk = num(pakete);
   const nen = num(S.settings.nenner) || 16;
   const kand = S.tiere.filter(t => {
+    if (t.archiv) return false;
     if (!t.abhol || t.abhol < heute) return false;
     if (wunschISO && t.abhol > wunschISO) return false;
     if (pk > 0) {
@@ -597,7 +659,7 @@ function wartelistePruefung(S) {
     else if (pFrei < 0) emp.push(`Achtung: ${fmtNum(pak)} Genusspakete bestellt, ein ${wahl.typ} gibt nur ca. ${fmtNum(wahl.maxPak)} her.`);
     if (wuensche.length) emp.push(`Frühester Wunschtermin: ${fmtDate(wuensche[0])}.`);
     const heute = todayISO();
-    const geplant = S.tiere.filter(t => t.abhol && t.abhol >= heute).map(t => ({ t, n: wartelistePassend(S, t).length })).filter(x => x.n > 0);
+    const geplant = S.tiere.filter(t => !t.archiv && t.abhol && t.abhol >= heute).map(t => ({ t, n: wartelistePassend(S, t).length })).filter(x => x.n > 0);
     if (geplant.length) emp.push(`Schon geplant: ${geplant.map(x => `${x.t.name} (Abholung ${fmtDate(x.t.abhol)}, ${x.n} Bestellung${x.n === 1 ? '' : 'en'} würden passen)`).join('; ')} – erst prüfen, ob die Warteliste dort Platz hat.`);
   }
   return { anzahl: ords.length, pakete: pak, kgGesamt, rows, rind: R, bulle: B, wahl: wahl ? wahl.typ : '', emp, schwelle, ords };
@@ -759,7 +821,7 @@ function packplan(S, tierName) {
       let stuecke = [];
       if (a.art === BRATEN && bratenTeile(S).length) {
         const yB = yieldArt(S, t, BRATEN), f = yB > 0 ? yB / bratenTeileKg(S, t.typ) : 1;
-        for (const x of bratenTeile(S)) for (let n = 0; n < num(x.stueck); n++) stuecke.push({ name: x.name, kg: teilKg(x, t.typ) * f, bug: !!x.bug });
+        for (const x of bratenTeile(S)) for (let n = 0; n < num(x.stueck); n++) stuecke.push({ name: x.name, kg: teilKg(x, t.typ, S) * f, bug: !!x.bug });
       } else {
         // ganze Stücke (z. B. 2 Filets, 2 Roastbeef-Stränge, 2 Hüften, 2 Tafelspitze)
         const y = yieldArt(S, t, a.art);
@@ -966,6 +1028,12 @@ function tierAbschliessen(S, tierName) {
   const heute = todayISO();
   for (const c of calc) {
     if (c.rest > 0.0001 && c.k.art !== 'Sonderfälle (beschriftet)') { S.hofladen.push({ datum: heute, tier: tierName, kiste: c.k.nr, art: c.k.art, rest: r2(c.rest), einheit: c.einheit }); n++; }
+  }
+  // Archiv: Stand der Kisten am Ende festhalten, Tier archivieren (wird nicht gelöscht)
+  const t = tier(S, tierName);
+  if (t) {
+    t.abschluss = { datum: heute, kisten: calc.map(c => ({ nr: c.k.nr, art: c.k.art, kg: r2(num(c.k.kg)), plan: has(c.k.plan) ? r2(num(c.k.plan)) : null, gew: has(c.k.gew) ? num(c.k.gew) : null, info: c.k.info || '', bedarf: r2(c.bedarf), verplant: r2(c.verplant), rest: r2(c.rest), einheit: c.einheit })) };
+    t.archiv = heute;
   }
   S.kisten = S.kisten.filter(k => k.tier !== tierName);
   return n;
@@ -1212,5 +1280,5 @@ if (typeof module !== 'undefined') module.exports = {
   tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
-  HACK, GULASCH, ORGANE, OCHS, ochsGanz, setDefaults: d => { global.DEFAULTS = d; }
+  HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
 };
