@@ -283,20 +283,22 @@ function tabPackliste(tn, ziel) {
     <div class="klein" style="margin-bottom:8px">Endbetrag nach dem Wiegen eintragen. Status antippen: offen → gepackt (mit Lagerplatz) → abgeholt.</div>
     <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>Bestellung</th><th>Sonderfälle</th><th>Lagerplatz</th><th class="r">Schätzpreis</th><th class="r">Endbetrag</th><th>Status</th></tr></thead><tbody>
     ${pl.rows.map(r => `<tr data-nr="${r.nr}"><td class="r"><a href="#/bestellung/${r.nr}">${r.nr}</a></td><td class="fett">${esc(r.name)}</td><td>${r.tel ? `<a href="tel:${esc(r.tel)}">${esc(r.tel)}</a>` : ''}</td><td class="klein">${esc(r.text)}</td><td class="klein">${esc(r.sonder)}</td><td>${r.lager ? `<b>${esc(r.lager)}</b>` : `<span class="klein">Vorschlag: ${esc(r.lagerVorschlag)}</span>`}</td><td class="r">${fmtEur(r.schaetz)}</td>
-      <td style="width:120px"><input class="feld zahl" inputmode="decimal" data-ch="betrag" value="${r.endbetrag !== null ? fmtIn(r.endbetrag, 2, 2) : ''}"></td><td><button class="btn klein" data-act="status">${statusMarke(r.status)}</button></td></tr>`).join('') || '<tr><td colspan="9" class="klein">Keine Bestellungen für dieses Tier.</td></tr>'}
+      <td style="width:120px"><input class="feld zahl" inputmode="decimal" data-ch="betrag" value="${r.endbetrag !== null ? fmtIn(r.endbetrag, 2, 2) : ''}"></td><td><button class="btn klein" data-act="status">${statusMarke(r.status)}</button>${r.status === 'abgeholt' ? `<button class="btn klein" data-act="zahl" style="margin-left:4px">${r.zahlOffen ? '<span class="marke rot">Zahlung offen</span>' : '<span class="marke gruen">bezahlt</span>'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="klein">Keine Bestellungen für dieses Tier.</td></tr>'}
     </tbody></table></div>`;
   const best = el => S.bestellungen.find(o => o.nr === +el.closest('tr').dataset.nr);
   ui.acts.betrag = el => { const o = best(el); o.endbetrag = el.value.trim() === '' ? null : r2(num(el.value)); speichern(); };
   ui.acts.status = async el => {
     const o = best(el); const f = ['offen', 'gepackt', 'abgeholt']; const neu = f[(f.indexOf(o.status || 'offen') + 1) % 3];
     if (neu === 'gepackt') { if (!(await lagerDialog(o))) return; }
-    else {
-      o.status = neu; if (neu === 'offen') { o.lagerOrt = ''; o.lagerPlatz = ''; o.gepacktAm = null; }
-      if (neu === 'abgeholt') preisFestsetzen(S, o); else if (!preisBleibtFest(S, o)) delete o.preisFest;
-      speichern();
-    }
+    else if (neu === 'abgeholt') {
+      const k = await dialog(`Nr. ${o.nr} abgeholt`, `<p>${esc(o.name)}${has(o.endbetrag) ? ' · Endbetrag <b>' + fmtEur(o.endbetrag) + '</b>' : ''}</p><p>Ist schon bezahlt?</p>`,
+        [{ k: 'x', t: 'Abbrechen' }, { k: 'offen', t: 'Bezahlung offen', cls: 'rot' }, { k: 'ok', t: 'Bezahlt ✓', cls: 'haupt' }]);
+      if (k !== 'ok' && k !== 'offen') return;
+      statusSetzen(S, o, 'abgeholt', k === 'offen'); speichern();
+    } else { statusSetzen(S, o, neu); speichern(); }
     render();
   };
+  ui.acts.zahl = el => { const o = best(el); o.zahlungOffen = !o.zahlungOffen; speichern(); meldung(`Nr. ${o.nr}: ${o.zahlungOffen ? 'Bezahlung offen' : 'bezahlt'}.`); render(); };
   ui.acts.teilen = async () => { const d = docPackliste(packliste(S, tn)); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
   ui.acts.drucken = () => docDrucken(docPackliste(packliste(S, tn)));
 }
@@ -357,9 +359,9 @@ function viewKommissionierung(q) {
       <button class="btn" data-act="vor" data-d="1" ${idx >= ords.length - 1 ? 'disabled' : ''}>nächste ▶</button></div>
     ${ohneKisten ? '<div class="hinweis">Für dieses Tier sind noch keine Kisten eingetragen (Schlachttag → Kisten & Ladeplan → „Plan erstellen“).</div>' : ''}
     <div class="spalten2"><div class="karte">
-      <h2 style="margin-top:0">Nr. ${ko.o.nr} – ${esc(ko.o.name)} ${statusMarke(ko.o.status)}</h2>
+      <h2 style="margin-top:0">Nr. ${ko.o.nr} – ${esc(ko.o.name)} ${statusMarke(ko.o.status)}${zahlMarke(ko.o)}</h2>
       ${(() => { const lv = lagerVorschlag(S, ko.o); const ort = ko.o.lagerOrt || lv.ort;
-        return `<div class="lagerbox ${ort === 'Kühlschrank' ? 'ks' : 'kr'}"><div class="klein">${ko.o.lagerOrt ? 'verräumt' : 'Lagerplatz nach dem Packen'}</div><div class="lagerort">${ort === 'Kühlschrank' ? '❄ Kühlschrank' : '▣ Kühlraum – Metzgerkiste'}${ko.o.lagerPlatz ? ' · ' + esc(ko.o.lagerPlatz) : ''}</div><div class="klein">${esc(lv.grund)}</div></div>`; })()}
+        return `<div class="lagerbox ${ort === 'Kühlschrank' ? 'ks' : 'kr'}"><div class="klein">${ko.o.lagerOrt ? 'verräumt' : 'Lagerplatz nach dem Packen'}</div><div class="lagerort">${ort === 'Kühlschrank' ? '❄ Kühlschrank' : '▣ Kühlraum – Metzgerkiste'}${ko.o.lagerPlatz ? ' · ' + esc(lagerPlatzText(ko.o)) : ''}</div><div class="klein">${esc(lv.grund)}</div></div>`; })()}
       <table class="doc-kv"><tr><td>Genusspakete</td><td class="fett">${fmtNum(ko.o.pakete) || '–'}${num(ko.o.pakVak) ? ` (davon ${fmtNum(ko.o.pakVak)} vakuumieren)` : ''}</td></tr>
       <tr><td>Separat vom Metzger</td><td class="fett">${esc(ko.sonder.join('; ') || '–')}</td></tr>
       <tr><td>Vakuum-Tüten</td><td class="fett">${ko.tueten || '–'}</td></tr>
@@ -672,7 +674,7 @@ function tabAusbeute(z) {
     ${feld('tueteJeKg', 'Vakuumieren ohne Portionsangabe: 1 Tüte je … kg')}
 </div></div>
    <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">
-    ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}</div></div>
+    ${feld('lagerMaxArtikel', 'Kühlschrank bei weniger als … Artikeln')}${feld('lagerMaxKg', 'und leichter als … kg')}${feld('lagerFaecher', 'Fächer im Kühlschrank (Anzahl)')}${feld('lagerKisten', 'Metzgerkisten im Kühlraum (Nr. 1 bis …)')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Innereien je Tier (werden vorab separat geholt)</h3><div class="zeile oben">
     ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('baeckleStk', 'Bäckle ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Ochsenschwanz</h3><div class="zeile oben">${feld('ochsStk', 'Ochsenschwanz je Tier (Stk)')}<p class="klein" style="max-width:420px;margin:22px 0 0">Kein Innereien-Artikel: kommt immer zu den Beinscheiben/Waden in die Kiste und wird gewogen. Mit Häkchen „am Stück“ bestellt → bleibt ganz (Zeile im Metzgerauftrag), sonst schneidet der Metzger ihn wie gewohnt. Verkauf immer als ganzer Schwanz an eine Bestellung, Preis nach kg; nicht bestellte gehen beim Abschluss an den Hofladen.</p></div></div>`;
@@ -810,22 +812,25 @@ document.addEventListener('DOMContentLoaded', start);
 // Lagerplatz beim Packen bestätigen und in der Bestellung speichern
 async function lagerDialog(o) {
   const lv = lagerVorschlag(S, o);
-  let ort = o.lagerOrt || lv.ort, platz = o.lagerPlatz || '';
+  let ort = o.lagerOrt || lv.ort, nr = lagerNr(o);
+  const anz = x => { const n = num(S.settings[x === 'Kühlschrank' ? 'lagerFaecher' : 'lagerKisten']); return n >= 1 ? Math.min(99, Math.round(n)) : (x === 'Kühlschrank' ? 6 : 29); };
+  const nrKnoepfe = () => `<div class="klein fett" style="margin-bottom:6px">${ort === 'Kühlschrank' ? 'Fach' : 'Kisten-Nr.'} (optional)</div><div class="lnr">${Array.from({ length: anz(ort) }, (_, i) => i + 1).map(n => `<button class="btn ${n === nr ? 'haupt' : ''}" data-nr="${n}">${n}</button>`).join('')}<button class="btn ${nr ? '' : 'haupt'}" data-nr="">–</button></div>`;
   const d = $('#dialog');
   const klick = e => {
     const b = e.target.closest('[data-ort]');
-    if (b) { e.stopPropagation(); ort = b.dataset.ort; $$('#dialog [data-ort]').forEach(x => x.classList.toggle('haupt', x.dataset.ort === ort)); }
-    if (e.target.closest('[data-k="ok"]')) platz = ($('#lplatz') || {}).value || '';
+    if (b) { e.stopPropagation(); ort = b.dataset.ort; if (nr > anz(ort)) nr = null; $$('#dialog [data-ort]').forEach(x => x.classList.toggle('haupt', x.dataset.ort === ort)); $('#lnrbox').innerHTML = nrKnoepfe(); return; }
+    const n = e.target.closest('[data-nr]');
+    if (n) { e.stopPropagation(); nr = n.dataset.nr ? +n.dataset.nr : null; $('#lnrbox').innerHTML = nrKnoepfe(); }
   };
   d.addEventListener('click', klick, true);
   const k = await dialog(`Nr. ${o.nr} gepackt – wohin?`, `<p>${esc(o.name)} · ${esc(lv.grund)} → Vorschlag: <b>${lv.ort}</b></p>
     <div class="knopfleiste" style="margin-bottom:12px">${LAGER.map(x => `<button class="btn ${x === ort ? 'haupt' : ''}" data-ort="${x}" style="min-height:60px;font-size:18px">${x === 'Kühlschrank' ? '❄ Kühlschrank' : '▣ Kühlraum (Metzgerkiste)'}</button>`).join('')}</div>
-    <label class="f">Fach / Kisten-Nr. (optional)<input class="feld" id="lplatz" value="${esc(platz)}" placeholder="z. B. Fach 2 oder Kiste 14" autocomplete="off"></label>`,
+    <div id="lnrbox">${nrKnoepfe()}</div>`,
     [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Gepackt ✓', cls: 'haupt' }]);
   d.removeEventListener('click', klick, true);
   if (k !== 'ok') return false;
   if (o.status !== 'abgeholt') o.status = 'gepackt';
-  o.lagerOrt = ort; o.lagerPlatz = platz.trim(); o.gepacktAm = o.gepacktAm || todayISO();
+  o.lagerOrt = ort; o.lagerPlatz = nr ? String(nr) : ''; o.gepacktAm = o.gepacktAm || todayISO();
   speichern();
   return true;
 }

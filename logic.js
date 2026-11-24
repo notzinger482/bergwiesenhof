@@ -860,7 +860,7 @@ function inaktiveKunden(S, heute = todayISO()) {
   return (S.kunden || []).map(k => ({ k, letzte: kundeLetzte(S, k, idx) }))
     .filter(x => x.letzte && x.letzte < grenze)
     // Bestellungen, die noch laufen (nicht abgeholt, Tier nicht im Archiv), schützen den Kunden
-    .filter(x => !ordersVonKunde(S, x.k, idx).some(o => (o.status || 'offen') !== 'abgeholt' && !archiviert(o.tier)))
+    .filter(x => !ordersVonKunde(S, x.k, idx).some(o => ((o.status || 'offen') !== 'abgeholt' && !archiviert(o.tier)) || zahlungOffen(o)))
     .sort((a, b) => a.letzte.localeCompare(b.letzte));
 }
 // Kunde aus der Kundenliste löschen; seine Bestellungen bleiben für Statistik und Ausbeute, aber ohne Name, Telefon, Mail und Notiz.
@@ -1386,7 +1386,7 @@ function packliste(S, tierName) {
   if (!t) return null;
   return { tier: t, rows: ordersOfTier(S, t.name).map(o => ({
     nr: o.nr, name: o.name, tel: o.tel, text: bestellText(S, o), sonder: sonderOf(S, o).map(s => sonderText(S, s)).join('; '),
-    schaetz: schaetzpreis(S, o), endbetrag: has(o.endbetrag) ? num(o.endbetrag) : null, status: o.status || 'offen', lager: lagerText(o), lagerVorschlag: lagerVorschlag(S, o).ort })) };
+    schaetz: schaetzpreis(S, o), endbetrag: has(o.endbetrag) ? num(o.endbetrag) : null, status: o.status || 'offen', zahlOffen: zahlungOffen(o), lager: lagerText(o), lagerVorschlag: lagerVorschlag(S, o).ort })) };
 }
 
 // ---------- Lagerplatz nach dem Packen ----------
@@ -1402,7 +1402,20 @@ function lagerVorschlag(S, o) {
   const klein = artikel < maxArt && kg < maxKg;
   return { ort: klein ? 'Kühlschrank' : 'Kühlraum', artikel, kg, grund: `${artikel} Artikel, ca. ${fmtNum(kg, 1)} kg` };
 }
-const lagerText = o => o.lagerOrt ? (o.lagerOrt === 'Kühlraum' ? 'Kühlraum (Metzgerkiste)' : o.lagerOrt) + (o.lagerPlatz ? ' – ' + o.lagerPlatz : '') : '';
+// Lagerplatz-Nummer (seit 1.9.7 nur Zahl): Kühlschrank → „Fach n“, Kühlraum → „Kiste n“; alte Freitexte bleiben lesbar
+const lagerNr = o => { const m = String((o && o.lagerPlatz) || '').match(/\d+/); return m ? +m[0] : null; };
+const lagerPlatzText = o => { const p = String(o.lagerPlatz || '').trim(); if (!p) return ''; return /^\d+$/.test(p) ? (o.lagerOrt === 'Kühlschrank' ? 'Fach ' : 'Kiste ') + p : p; };
+// Bezahlung (seit 1.9.7): abgeholt, aber noch nicht bezahlt → Erinnerung auf der Übersicht
+const zahlungOffen = o => !!o && (o.status || 'offen') === 'abgeholt' && !!o.zahlungOffen;
+const offeneZahlungen = S => (S.bestellungen || []).filter(zahlungOffen).sort((a, b) => String(a.abgeholtAm || '').localeCompare(String(b.abgeholtAm || '')) || a.nr - b.nr);
+// Status setzen mit allem, was dazugehört (abgeholt am, fester Preis, Lager leeren bei „offen“)
+function statusSetzen(S, o, neu, zahlungOffenJa) {
+  o.status = neu;
+  if (neu === 'offen') { o.lagerOrt = ''; o.lagerPlatz = ''; o.gepacktAm = null; }
+  if (neu === 'abgeholt') { o.abgeholtAm = o.abgeholtAm || todayISO(); if (zahlungOffenJa !== undefined) o.zahlungOffen = !!zahlungOffenJa; preisFestsetzen(S, o); }
+  else { delete o.abgeholtAm; delete o.zahlungOffen; if (!preisBleibtFest(S, o)) delete o.preisFest; }
+}
+const lagerText = o => o.lagerOrt ? (o.lagerOrt === 'Kühlraum' ? 'Kühlraum (Metzgerkiste)' : o.lagerOrt) + (o.lagerPlatz ? ' – ' + lagerPlatzText(o) : '') : '';
 
 // ---------- Hofladen ----------
 function hofladenSummen(S, jahr) {
@@ -1469,7 +1482,7 @@ if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
-  tierInfo, lagerVorschlag, lagerText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
+  tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, packplan, packplanUebernehmen, kistenRows, kistenTiere, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }

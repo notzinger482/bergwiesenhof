@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '1.9.6';
+const APP_VERSION = '2.0';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '' }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -130,6 +130,7 @@ function standardTier() {
   const aktiv = tiereSortiert();
   return t ? t.name : (aktiv[0] ? aktiv[0].name : '');
 }
+const zahlMarke = o => zahlungOffen(o) ? ' <span class="marke rot">Zahlung offen</span>' : '';
 const statusMarke = s => s === 'abgeholt' ? '<span class="marke blau">abgeholt</span>' : s === 'gepackt' ? '<span class="marke gruen">gepackt</span>' : '<span class="marke">offen</span>';
 function checkMarke(txt) {
   if (!txt) return '';
@@ -174,6 +175,16 @@ function viewStart() {
     <div class="kachel"><div class="gross">${warte}</div><div class="klein">auf der Warteliste</div></div>
     <div class="kachel"><div class="gross">${S.kunden.length}</div><div class="klein">Kunden</div></div>
     <a class="btn" href="#/vordrucke" style="min-height:60px">🖨 Vordrucke drucken</a></div>`;
+  // Bezahlung offen: abgeholte Bestellungen, die noch nicht bezahlt sind
+  const zo = offeneZahlungen(S);
+  if (zo.length) {
+    const summe = zo.reduce((s, o) => s + (has(o.endbetrag) ? num(o.endbetrag) : schaetzpreis(S, o)), 0);
+    h += `<div class="karte zahlkarte"><h3 style="margin-top:0">Bezahlung offen <span class="marke rot">${zo.length}</span> <span class="klein">– zusammen ca. ${fmtEur(summe)}</span></h3>
+      <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>Tier</th><th>abgeholt am</th><th class="r">Betrag</th><th></th></tr></thead><tbody>
+      ${zo.map(o => `<tr class="klick" data-act="zbest" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td class="fett">${esc(o.name)}</td><td>${o.tel ? `<a href="tel:${esc(o.tel)}" data-act="anrufen">${esc(o.tel)}</a>` : ''}</td><td>${esc(o.tier)}</td><td>${fmtDate(o.abgeholtAm)}</td>
+        <td class="r">${has(o.endbetrag) ? fmtEur(o.endbetrag) : `<span class="klein">ca.</span> ${fmtEur(schaetzpreis(S, o))}`}</td><td class="r"><button class="btn klein haupt" data-act="zbezahlt" data-nr="${o.nr}">bezahlt ✓</button></td></tr>`).join('')}
+      </tbody></table></div></div>`;
+  }
   if (ui.letzteNr) h += `<p class="klein">Zuletzt gespeichert: <a href="#/bestellung/${ui.letzteNr}">Bestellung Nr. ${ui.letzteNr}</a></p>`;
   h += `<h2>Tiere</h2>`;
   if (!kommende.length) h += `<div class="karte">Noch keine Tiere angelegt. <a href="#/tier/neu">Tier anlegen</a></div>`;
@@ -181,6 +192,13 @@ function viewStart() {
   inhalt().innerHTML = h;
   ui.acts.sichern = async () => { if (S.settings.sicherungUrl) { const r = await autoSicherung(true); if (r.ok) { meldung('Sicherung in Google Drive abgelegt: ' + r.datei); render(); return; } meldung('Google-Drive-Sicherung fehlgeschlagen: ' + r.fehler, true); } sicherungErstellen(true); };
   ui.acts.tier = el => gehe('#/schlachttag/menge?tier=' + encodeURIComponent(el.dataset.t));
+  ui.acts.zbest = el => gehe('#/bestellung/' + el.dataset.nr);
+  ui.acts.anrufen = el => { location.href = el.getAttribute('href'); };
+  ui.acts.zbezahlt = async el => {
+    const o = S.bestellungen.find(x => x.nr === +el.dataset.nr); if (!o) return;
+    if (!(await frage('Bezahlt', `Nr. ${o.nr} – <b>${esc(o.name)}</b>${has(o.endbetrag) ? ' (' + fmtEur(o.endbetrag) + ')' : ''} als bezahlt markieren?`, 'Bezahlt ✓', 'Abbrechen'))) return;
+    o.zahlungOffen = false; speichern(); meldung(`Nr. ${o.nr}: bezahlt.`); render();
+  };
 }
 function tierKarte(t) {
   const i = tierInfo(S, t);
@@ -233,7 +251,7 @@ function viewBestellung(nr, q, vorlage) {
   const letzte = !nr && o.name ? letzteBestellungVon(o.name) : null;
   inhalt().innerHTML = `
   <div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">${nr ? `Bestellung Nr. ${nr}` : 'Neue Bestellung'}</h1>
-    ${nr ? `${o.lagerOrt ? `<span class="marke blau" style="font-size:15px;padding:6px 12px">${esc(lagerText(o))}</span>` : ''}<button class="btn" data-act="lager">Lagerplatz …</button><select class="feld" style="width:auto" data-in="kopf" data-f="status">${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, (o.status || 'offen') === s)).join('')}</select>
+    ${nr ? `${o.lagerOrt ? `<span class="marke blau" style="font-size:15px;padding:6px 12px">${esc(lagerText(o))}</span>` : ''}<button class="btn" data-act="lager">Lagerplatz …</button><select class="feld" style="width:auto" data-in="kopf" data-f="status">${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, (o.status || 'offen') === s)).join('')}</select><label class="check zahlcheck" id="zahlbox" style="${(o.status || 'offen') === 'abgeholt' ? '' : 'display:none'}"><input type="checkbox" id="zahloffen"${o.zahlungOffen ? ' checked' : ''}> Bezahlung offen</label>
     <button class="btn" data-act="teilen">Teilen …</button><button class="btn rot" data-act="loeschen">Löschen</button>` : ''}
     ${ui.letzteNr && !nr ? `<a class="btn klein" href="#/bestellung/${ui.letzteNr}">Zuletzt: Nr. ${ui.letzteNr} öffnen</a>` : ''}</div>
   <div id="fehler"></div>
@@ -336,6 +354,7 @@ function viewBestellung(nr, q, vorlage) {
     if (['pakete', 'pakVak'].includes(f)) v = num(v);
     if (f === 'tuetenManuell') v = el.value.trim() === '' ? null : num(v);
     o[f] = v; ui.formDirty = true;
+    if (f === 'status') { const zb = $('#zahlbox'); if (zb) zb.style.display = v === 'abgeholt' ? '' : 'none'; }
     if (f === 'name') {
       const k = S.kunden.find(x => sameText(x.name, v));
       if (k) { if (!o.tel && k.tel) { o.tel = k.tel; $('[data-f=tel]').value = k.tel; } if (!o.mail && k.mail) { o.mail = k.mail; $('[data-f=mail]').value = k.mail; } }
@@ -410,6 +429,7 @@ function viewBestellung(nr, q, vorlage) {
     S.bestellungen = S.bestellungen.filter(x => x.nr !== nr); speichern(); ui.formDirty = false; meldung(`Bestellung Nr. ${nr} gelöscht.`); gehe('#/bestellungen');
   };
   ui.acts.speichern = () => bestellungSpeichern(o);
+  { const zc = $('#zahloffen'); if (zc) zc.addEventListener('change', () => { ui.formDirty = true; }); }
   // Auf die verfügbare Menge kürzen (nur im Formular – erst „Speichern“ übernimmt es)
   ui.acts.kuerzen = () => {
     const fd = ui.fehlDetail; if (!fd || !fd.zeilen.length) return;
@@ -494,6 +514,9 @@ async function bestellungSpeichern(o) {
     if (S.bestellungen[i].tier !== o.tier) o.rang = nextRang(S);
     S.bestellungen[i] = o;
   }
+  // Bezahlung: nur bei „abgeholt“ (Haken „Bezahlung offen“ im Formular)
+  if ((o.status || 'offen') === 'abgeholt') { o.abgeholtAm = o.abgeholtAm || todayISO(); const zc = $('#zahloffen'); if (zc) o.zahlungOffen = zc.checked; }
+  else { delete o.abgeholtAm; delete o.zahlungOffen; }
   // Schätzpreis abgeholter/archivierter Bestellungen festhalten (bei Änderung neu berechnet), sonst mit der Preisliste am Abholtermin
   if (preisBleibtFest(S, o)) preisFestsetzen(S, o); else delete o.preisFest;
   const kundeNeu = kundePflegen(S, o.name, o.tel, o.mail, o.eingang);
@@ -520,14 +543,14 @@ function viewBestellungen() {
     const q = F.q.trim().toLowerCase();
     let os = S.bestellungen.slice().sort((a, b) => b.nr - a.nr);
     if (F.tier) os = os.filter(o => o.tier === F.tier);
-    if (F.status) os = os.filter(o => (o.status || 'offen') === F.status);
+    if (F.status === 'zahlung') os = os.filter(zahlungOffen); else if (F.status) os = os.filter(o => (o.status || 'offen') === F.status);
     if (q) os = os.filter(o => String(o.nr) === q || (o.name || '').toLowerCase().includes(q) || (o.tel || '').includes(q));
     const checks = {}; [...new Set(os.map(o => o.tier))].forEach(t => Object.assign(checks, mengencheckTier(S, t)));
     $('#liste').innerHTML = !os.length ? '<div class="karte">Keine Bestellungen gefunden.</div>' :
       `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Eingang</th><th>Name</th><th>Tier</th><th class="r">Pakete</th><th>Bestellung</th><th class="r">Schätzpreis</th><th>Status</th><th>Mengencheck</th></tr></thead><tbody>` +
       os.map(o => {
         const ch = o.tier === 'Warteliste' ? 'Warteliste – noch kein Tier' : tier(S, o.tier) ? (checks[o.nr] || '') : 'Tier unbekannt';
-        return `<tr class="klick ${ch.startsWith('reicht') ? 'rot' : ''}" data-act="oeffnen" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${esc(o.name)}</td><td>${esc(o.tier)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein" style="max-width:380px">${esc(kurzText(o))}</td><td class="r">${fmtEur(schaetzpreis(S, o))}</td><td>${statusMarke(o.status)}${o.lagerOrt ? `<div class="klein">${esc(lagerText(o))}</div>` : ''}</td><td>${checkMarke(ch)}</td></tr>`;
+        return `<tr class="klick ${ch.startsWith('reicht') ? 'rot' : ''}" data-act="oeffnen" data-nr="${o.nr}"><td class="r fett">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${esc(o.name)}</td><td>${esc(o.tier)}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein" style="max-width:380px">${esc(kurzText(o))}</td><td class="r">${fmtEur(schaetzpreis(S, o))}</td><td>${statusMarke(o.status)}${zahlMarke(o)}${o.lagerOrt ? `<div class="klein">${esc(lagerText(o))}</div>` : ''}</td><td>${checkMarke(ch)}</td></tr>`;
       }).join('') + '</tbody></table></div>';
     $('#anzahl').textContent = `${os.length} Bestellung${os.length === 1 ? '' : 'en'}`;
   };
@@ -535,7 +558,7 @@ function viewBestellungen() {
     <div class="suchzeile">
       <input class="feld" type="search" placeholder="Suchen: Name, Telefon oder Nr." data-in="q" value="${esc(F.q)}">
       <select class="feld" data-ch="ft" style="max-width:260px">${opt('', 'alle Tiere', !F.tier)}${tiereSortiert().map(t => opt(t.name, t.name, F.tier === t.name)).join('')}${opt('Warteliste', 'Warteliste', F.tier === 'Warteliste')}</select>
-      <select class="feld" data-ch="fs" style="max-width:170px">${opt('', 'jeder Status', !F.status)}${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, F.status === s)).join('')}</select>
+      <select class="feld" data-ch="fs" style="max-width:170px">${opt('', 'jeder Status', !F.status)}${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, F.status === s)).join('')}${opt('zahlung', 'Zahlung offen', F.status === 'zahlung')}</select>
     </div><div class="klein" id="anzahl" style="margin-bottom:6px"></div><div id="liste"></div>`;
   ui.ins.q = el => { F.q = el.value; liste(); };
   ui.acts.ft = el => { F.tier = el.value; liste(); };
@@ -584,7 +607,7 @@ function viewKunde(id) {
       <div class="knopfleiste" style="margin-top:14px"><button class="btn haupt" data-act="speichern">Speichern</button>${neu ? '' : `<a class="btn" href="#/neu?kunde=${k.nr}">+ Neue Bestellung</a>`}${!neu && !os.length ? '<button class="btn rot" data-act="loeschen">Löschen</button>' : ''}${!neu && os.length ? '<button class="btn rot" data-act="anonym">Anonymisieren …</button>' : ''}</div>
       ${neu ? '' : `<p class="klein" style="margin-top:10px">Angelegt: ${fmtDate(k.angelegt) || '–'} · letzte Bestellung: ${fmtDate(kundeLetzte(S, k)) || '–'}</p>`}</div>
     <div>${neu ? '' : `<div class="karte"><b>${st.anzahl}</b> Bestellungen · <b>${st.pakete}</b> Genusspakete · Summe Endbeträge <b>${fmtEur(st.umsatz)}</b></div>
-      <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Eingang</th><th>Tier</th><th>Bestellung</th><th>Status</th></tr></thead><tbody>${os.map(o => `<tr class="klick" data-act="best" data-nr="${o.nr}"><td class="r">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${esc(o.tier)}</td><td class="klein">${esc(kurzText(o))}</td><td>${statusMarke(o.status)}</td></tr>`).join('') || '<tr><td colspan="5" class="klein">noch keine Bestellungen</td></tr>'}</tbody></table></div>`}</div></div>`;
+      <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Eingang</th><th>Tier</th><th>Bestellung</th><th>Status</th></tr></thead><tbody>${os.map(o => `<tr class="klick" data-act="best" data-nr="${o.nr}"><td class="r">${o.nr}</td><td>${fmtDate(o.eingang)}</td><td>${esc(o.tier)}</td><td class="klein">${esc(kurzText(o))}</td><td>${statusMarke(o.status)}${zahlMarke(o)}</td></tr>`).join('') || '<tr><td colspan="5" class="klein">noch keine Bestellungen</td></tr>'}</tbody></table></div>`}</div></div>`;
   ui.ins.k = el => { k[el.dataset.f] = el.value; };
   ui.acts.best = el => gehe('#/bestellung/' + el.dataset.nr);
   ui.acts.speichern = async () => {

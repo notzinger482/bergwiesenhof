@@ -306,6 +306,8 @@ const DEFAULTS = {
   "rindWieBulle": false,
   "lagerMaxArtikel": 3,
   "lagerMaxKg": 5,
+  "lagerFaecher": 6,
+  "lagerKisten": 29,
   "preiseAb": "01.10.2026",
   "vdName": "Bernd & Claudia Huber",
   "vdAdresse": "Bergwiesenweg 10 · 72658 Bempflingen",
