@@ -1961,6 +1961,10 @@ function kommissionierung(S, nr) {
       for (const p of hp) picks.splice(picks.indexOf(p), 1);
       picks.push({ kiste: null, hackTisch: true, menge: summe, roh, einheit: 'kg', art: HACK, verpacken: 'vom Hack-Tisch, fertig verpackt: ' + teile.join(' + '), platz: '' });
     }
+    // nicht vakuumieren direkt an der Zeile (seit 3.4.3, Wunsch Nutzer – vorher nur klein im Kopf); gilt für die Einzel-Bestellung,
+    // Genusspakete werden nach o.pakVak verpackt
+    const nvL = nichtVak(S, o);
+    for (const p of picks) if (nvL.includes(p.art)) { const r = rows.find(x => x.art === p.art); p.nichtVak = r && r.ausPak > 0 ? 'einzeln' : 'ja'; } // „(einzeln)“ nur, wenn dieser Artikel auch aus dem Paket kommt
     // Innereien auf der Pickliste direkt unter dem Hack (seit 3.2.7, Wunsch Nutzer): je Innerei eine Zeile, nur abhaken –
     // gekoppelt mit dem Häkchen auf dem Innereien-Zettel (o.innOk)
     const iz = ORGANE.filter(n => qty(S, o, n) > 0);
