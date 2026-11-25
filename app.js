@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.4';
+const APP_VERSION = '3.4.1';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '', archiv: false }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -108,7 +108,7 @@ function render() {
   const { teile, q } = route();
   const seite = teile[0] || 'start';
   ui.renderY = window.scrollY;
-  ui.acts = {}; ui.ins = {};
+  ui.acts = {}; ui.ins = {}; clearTimeout(ui.qTimer);
   if (seite !== 'neu' && seite !== 'bestellung') ui.formDirty = false;
   const navKey = seite === 'bestellung' ? 'bestellungen' : seite === 'kunde' ? 'kunden' : seite === 'tier' || seite === 'archiv' ? 'tiere' : seite === 'warteliste' ? 'bestellungen' : seite === 'vordrucke' ? 'start' : seite;
   navRender(navKey);
@@ -149,8 +149,8 @@ async function neuVerteilenDialog(nurWennWechsel, fest = new Set(), hinweis = ''
   const bleibtNicht = plan.zeilen.filter(z => sameText(z.von, z.nach) && z.check && z.check !== 'ok');
   const abgew = [...fest].map(nr => S.bestellungen.find(o => o.nr === nr)).filter(Boolean);
   const zeile = (nr, an, name, eingang, von, nach, check) => `<tr><td class="c"><label class="check"><input type="checkbox" id="vt_${nr}"${an ? ' checked' : ''}></label></td><td class="r fett">${nr}</td><td>${esc(name)}</td><td>${fmtDate(eingang)}</td><td>${esc(von)}</td><td>→</td><td class="fett">${esc(nach)}</td><td>${check}</td></tr>`;
-  const html = `${hinweis ? `<div class="hinweis">${esc(hinweis)}</div>` : ''}<p>Geprüft: <b>${plan.zeilen.length}</b> offene Bestellungen (alle Tiere ohne gewogene Kisten und Warteliste), in Reihenfolge des Eingangs. <span class="klein">Zeitfenster: höchstens die eingestellten Tage <b>vor</b> dem Wunschtermin – ohne Wunschtermin vor dem Abholtermin des bisherigen Tiers (nie später). Nur Warteliste ohne Wunschtermin: so früh wie möglich. Gemeinsame Abholung zählt als ein Tier.</span>
-      ${plan.festTiere.length ? `<br><span class="klein">Fest (Kisten schon gewogen): ${plan.festTiere.map(esc).join(', ')} · gepackte und bewusst überbelegte Bestellungen bleiben, wo sie sind.</span>` : ''}</p>
+  const html = `${hinweis ? `<div class="hinweis">${esc(hinweis)}</div>` : ''}<p>Geprüft: <b>${plan.zeilen.length}</b> offene Bestellungen (alle Tiere ohne Kistenplan und Warteliste), in Reihenfolge des Eingangs. <span class="klein">Zeitfenster: höchstens die eingestellten Tage <b>vor</b> dem Wunschtermin – ohne Wunschtermin vor dem Abholtermin des bisherigen Tiers (nie später). Nur Warteliste ohne Wunschtermin: so früh wie möglich. Gemeinsame Abholung zählt als ein Tier.</span>
+      ${plan.festTiere.length ? `<br><span class="klein">Fest (Kistenplan fertig – nur noch von Hand): ${plan.festTiere.map(esc).join(', ')} · gepackte und bewusst überbelegte Bestellungen bleiben, wo sie sind.</span>` : ''}</p>
     ${plan.wechsel.length || abgew.length ? `<p><b>${plan.wechsel.length} Bestellung${plan.wechsel.length === 1 ? '' : 'en'} wechseln das Tier</b> <span class="klein">– Häkchen raus = bleibt, wo sie ist (z. B. auf der Warteliste)</span></p>
     <div class="tabwrap" style="max-height:50vh;overflow:auto"><table class="tab"><thead><tr><th class="c">✓</th><th class="r">Nr.</th><th>Name</th><th>Eingang</th><th>bisher</th><th></th><th>neu</th><th>Mengencheck</th></tr></thead><tbody>
     ${plan.wechsel.map(z => zeile(z.nr, true, z.name, z.eingang, z.von, z.nach, reicht(z.check))).join('')}
@@ -299,7 +299,7 @@ function viewBestellung(nr, q, vorlage) {
     if (q && q.get('kunde')) { const k = S.kunden.find(x => x.nr === +q.get('kunde')); if (k) { o.name = k.name; o.tel = k.tel; o.mail = k.mail; } }
     if (q && q.get('tier')) o.tier = q.get('tier');
   }
-  ui.o = o; ui.formDirty = false;
+  ui.o = o; ui.formDirty = false; ui.formVors = null; clearTimeout(ui.formTimer);
   titel(nr ? `Bestellung Nr. ${nr}` : 'Neue Bestellung');
   const st = S.settings;
   const artRows = S.artikel.map((a, i) => {
@@ -371,6 +371,8 @@ function viewBestellung(nr, q, vorlage) {
 
   // --- Live-Berechnung ---
   const aktualisieren = () => {
+    // seit 3.4.1: Mengen/Summen sofort, Tierwahl + Mengencheck erst nach kurzer Tipp-Pause (mit vollem Datenstand sonst träge)
+    const vors = ui.formVors || o.tier || '';
     // Positionen: automatische Menge bei Anzahl × g bzw. Schätzung
     $$('.art-tab tbody tr').forEach(tr => {
       const a = S.artikel[+tr.dataset.i];
@@ -383,15 +385,25 @@ function viewBestellung(nr, q, vorlage) {
         mF.classList.remove('auto', 'schaetz', 'fehlt'); mF.readOnly = false;
         if (an > 0 && g > 0) { mF.value = fmtIn(an * g / 1000, 3); mF.classList.add('auto'); mF.readOnly = true; }
         else if (an > 0 && !(num(p.menge) > 0)) {
-          const sg = posStueckG(S, a, p, Object.assign({}, o, { tier: o.tier || tierVorschlag(S, o.wunsch, o.pakete, o.nr) }));
+          const sg = posStueckG(S, a, p, Object.assign({}, o, { tier: o.tier || vors }));
           if (sg > 0) { mF.value = fmtIn(an * sg / 1000, 3); mF.classList.add('schaetz'); mF.readOnly = true; }
           else { mF.value = ''; mF.classList.add('fehlt'); }
         } else if (warAuto) mF.value = has(p.menge) ? fmtIn(p.menge, 3) : ''; // Anzahl/g gelöscht → berechneten Wert entfernen
       }
       tr.classList.toggle('hat', qty(S, o, a.name) > 0);
     });
-    // Tier
-    const vors = tierVorschlag(S, o.wunsch, o.pakete, o.nr, o);
+    clearTimeout(ui.formTimer); ui.formTimer = setTimeout(() => { if ($('#tierwahl') && ui.o === o) tierUndCheck(); }, 300);
+    // Kunde
+    const k = S.kunden.find(x => sameText(x.name, o.name));
+    const lb = !o.nr && o.name ? letzteBestellungVon(o.name) : null;
+    $('#kdinfo').innerHTML = !o.name ? '' : k ? `Kd-Nr. ${k.nr}${k.notiz ? ' – ' + esc(k.notiz) : ''}${lb ? ` · <a href="#" data-act="uebernehmen">letzte Bestellung (Nr. ${lb.nr}) übernehmen</a>` : ''}` : '<span class="ok">neuer Kunde – wird beim Speichern angelegt</span>';
+    // Summe
+    const ek = einzelKg(S, o);
+    $('#summe').innerHTML = `Einzelartikel ca. <b>${fmtNum(ek, 2)} kg</b>${num(o.pakete) ? ` + ${fmtNum(o.pakete)} Genusspaket${num(o.pakete) > 1 ? 'e' : ''}` : ''} · Schätzpreis <b>${fmtEur(schaetzpreis(S, o))}</b>`;
+  };
+  // Tier & Mengencheck (rechnet die automatische Tierwahl – einmal je Pause)
+  const tierUndCheck = () => {
+    const vors = tierVorschlag(S, o.wunsch, o.pakete, o.nr, o); ui.formVors = vors;
     $('#tierwahl').innerHTML = tierOptionen(o.tier, true, vors);
     const tn = o.tier || vors, t = tier(S, tn);
     let ti = '';
@@ -411,13 +423,6 @@ function viewBestellung(nr, q, vorlage) {
         return `<tr><td class="fett">${esc(z.art)}</td><td class="r">${fmtNum(z.bestelltKg, 2)} kg${stk(nB)}</td><td class="r">ca. ${fmtNum(z.verfuegbarKg, 2)} kg${stk(nV)}</td><td class="r warn">${fehlKgText(z.fehltKg)}${nB !== undefined ? ` <span class="klein">(${fmtNum(nB - nV)} ${z.stkBestellt !== undefined ? 'Stk' : 'Btl'})</span>` : ''}</td></tr>`; }).join('')}</tbody></table>` : ''}
       ${fd.sonst.length ? `<p style="margin:6px 0">${fd.sonst.map(esc).join('<br>')}</p>` : ''}
       <div class="zeile" style="gap:8px;margin-top:8px;flex-wrap:wrap">${ueb ? '<button class="btn" data-act="ueberbelegen" data-w="0">Überbelegung aufheben</button>' : `${fd.zeilen.length ? '<button class="btn" data-act="kuerzen">Auf verfügbare Menge kürzen</button>' : ''}${nr && fd.zeilen.length ? '<button class="btn" data-act="teilen">Rest aufs nächste Tier (Teilen …)</button>' : ''}<button class="btn braun" data-act="ueberbelegen" data-w="1">Bewusst überbelegen – bei diesem Tier lassen</button><span class="klein platz">Ist der Kunde mit weniger einverstanden, kürzen und speichern – sonst den Rest aufs nächste Tier verschieben oder bewusst überbelegen.</span>`}</div></div>`;
-    // Kunde
-    const k = S.kunden.find(x => sameText(x.name, o.name));
-    const lb = !o.nr && o.name ? letzteBestellungVon(o.name) : null;
-    $('#kdinfo').innerHTML = !o.name ? '' : k ? `Kd-Nr. ${k.nr}${k.notiz ? ' – ' + esc(k.notiz) : ''}${lb ? ` · <a href="#" data-act="uebernehmen">letzte Bestellung (Nr. ${lb.nr}) übernehmen</a>` : ''}` : '<span class="ok">neuer Kunde – wird beim Speichern angelegt</span>';
-    // Summe
-    const ek = einzelKg(S, o);
-    $('#summe').innerHTML = `Einzelartikel ca. <b>${fmtNum(ek, 2)} kg</b>${num(o.pakete) ? ` + ${fmtNum(o.pakete)} Genusspaket${num(o.pakete) > 1 ? 'e' : ''}` : ''} · Schätzpreis <b>${fmtEur(schaetzpreis(S, o))}</b>`;
   };
   ui.ins.kopf = el => {
     const f = el.dataset.f; let v = el.value;
@@ -527,9 +532,10 @@ function viewBestellung(nr, q, vorlage) {
     const txt = [];
     for (const z of fd.zeilen) {
       const p = o.pos[z.art]; if (!p) continue;
-      if (z.neu > 0) { p[z.feld] = z.neu; if (z.feld === 'anzahl') p.menge = null; }
+      if (z.neu > 0) { p[z.feld] = z.neu; if (z.feld === 'anzahl') p.menge = null; delete p.pack; } // Packungs-Angabe passt nach dem Kürzen nicht mehr (seit 3.4.1)
       else delete o.pos[z.art];
       const i = S.artikel.findIndex(a => a.name === z.art), tr = $(`.art-tab tbody tr[data-i="${i}"]`);
+      if (tr) { const pf = $('[data-f=pack]', tr), pi = $('.packinfo', tr); if (pf) { pf.value = ''; pf.classList.remove('fehlerfeld'); } if (pi) pi.textContent = ''; }
       if (tr) { const pp = o.pos[z.art] || {}; for (const f of ['anzahl', 'menge']) { const el = $(`[data-f=${f}]`, tr); if (el) el.value = has(pp[f]) && num(pp[f]) > 0 ? fmtIn(pp[f], 3) : ''; } }
       txt.push(`${z.art} ${z.neu > 0 ? 'auf ' + fmtNum(z.neu, 1) + (z.feld === 'anzahl' ? ' Stück' : z.btlBestellt !== undefined ? ' Btl' : ' kg') : 'entfernt'}`);
     }
@@ -542,7 +548,7 @@ function viewBestellung(nr, q, vorlage) {
     if (await lagerDialog(echt)) { meldung(`Nr. ${nr}: ${lagerText(echt)}`); render(); }
   };
   ui.acts.teilen = () => { if (ui.formDirty) return meldung('Bitte die Änderungen zuerst speichern, dann teilen.', true); teilenDialog(nr); };
-  aktualisieren();
+  aktualisieren(); clearTimeout(ui.formTimer); tierUndCheck(); // beim Öffnen sofort vollständig
 }
 function letzteBestellungVon(name) {
   return S.bestellungen.filter(x => sameText(x.name, name)).sort((a, b) => b.nr - a.nr)[0] || null;
@@ -593,6 +599,8 @@ async function bestellungSpeichern(o) {
   const f = formFehler(S, o);
   if (f.length) { fb.innerHTML = `<div class="fehlerbox"><b>Bitte korrigieren – nicht gespeichert:</b><br>${f.map(esc).join('<br>')}</div>`; window.scrollTo(0, 0); return; }
   fb.innerHTML = '';
+  const alt0 = o.nr ? S.bestellungen.find(x => x.nr === o.nr) : null;
+  if (alt0 && (alt0.status || 'offen') !== 'offen' && (o.status || 'offen') === 'offen' && !(await frage('Status zurücksetzen', `Nr. ${o.nr} war <b>${esc(alt0.status)}</b> und wird wieder <b>offen</b>.<br><span class="klein">Lagerplatz${alt0.status === 'abgeholt' ? ', Abholdatum und „Bezahlung offen“' : ''} werden dabei gelöscht.</span>`, 'Auf offen setzen', 'Abbrechen', 'rot'))) return;
   // aufräumen
   o.sonder = (o.sonder || []).filter(s => s.art).map(s => ({ art: s.art, menge: has(s.menge) ? s.menge : null, wunsch: (s.wunsch || '').trim(), ...(s.art === HACK && (s.sorte === 'fettig' || s.sorte === 'mager') ? { sorte: s.sorte } : {}), ...(s.art === BRATEN && s.teil ? { teil: s.teil } : {}), ...(num(s.ganz) > 0 && ganzArt(S, s.art) ? { ganz: Math.round(num(s.ganz)) } : {}) }));
   for (const [k, p] of Object.entries(o.pos)) {
@@ -620,6 +628,8 @@ async function bestellungSpeichern(o) {
   // Bezahlung: nur bei „abgeholt“ (Haken „Bezahlung offen“ im Formular)
   if ((o.status || 'offen') === 'abgeholt') { o.abgeholtAm = o.abgeholtAm || todayISO(); const zc = $('#zahloffen'); if (zc) o.zahlungOffen = zc.checked; }
   else { delete o.abgeholtAm; delete o.zahlungOffen; }
+  // zurück auf „offen“: Lagerplatz wie in der Packliste löschen (seit 3.4.1, vorher blieb er stehen)
+  if ((o.status || 'offen') === 'offen') { o.lagerOrt = ''; o.lagerPlatz = ''; o.gepacktAm = null; }
   // Schätzpreis abgeholter/archivierter Bestellungen festhalten (bei Änderung neu berechnet), sonst mit der Preisliste am Abholtermin
   if (preisBleibtFest(S, o)) preisFestsetzen(S, o); else delete o.preisFest;
   const kundeNeu = kundePflegen(S, o.name, o.tel, o.mail, o.eingang);
@@ -670,7 +680,7 @@ function viewBestellungen() {
       <select class="feld" data-ch="fs" style="max-width:170px">${opt('', 'jeder Status', !F.status)}${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, F.status === s)).join('')}${opt('zahlung', 'Zahlung offen', F.status === 'zahlung')}</select>
       <label class="zeile" style="gap:8px;white-space:nowrap;align-items:center"><input type="checkbox" data-ch="fa" style="width:24px;height:24px"${F.archiv ? ' checked' : ''}> mit Archiv</label>
     </div><div class="klein" id="anzahl" style="margin-bottom:6px"></div><div id="liste"></div>`;
-  ui.ins.q = el => { F.q = el.value; clearTimeout(ui.qTimer); ui.qTimer = setTimeout(liste, 250); }; // erst nach kurzer Tipp-Pause neu aufbauen
+  ui.ins.q = el => { F.q = el.value; clearTimeout(ui.qTimer); ui.qTimer = setTimeout(() => { if ($('#liste')) liste(); }, 250); }; // Seite gewechselt → nichts tun (Fehler bis 3.4) // erst nach kurzer Tipp-Pause neu aufbauen
   ui.acts.fa = el => { F.archiv = el.checked; liste(); };
   ui.acts.ft = el => { F.tier = el.value; liste(); };
   ui.acts.fs = el => { F.status = el.value; liste(); };

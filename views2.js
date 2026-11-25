@@ -298,16 +298,6 @@ function tabMetzger(tn, ziel, zeige) {
   if (g.length > 1) zeige(docMetzger(metzgerauftrag(S, tn, (S.packplaene[tn] || {}).gruppe ? S.packplaene[tn].hackKisteKg : null)), '', `<div class="hinweis"><b>Gemeinsame Abholung ${fmtDate(tier(S, tn).abhol)}:</b> ${g.map(esc).join(' + ')} laufen als ein Topf – ein Auftrag, Mengen für alle Tiere zusammen.</div>`);
   else zeige(docMetzger(metzgerauftrag(S, tn)));
 }
-// Metzgerauftrag für mehrere Tiere mit gleichem Abholtermin (ein Bild für WhatsApp)
-function docMetzgerGruppe(mas) {
-  const blocks = [{ type: 'text', bold: true, text: `Gemeinsame Abholung: ${mas.map(m => m.tier.name).join(' + ')} – Stücke bitte je Tier getrennt halten.` }];
-  for (const ma of mas) {
-    const d = docMetzger(ma);
-    blocks.push({ type: 'h', text: `▶ ${ma.tier.name} (${ma.tier.typ}${num(ma.tier.sg) ? ', ' + fmtNum(ma.tier.sg) + ' kg' : ''})` });
-    d.blocks.forEach(b => blocks.push(b.type === 'h' ? { type: 'h', text: `${ma.tier.name}: ${b.text}` } : b));
-  }
-  return { title: `Auftrag Metzger – ${mas.map(m => m.tier.name).join(' + ')}`, sub: [abholTxt(mas[0].tier)], blocks, footer: fussZeile() };
-}
 
 // =====================================================================
 //  Kisten & Ladeplan (Packplan und Kistenliste in einem)
@@ -425,8 +415,19 @@ function tabKisten(tn, ziel) {
     kistenZuruecksetzen(S, namen); speichern(); meldung(`Kisten von ${namen.join(' + ')} zurückgesetzt.`); render();
   };
   const find = id => S.kisten.find(k => k.id === +id);
-  ui.acts.kf = el => {
+  ui.acts.kf = async el => {
+    if ($('#dialog.auf')) return; // eine Nachfrage läuft schon (z. B. Feld verliert beim Antippen des Knopfs den Fokus)
     const k = find(el.closest('tr').dataset.id); const f = el.dataset.f;
+    // Plausibilität (seit 3.4.1): gewogene kg fließen in die Ausbeute-Statistik – Tippfehler wie 195 statt 19,5 abfangen
+    if ((f === 'kg' && k.art !== OCHS) || f === 'gew') {
+      const v = num(el.value), plan = num(k.plan);
+      if (el.value.trim() !== '') {
+        if (!(v > 0)) { meldung('Gewicht: bitte eine Zahl über 0 kg eintragen (Komma oder Punkt).', true); render(); return; }
+        const grenze = f === 'gew' ? 15 : 35;
+        const auffaellig = v > grenze ? `${fmtNum(v, 2)} kg ist sehr viel für eine Kiste.` : f === 'kg' && plan > 1 && v < plan * 0.5 ? `${fmtNum(v, 2)} kg ist weniger als die Hälfte vom Plan (${fmtNum(plan, 1)} kg).` : '';
+        if (auffaellig && !(await frage('Gewicht prüfen', `Kiste <b>${esc(k.nr)}</b> – ${esc(k.art)}: ${auffaellig}<br>Stimmt das? <span class="klein">(Komma beachten, z. B. 19,5)</span>`, 'Ja, stimmt', 'Korrigieren'))) { render(); return; }
+      }
+    }
     if (f === 'nr') { const n = Math.round(num(el.value)); if (n < 1 || n > 99) { meldung('Kistennummer 1 bis 99', true); render(); return; } k.nr = n; }
     else if (f === 'gew') { k.gew = el.value.trim() === '' ? null : num(el.value); }
     else if (f === 'kg' && k.art === OCHS) { k.kg = el.value.trim() === '' ? (has(k.plan) ? k.plan : 0) : Math.max(0, Math.round(num(el.value))); }
@@ -472,7 +473,7 @@ function tabPackliste(tn, ziel) {
       <td style="width:120px"><input class="feld zahl" inputmode="decimal" data-ch="betrag" value="${r.endbetrag !== null ? fmtIn(r.endbetrag, 2, 2) : ''}"></td><td><button class="btn klein" data-act="status">${statusMarke(r.status)}</button>${r.status === 'abgeholt' ? `<button class="btn klein" data-act="zahl">${r.zahlOffen ? '<span class="marke rot">Zahlung offen</span>' : '<span class="marke gruen">bezahlt</span>'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="klein">Keine Bestellungen für dieses Tier.</td></tr>'}
     </tbody></table></div>`;
   const best = el => S.bestellungen.find(o => o.nr === +el.closest('tr').dataset.nr);
-  ui.acts.betrag = el => { const o = best(el); o.endbetrag = el.value.trim() === '' ? null : r2(num(el.value)); speichern(); };
+  ui.acts.betrag = el => { const o = best(el); const v = num(el.value); if (el.value.trim() !== '' && !(v >= 0)) { meldung('Endbetrag: bitte einen Betrag ab 0 € eintragen.', true); el.value = has(o.endbetrag) ? fmtIn(o.endbetrag, 2, 2) : ''; return; } o.endbetrag = el.value.trim() === '' ? null : r2(v); speichern(); };
   ui.acts.status = async el => {
     const o = best(el); const f = ['offen', 'gepackt', 'abgeholt']; const neu = f[(f.indexOf(o.status || 'offen') + 1) % 3];
     if (neu === 'gepackt') { if (!(await lagerDialog(o))) return; }
@@ -496,38 +497,6 @@ function tabPackliste(tn, ziel) {
 // =====================================================================
 //  Kommissionieren (Pick-by-Light-Liste je Bestellung)
 // =====================================================================
-// Ausbeute wiegen beim Kommissionieren: Gewicht eintippen, dann Teil antippen (Braten nach Teilstück)
-function wiegeKarte(tn, nr) {
-  const t = tier(S, tn); if (!t) return '';
-  const fuer = ui.wiegeFuer === 'rest' ? 0 : nr;
-  const er = (t.erfassung || []).map((e, i) => ({ e, i })).filter(x => num(x.e.nr) === fuer).reverse();
-  const su = erfassungSumme(t, S);
-  const knopf = w => { const v = w.teil ? su.teil[w.teil] : su.art[w.art]; return `<button class="btn" style="min-height:52px;flex:1 1 150px" data-act="wiege" data-art="${esc(w.art)}" data-teil="${esc(w.teil)}">${esc(w.teil ? w.teil.replace(/\s*\(.*\)$/, '') : w.art)}${v ? `<br><span class="klein">${v.teile} ${v.teile === 1 ? 'Teil' : 'Teile'} · ${fmtNum(v.kg, 1)} kg</span>` : ''}</button>`; };
-  const arten = wiegeArten(S);
-  return `<div class="karte"><div class="zeile" style="margin-bottom:8px"><h3 class="platz" style="margin:0">Ausbeute wiegen – ${esc(tn)} <span class="klein">${su.teile} ${su.teile === 1 ? 'Teil' : 'Teile'} · ${fmtNum(su.kg, 1)} kg bisher</span></h3>
-      <label class="f">gewogen für<select class="feld" data-ch="wiegefuer">${opt('nr', `Nr. ${nr}`, fuer !== 0)}${opt('rest', 'Rest (Hofladen)', fuer === 0)}</select></label>
-      <label class="f">Gramm<input class="feld zahl" id="wiegekg" inputmode="numeric" style="width:120px;font-size:22px" placeholder="0"></label></div>
-    <div class="klein" style="margin-bottom:8px">Gewicht in <b>Gramm</b> eintippen, dann das Teil antippen. Braten nach Teilstück, alles andere nach Artikel. Hackfleisch, Suppen- und Soßenknochen werden nicht einzeln gewogen – sie zählen über die gewogenen Kisten (Kisten &amp; Ladeplan). Gesamtübersicht und Löschen beim <a href="#/tier/${encodeURIComponent(tn)}">Tier</a>.</div>
-    <div class="zeile" style="gap:8px;flex-wrap:wrap">${arten.map(knopf).join('')}</div>
-    ${er.length ? `<div class="klein" style="margin-top:10px"><b>Zuletzt ${fuer ? 'für Nr. ' + nr : 'als Rest'}:</b> ${er.slice(0, 12).map(({ e, i }) => `<span class="marke" style="margin:2px">${esc(e.teil ? e.teil.replace(/\s*\(.*\)$/, '') : e.art)} ${fmtNum(num(e.kg) * 1000, 0)} g <a href="#" data-act="wiegeWeg" data-i="${i}" title="löschen">✕</a></span>`).join('')}</div>` : ''}</div>`;
-}
-function wiegeAktionen(tn, nr) {
-  const t = tier(S, tn); if (!t) return;
-  // nach dem Neuzeichnen beim Wiegen bleiben (nicht nach oben springen), Feld wieder bereit
-  const wiegeNeu = () => { render(); setTimeout(() => { const g = $('#wiegekg'); if (g) { g.scrollIntoView({ block: 'center' }); g.focus(); } }, 30); };
-  ui.acts.wiegefuer = el => { ui.wiegeFuer = el.value; wiegeNeu(); };
-  ui.acts.wiege = el => {
-    // Eingabe in Gramm (ganze Zahl; „1.450“ oder „1450“), gespeichert wird weiter in kg
-    const f = $('#wiegekg'); const g = Math.round(parseFloat(String(f.value).replace(/[\s.]/g, '').replace(',', '.')) || 0); const kg = g / 1000;
-    if (!(g > 0)) { meldung('Bitte zuerst das Gewicht in Gramm eintippen.', true); f.focus(); return; }
-    if (g < 20) { meldung(`${fmtNum(g)} g? Bitte in Gramm eintippen (z. B. 1450 für 1,45 kg).`, true); f.focus(); return; }
-    if (g > 30000) { meldung(`${fmtNum(g)} g für ein Teil? Bitte prüfen (in Gramm, z. B. 1450).`, true); f.focus(); return; }
-    if (!Array.isArray(t.erfassung)) t.erfassung = [];
-    t.erfassung.push({ art: el.dataset.art, teil: el.dataset.teil || '', kg: r3(kg), nr: ui.wiegeFuer === 'rest' ? 0 : nr, zeit: new Date().toISOString() });
-    speichern(); meldung(`${el.dataset.teil || el.dataset.art}: ${fmtNum(g)} g erfasst.`); wiegeNeu();
-  };
-  ui.acts.wiegeWeg = el => { t.erfassung.splice(+el.dataset.i, 1); speichern(); wiegeNeu(); };
-}
 function viewKommissionierung(q) {
   if (q.get('tier')) ui.tierWahl = q.get('tier');
   const tn = standardTier();

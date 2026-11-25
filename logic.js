@@ -14,7 +14,6 @@ const GULASCH = 'Gulasch geschnitten';
 const BRATEN = 'Braten';
 const SK = 'Suppenknochen (SK)';
 const FK = 'Soßenknochen (FK)';
-const EPS = 1e-9;
 
 // ---------- Hilfen ----------
 const num = v => {
@@ -65,7 +64,6 @@ function parseDate(t) {
 const sameText = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
 
 // ---------- Artikel / Preisliste ----------
-const artList = S => S.artikel;
 const art = (S, name) => S.artikel.find(a => a.name === name);
 const istOrgan = name => ORGANE.includes(name);
 const einheitForm = a => a.beutelG > 0 ? 'Btl' : a.einheit; // wie im Eingabeblatt: kg / Btl / Stk
@@ -87,8 +85,6 @@ const posStueckG = (S, a, p, o) => istWade(a, p) ? wadeKg(S, o && o.tier) * 1000
 const gText = g => g >= 1000 ? fmtNum(g / 1000, 2) + ' kg' : fmtNum(g) + ' g';
 const paketKgArt = (S, name) => paketListe(S).filter(p => p.art === name).reduce((s, p) => s + num(p.anzahl) * paketG(S, p) / 1000, 0);
 const paketGewicht = S => paketListe(S).reduce((s, p) => s + num(p.anzahl) * paketG(S, p) / 1000, 0);
-const imPaket = (S, name) => paketKgArt(S, name) > 0;
-const paketStueck = (S, name) => paketListe(S).filter(p => p.art === name).reduce((s, p) => s + num(p.anzahl), 0);
 // Hack im Paket: offen = 1 Tüte, vakuumiert = Portionen à hackPaketG
 function hackPaketText(S, pakete, pakVak) {
   const kg = paketKgArt(S, HACK), hp = num(S.settings.hackPaketG) || 500;
@@ -231,16 +227,6 @@ function ausbeuteStatistik(S) {
 // Messwert, der verwendet wird (erst ab STAT_MIN_TIERE Tieren), sonst null
 const gemessen = (S, typ, kind, name) => { const s = ausbeuteStatistik(S)[typ === 'Bulle' ? 'Bulle' : 'Rind'][kind][name]; return s && s.n >= STAT_MIN_TIERE ? s : null; };
 const gemessenRoh = (S, typ, kind, name) => ausbeuteStatistik(S)[typ === 'Bulle' ? 'Bulle' : 'Rind'][kind][name] || null;
-// Wiege-Knöpfe beim Kommissionieren: Ausbeute-Artikel, Braten nach Teilstück
-function wiegeArten(S) {
-  const out = [];
-  for (const a of ausbeuteArtikel(S)) {
-    if (KISTEN_AUSBEUTE.includes(a.name)) continue; // kommt aus den gewogenen Kisten
-    if (a.name === BRATEN && bratenTeile(S).length) bratenTeile(S).forEach(x => out.push({ art: BRATEN, teil: x.name }));
-    else out.push({ art: a.name, teil: '' });
-  }
-  return out;
-}
 // Teile, die am Ende je Artikel zur Verfügung standen (für das Archiv)
 function ausbeuteTier(S, t) {
   const su = erfassungSumme(t, S), sg = num(t.sg);
@@ -420,22 +406,6 @@ const portionOf = (S, o, name) => portionenOf(S, o).find(p => p.art === name);
 // Vakuum-Artikel – seit 1.8.1 Standard: vakuumiert, außer ausdrücklich abgewählt (vak: false)
 const istVak = p => !!p && p.vak !== false;
 const vakArtikel = (S, o) => S.artikel.filter(a => { const p = o.pos && o.pos[a.name]; return istVak(p) && qty(S, o, a.name) > 0; }).map(a => a.name);
-// Vakuum-Tüten (leer = automatisch)
-function tuetenAuto(S, o) {
-  let t = 0;
-  const std = num(S.settings.tueteJeKg) > 0 ? num(S.settings.tueteJeKg) : 1;
-  for (const a of S.artikel) {
-    const p = o.pos && o.pos[a.name];
-    if (!istVak(p) || !has(p.menge) && !has(p.anzahl)) continue;
-    const q = qty(S, o, a.name);
-    if (!(q > 0)) continue;
-    if (a.beutelG > 0 || a.einheit === 'Stk') t += num(p.menge);
-    else if (num(p.anzahl) > 0) t += num(p.anzahl);
-    else t += Math.max(1, roundUp(q / std));
-  }
-  return t;
-}
-const tueten = (S, o) => has(o.tuetenManuell) ? num(o.tuetenManuell) : tuetenAuto(S, o);
 // Ausnahmen vom Standard „vakuumiert“ (seit 2.2 ersetzt das die Tüten-Zählung)
 const nichtVak = (S, o) => S.artikel.filter(a => { const p = o.pos && o.pos[a.name]; return p && !istVak(p) && qty(S, o, a.name) > 0 && !istOrgan(a.name); }).map(a => a.name);
 // ---------- Preislisten mit „gültig ab“ ----------
@@ -513,6 +483,13 @@ const einzelKg = (S, o) => S.artikel.reduce((t, a) => t + kgVon(S, o, a), 0);
 // Prüfung im Formular (PortionsText / Stückgewicht fehlt)
 function formFehler(S, o) {
   const f = [];
+  // seit 3.4.1: keine negativen/ungültigen Zahlen (vorher wurden z. B. −2 Nieren gespeichert → negativer Schätzpreis, Tier hatte mehr frei)
+  for (const [k, t] of [['pakete', 'Genusspakete'], ['pakVak', 'vakuumierte Pakete']]) { const v = o[k]; if (has(v) && (!isFinite(Number(String(v).replace(',', '.'))) || num(v) < 0 || num(v) !== Math.round(num(v)))) f.push(`${t}: bitte eine ganze Zahl ab 0 eintragen`); }
+  for (const a of S.artikel) {
+    const p = o.pos && o.pos[a.name]; if (!p) continue;
+    for (const [k, t] of [['menge', 'Menge'], ['anzahl', 'Anzahl'], ['g', 'g je Stück']]) if (has(p[k]) && num(p[k]) < 0) f.push(`${a.name}: ${t} darf nicht negativ sein`);
+    if ((a.einheit === 'Stk' || a.beutelG > 0) && has(p.menge) && num(p.menge) > 0 && num(p.menge) !== Math.round(num(p.menge))) f.push(`${a.name}: bitte ganze ${a.beutelG > 0 ? 'Beutel' : 'Stück'} eintragen`);
+  }
   for (const a of S.artikel) {
     if (a.beutelG > 0 || a.einheit === 'Stk') continue;
     const p = o.pos && o.pos[a.name];
@@ -882,6 +859,7 @@ function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
   const kand = S.tiere.filter(t => {
     if (t.archiv) return false;
     if (!t.abhol || t.abhol < heute) return false;
+    if (kistenRows(S, t.name).length) return false; // Kistenplan fertig → nur noch von Hand (seit 3.4.1, Entscheidung Nutzer)
     if (wunschISO && t.abhol > wunschISO) return false;
     // wie beim Neu-Verteilen: höchstens … Tage vor dem Wunschtermin, sonst Warteliste
     if (wunschISO && tageZwischen(t.abhol, wunschISO) > (has(S.settings.verteilenMaxTage) && num(S.settings.verteilenMaxTage) >= 0 ? num(S.settings.verteilenMaxTage) : 5)) return false;
@@ -929,8 +907,8 @@ function neuVerteilenPlan(S, fest) {
   const heute = todayISO();
   const maxTage = has(S.settings.verteilenMaxTage) && num(S.settings.verteilenMaxTage) >= 0 ? num(S.settings.verteilenMaxTage) : 5;
   const T = JSON.parse(JSON.stringify(S));
-  // fest sind nur Tiere, deren Kisten schon gewogen werden (beim Metzger abgeholt); ein bloßer Kistenplan wird danach neu berechnet
-  const mitKisten = new Set((T.kisten || []).filter(k => kisteGewogen(k)).flatMap(keyNamen));
+  // fest sind alle Tiere mit Kistenplan (seit 3.4.1, Entscheidung Nutzer: „Kistenplan fertig – nur noch von Hand“; vorher nur gewogene)
+  const mitKisten = new Set((T.kisten || []).flatMap(keyNamen));
   for (const t of T.tiere || []) if (!t.archiv && kistenRows(T, t.name).length && kommissionierBegonnen(T, [t.name])) mitKisten.add(t.name); // Kommissionieren läuft → fest
   const mitPlan = new Set((T.kisten || []).flatMap(keyNamen).filter(n => !mitKisten.has(n)));
   const freiesTier = t => !!t && !t.archiv && !mitKisten.has(t.name);
@@ -1353,7 +1331,6 @@ const HOF_REGELN = {
   Braten: { r: 'kg', von: 1, bis: 1.5 }, Tafelspitz: { r: 'kg', von: 1.5, bis: 2 }, Filet: { r: 'halb' }, 'Gulasch geschnitten': { r: 'kg', von: 1, bis: 1 },
   Siedfleisch: { r: 'kg', von: 1, bis: 1.5 }, Ochsenschwanz: { r: 'ganz' }, 'Suppenknochen (SK)': { r: 'kiste' }, 'Soßenknochen (FK)': { r: 'kiste' }
 };
-const HOF_REGEL_ARTEN = ['stk', 'kg', 'ganz', 'halb', 'kiste'];
 function hofRegel(S, name) { const x = (S.settings.hofPack || {})[name]; return Object.assign({}, HOF_REGELN[name] || { r: 'kg', von: 1, bis: 1.5 }, x || {}); }
 function hofRegelText(S, name) {
   const g = hofRegel(S, name);
@@ -1850,7 +1827,6 @@ function kistenKontext(S, tierName) {
   const t = tier(S, tierName);
   return { t, ords: t ? ordersOfTier(S, t.name) : [], rows, key: tierName, topf: false };
 }
-function kistenSumme(S, tierName, artName) { return S.kisten.filter(k => k.tier === tierName && k.art === artName).reduce((s, k) => s + num(k.kg), 0); }
 // Menge je Genusspaket (feste Zusammensetzung aus den Einstellungen)
 function anteilJePaket(S, t, artName) { return paketKgArt(S, artName); }
 // Berechnung Kistenblatt: je Zeile Start, Bedarf, verplant, Rest
@@ -2245,9 +2221,9 @@ function standPruefen(x) {
 if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, bezugstermin, erfassungLuecken, statistikGrund, unvollstaendig, topfGemischt, innPickAbgleich, innOkUmschalten, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
-  tuetenAuto, tueten, nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
+  nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, topfTier, topfAus, topfN, ordersOfTopf, tierAnzeige, kistenKontext, abschlussNamen, mengencheckT, TOPF_SEP, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
-  HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, wiegeArten, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
+  HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
 };
