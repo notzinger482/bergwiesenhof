@@ -349,3 +349,7 @@ td .btn.klein + .btn.klein { margin-left: 0; margin-top: 8px; }
 .abhakhinweis { margin: 0 0 8px; }
 .ktab td:last-child, .ktab th:last-child { padding-left: 2px; padding-right: 4px; }
 .ktab td:first-child, .ktab th:first-child { padding-left: 4px; padding-right: 4px; }
+
+/* Sortieren per Spaltenkopf (3.5.3) */
+.tab th.sortierbar { cursor: pointer; user-select: none; white-space: nowrap; }
+.tab th.sortierbar:active { background: #eef3e4; }

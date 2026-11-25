@@ -57,20 +57,25 @@ function viewTermine() {
   titel('Abholtermine');
   const heute = todayISO(), alt = isoOf(new Date(Date.now() - 14 * 864e5));
   const liste = termine(S).filter(x => x.datum >= alt || ordersOfTermin(S, x).some(o => (o.status || 'offen') === 'offen'));
+  const zus = (x, f) => x[f] ? `<span class="marke gruen">${esc(zusageText(x, f))}</span>` : '<span class="marke gelb">offen</span>';
   const zeile = x => {
+    if (terminAbgeschlossen(S, x)) {
+      const at = terminArchivTiere(S, x), ob = terminArchivBestellungen(S, x);
+      return `<tr class="klick grau" data-act="oeffnen" data-id="${esc(x.id)}"><td class="fett">${fmtDate(x.datum)}</td><td>${at.map(t => esc(t.name)).join(' + ')} <span class="klein">(Archiv)</span></td><td class="r">${ob.length}</td><td class="r">${fmtNum(ob.reduce((s, o) => s + num(o.pakete), 0))}</td><td colspan="2" class="klein">–</td><td><span class="marke blau">abgeschlossen</span></td><td class="klein">${esc(x.notiz || '')}</td></tr>`;
+    }
     const gl = terminTiere(S, x), os = ordersOfTermin(S, x);
     const pak = os.reduce((s, o) => s + num(o.pakete), 0);
     let status = '';
     if (gl.length) { const T = topfAus(S, gl.map(t => t.name)) || gl[0]; const ch = mengencheckT(S, T); const n = os.filter(o => (ch[o.nr] || '').startsWith('reicht') && !o.ueberbelegt).length; status = n ? `<span class="marke rot">${n} reicht nicht</span>` : os.length ? '<span class="marke gruen">ok</span>' : ''; }
     else status = os.length ? '<span class="marke gelb">Tier fehlt – Vorschlag ansehen</span>' : '<span class="klein">noch keine Bestellungen</span>';
     return `<tr class="klick${x.datum < heute ? ' grau' : ''}" data-act="oeffnen" data-id="${esc(x.id)}"><td class="fett">${fmtDate(x.datum)}</td><td>${gl.length ? gl.map(t => `${esc(t.name)} <span class="klein">(${esc(t.typ)}${num(t.sg) ? ', ' + fmtNum(t.sg) + ' kg' : ''})</span>`).join(' + ') : '<span class="klein">noch kein Tier</span>'}</td>
-      <td class="r">${os.length}</td><td class="r">${fmtNum(pak)}</td><td>${status}</td><td class="klein">${esc(x.notiz || '')}</td></tr>`;
+      <td class="r">${os.length}</td><td class="r">${fmtNum(pak)}</td><td>${zus(x, 'zusageSchlachter')}</td><td>${zus(x, 'zusageMetzger')}</td><td>${status}</td><td class="klein">${esc(x.notiz || '')}</td></tr>`;
   };
   const ohne = S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name && !istTerminWarte(o)).length;
   inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Abholtermine</h1>${ohne ? `<a class="btn" href="#/warteliste">Warteliste ohne Termin (${ohne})</a>` : ''}<button class="btn" data-act="mehrere">Mehrere anlegen …</button><button class="btn haupt" data-act="neu">+ Neuer Abholtermin</button></div>
     ${(() => { const bis = isoOf(new Date(Date.now() + 80 * 864e5)), letzter = termine(S).filter(x => x.datum >= heute).pop(); return !letzter || letzter.datum < bis ? `<div class="hinweis">Termine reichen nur bis ${letzter ? fmtDate(letzter.datum) : '–'} – bitte Termine für die nächsten ca. 3 Monate anlegen.</div>` : ''; })()}
     <p class="klein" style="margin-top:0">Wir sagen „nächste Woche gibt es Fleisch“: Abholtermin anlegen, Bestellungen darauf legen – das passende Tier kommt später dazu. Die App sagt, wie schwer ein Rind bzw. ein Bulle mindestens sein muss. Unverbindliche Anfragen („melde mich nochmal“) bleiben auf der Warteliste.</p>
-    ${liste.length ? `<div class="tabwrap"><table class="tab"><thead><tr><th>Abholung</th><th>Tier(e)</th><th class="r">Bestellungen</th><th class="r">Pakete</th><th>Stand</th><th>Notiz</th></tr></thead><tbody>${liste.map(zeile).join('')}</tbody></table></div>` : '<div class="karte">Noch keine Abholtermine.</div>'}`;
+    ${liste.length ? `<div class="tabwrap"><table class="tab"><thead><tr><th>Abholung</th><th>Tier(e)</th><th class="r">Bestellungen</th><th class="r">Pakete</th><th>Zusage Schlachter</th><th>Zusage Metzger</th><th>Stand</th><th>Notiz</th></tr></thead><tbody>${liste.map(zeile).join('')}</tbody></table></div>` : '<div class="karte">Noch keine Abholtermine.</div>'}`;
   ui.acts.oeffnen = el => gehe('#/termin/' + encodeURIComponent(el.dataset.id));
   ui.acts.neu = () => terminNeuDialog();
   ui.acts.mehrere = () => termineMehrereDialog();
@@ -159,6 +164,16 @@ function viewTermin(id) {
   const x = terminById(S, id);
   if (!x) { inhalt().innerHTML = '<div class="fehlerbox">Abholtermin nicht gefunden.</div>'; return; }
   titel(terminTxt(x));
+  if (terminAbgeschlossen(S, x)) {
+    const at = terminArchivTiere(S, x), ob = terminArchivBestellungen(S, x);
+    inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">${terminTxt(x)} <span class="marke blau" style="font-size:15px">abgeschlossen</span></h1><a class="btn" href="#/termine">Alle Termine</a></div>
+      <div class="karte"><p style="margin-top:0">Alle Tiere dieses Termins sind abgeschlossen und im Archiv.</p>
+      <p>${at.map(t => `<a href="#/tier/${encodeURIComponent(t.name)}"><b>${esc(t.name)}</b></a> – ${esc(t.typ)}${num(t.sg) ? ', ' + fmtNum(t.sg) + ' kg' : ''}`).join('<br>')}</p>
+      <p>${ob.length} Bestellungen · ${fmtNum(ob.reduce((s, o) => s + num(o.pakete), 0))} Genusspakete · Zusage Schlachter ${esc(zusageText(x, 'zusageSchlachter'))} · Zusage Metzger ${esc(zusageText(x, 'zusageMetzger'))}</p>
+      <label class="f">Notiz<input class="feld" data-ch="tnotiz" value="${esc(x.notiz || '')}"></label></div>`;
+    ui.acts.tnotiz = el => { x.notiz = el.value.trim(); speichern(); meldung('Notiz gespeichert.'); };
+    return;
+  }
   const gl = terminTiere(S, x), ords = ordersOfTermin(S, x);
   ui.terminProbe = ui.terminProbe || {};
   inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">${terminTxt(x)}</h1><a class="btn" href="#/termine">Alle Termine</a></div><div id="tinhalt"><div class="karte">wird berechnet …</div></div>`;
@@ -182,6 +197,7 @@ function terminInhalt(x, gl, ords) {
   const vorschlagTyp = (gv.rind.mindest && gv.rind.n === 1 && gv.rind.mindest <= gv.rind.std * 1.15) ? 'Rind' : 'Bulle';
   $('#tinhalt').innerHTML = `<div class="spalten2"><div class="karte"><h3 style="margin-top:0">Termin</h3>
       <div class="zeile oben"><label class="f" style="width:200px">Datum<input class="feld" type="date" data-ch="tdatum" value="${esc(x.datum)}"></label><label class="f platz">Notiz<input class="feld" data-ch="tnotiz" value="${esc(x.notiz || '')}"></label></div>
+      <div class="zeile oben" style="margin-top:10px;gap:18px">${[['zusageSchlachter', 'Zusage Schlachter'], ['zusageMetzger', 'Zusage Metzger']].map(([f, t]) => `<label class="zeile" style="gap:8px;align-items:center"><input type="checkbox" style="width:26px;height:26px;accent-color:var(--gruen-d)" data-ch="zusage" data-f="${f}"${x[f] ? ' checked' : ''}> <b>${t}</b> <span class="klein">${x[f] ? 'am ' + fmtDate(x[f]) : 'offen'}</span></label>`).join('')}</div>
       <div class="knopfleiste" style="margin-top:10px"><a class="btn haupt" href="#/neu?termin=${encodeURIComponent(x.id)}">+ Bestellung für diesen Termin</a><a class="btn" href="#/bestellungen" data-act="liste">Bestellliste</a>${gl.length ? '' : '<button class="btn rot" data-act="loeschen">Termin löschen</button>'}</div></div>
     <div class="karte"><h3 style="margin-top:0">Tier${gl.length > 1 ? 'e' : ''}</h3>
       ${gl.length ? `<p style="margin-top:0">${gl.map(t => `<a href="#/tier/${encodeURIComponent(t.name)}"><b>${esc(t.name)}</b></a> – ${esc(t.typ)}, ${fmtNum(sgRechnung(S, t))} kg${num(t.sg) ? '' : ' (Standard)'}`).join('<br>')}</p><div class="knopfleiste"><a class="btn" href="#/schlachttag/menge?tier=${encodeURIComponent(gl[0].name)}">Mengenprüfung</a></div>` : `<p class="klein" style="margin-top:0">Noch kein Tier. Vorschlag: <b>${vorschlagTyp}</b> – Mindestgewicht siehe unten.</p>`}
@@ -202,6 +218,7 @@ function terminInhalt(x, gl, ords) {
   ui.acts.pmin = el => { const v = el.dataset.t === 'Bulle' ? gv.bulle : gv.rind; if (!v.mindest) return meldung(`Mit bis zu 4 ${el.dataset.t === 'Bulle' ? 'Bullen' : 'Rindern'} reicht es nicht.`, true); p = { typ: v.typ, sg: v.mindest, n: v.n }; neuRechnen(); };
   ui.acts.liste = () => { ui.filter.tier = 'termin:' + x.id; ui.filter.archiv = false; gehe('#/bestellungen'); };
   ui.acts.tnotiz = el => { x.notiz = el.value.trim(); speichern(); meldung('Notiz gespeichert.'); };
+  ui.acts.zusage = el => { zusageSetzen(S, x.id, el.dataset.f, el.checked); speichern(); meldung(el.checked ? 'Zusage eingetragen.' : 'Zusage entfernt.'); terminInhalt(x, gl, ords); };
   ui.acts.tdatum = async el => {
     const neu = el.value; if (!neu || neu === x.datum) return;
     if (!(await frage('Datum ändern', `Abholtermin von ${fmtDate(x.datum)} auf <b>${fmtDate(neu)}</b> verlegen?${gl.length ? ' Die Tiere des Termins gehen mit.' : ''} Alle Bestellungen bleiben auf dem Termin.`, 'Verlegen', 'Abbrechen'))) { el.value = x.datum; return; }

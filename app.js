@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.5.2';
+const APP_VERSION = '3.5.3';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '', archiv: false }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -191,6 +191,17 @@ function standardTier() {
   const aktiv = tiereSortiert();
   return t ? t.name : (aktiv[0] ? aktiv[0].name : '');
 }
+// Sortieren per Spaltenkopf (seit 3.5.3, Wunsch Nutzer): unabhängig von Suche/Filtern, erneutes Antippen dreht die Richtung
+const thSort = (st, k, t, cls = '') => `<th class="${cls} sortierbar" data-act="sort" data-k="${k}">${t}${st.k === k ? (st.d > 0 ? ' ▲' : ' ▼') : ''}</th>`;
+function sortiere(liste, st, wert) {
+  const v = x => wert(x, st.k), leer = x => x === '' || x === null || x === undefined;
+  return liste.map((x, i) => ({ x, w: v(x), i })).sort((a, b) => {
+    if (leer(a.w) !== leer(b.w)) return leer(a.w) ? 1 : -1; // Leere immer ans Ende
+    const c = typeof a.w === 'number' && typeof b.w === 'number' ? a.w - b.w : String(a.w).localeCompare(String(b.w), 'de', { numeric: true, sensitivity: 'base' });
+    return (c || a.i - b.i) * (c ? st.d : 1);
+  }).map(z => z.x);
+}
+function sortKlick(st, k, absteigend = []) { if (st.k === k) st.d = -st.d; else { st.k = k; st.d = absteigend.includes(k) ? -1 : 1; } }
 const zahlMarke = o => zahlungOffen(o) ? ' <span class="marke rot">Zahlung offen</span>' : '';
 const statusMarke = s => s === 'abgeholt' ? '<span class="marke blau">abgeholt</span>' : s === 'gepackt' ? '<span class="marke gruen">gepackt</span>' : '<span class="marke">offen</span>';
 // bewusst überbelegt (Bestellung bleibt trotz „reicht nicht“ bei diesem Tier): gelb statt rot
@@ -257,11 +268,14 @@ function viewStart() {
         <td class="r">${has(o.endbetrag) ? fmtEur(o.endbetrag) : `<span class="klein">ca.</span> ${fmtEur(schaetzpreis(S, o))}`}</td><td class="r"><button class="btn klein haupt" data-act="zbezahlt" data-nr="${o.nr}">bezahlt ✓</button></td></tr>`).join('')}
       </tbody></table></div></div>`;
   }
+  // Zusagen fehlen bei Terminen in den nächsten 21 Tagen
+  const ohneZusage = termine(S).filter(x => x.datum >= heute && x.datum <= isoOf(new Date(Date.now() + 21 * 864e5)) && !terminAbgeschlossen(S, x) && (!x.zusageSchlachter || !x.zusageMetzger) && (terminTiere(S, x).length || ordersOfTermin(S, x).length));
+  if (ohneZusage.length) h += `<div class="hinweis"><b>Zusagen fehlen:</b> ${ohneZusage.map(x => `<a href="#/termin/${esc(x.id)}">${fmtDate(x.datum)}</a> – ${[!x.zusageSchlachter ? 'Schlachter' : '', !x.zusageMetzger ? 'Metzger' : ''].filter(Boolean).join(' und ')}`).join(' · ')}</div>`;
   if (ui.letzteNr) h += `<p class="klein">Zuletzt gespeichert: <a href="#/bestellung/${ui.letzteNr}">Bestellung Nr. ${ui.letzteNr}</a></p>`;
   if (offeneTermine.length) {
     h += `<h2>Abholtermine ohne Tier</h2><div class="raster">` + offeneTermine.map(x => { const os = ordersOfTermin(S, x); return `<div class="karte tierkarte" data-act="termin" data-id="${esc(x.id)}">
       <div class="kopfz"><span class="name">${fmtDate(x.datum)}</span><span class="klein">noch kein Tier</span></div>${x.notiz ? `<div class="klein">${esc(x.notiz)}</div>` : ''}
-      <div class="klein">${os.length} Bestellung${os.length === 1 ? '' : 'en'} · ${fmtNum(os.reduce((s, o) => s + num(o.pakete), 0))} Genusspakete</div><div class="klein">Gewichtsvorschlag ansehen →</div></div>`; }).join('') + '</div>';
+      <div class="klein">${os.length} Bestellung${os.length === 1 ? '' : 'en'} · ${fmtNum(os.reduce((s, o) => s + num(o.pakete), 0))} Genusspakete</div>${zusageZeile(x)}<div class="klein">Gewichtsvorschlag ansehen →</div></div>`; }).join('') + '</div>';
   }
   h += `<h2>Tiere</h2>`;
   if (!kommende.length) h += `<div class="karte">Noch keine Tiere angelegt. <a href="#/tier/neu">Tier anlegen</a></div>`;
@@ -278,6 +292,8 @@ function viewStart() {
     o.zahlungOffen = false; speichern(); meldung(`Nr. ${nrText(o)}: bezahlt.`); render();
   };
 }
+// Zusagen Schlachter/Metzger eines Abholtermins (seit 3.5.3)
+const zusageZeile = x => `<div class="klein">Zusage Schlachter: ${x.zusageSchlachter ? '<b class="ok">✓</b>' : '<b class="warn">offen</b>'} · Metzger: ${x.zusageMetzger ? '<b class="ok">✓</b>' : '<b class="warn">offen</b>'}</div>`;
 function tierKarte(t) {
   const i = tierInfo(S, t);
   const nen = i.maxPak || 1;
@@ -290,7 +306,7 @@ function tierKarte(t) {
     <div class="balken ${q > 1.0001 ? 'ueber' : q >= 0.9999 ? 'voll' : ''}"><div style="width:${pct}%"></div></div>
     <div class="klein">verkauft: <b>${fmtNum(q * 100, 0)} %</b>${topf ? ` <span class="klein">(${esc(topf)} zusammen)</span>` : ''}</div>
     <div class="klein">Genusspakete: <b>${fmtNum(i.pakete)}</b> von ${nen} · frei ${fmtNum(i.frei)}</div>
-    <div class="klein">${i.anzahl} Bestellungen${i.reichtNicht ? ` · <span class="warn">${i.reichtNicht} reicht nicht</span>` : ''}${i.ueberbelegt ? ` · <span class="klein">${i.ueberbelegt} bewusst überbelegt</span>` : ''}</div></div>`;
+    <div class="klein">${i.anzahl} Bestellungen${i.reichtNicht ? ` · <span class="warn">${i.reichtNicht} reicht nicht</span>` : ''}${i.ueberbelegt ? ` · <span class="klein">${i.ueberbelegt} bewusst überbelegt</span>` : ''}</div>${t.abhol && terminAm(S, t.abhol) ? zusageZeile(terminAm(S, t.abhol)) : ''}</div>`;
 }
 
 // =====================================================================
@@ -735,9 +751,10 @@ async function bestellungSpeichern(o) {
 function viewBestellungen() {
   titel('Bestellungen');
   const F = ui.filter;
+  const SB = ui.sortB = ui.sortB || { k: 'nr', d: -1 }; // Standard wie bisher: neueste Nummer oben
   const liste = () => {
     const q = F.q.trim().toLowerCase();
-    let os = S.bestellungen.slice().sort((a, b) => b.nr - a.nr);
+    let os = S.bestellungen.slice();
     if (F.tier && F.tier.startsWith('termin:')) { const x = terminById(S, F.tier.slice(7)); const ids = new Set(ordersOfTermin(S, x).map(o => o.nr)); os = os.filter(o => ids.has(o.nr)); }
     else if (F.tier === 'Warteliste') os = os.filter(o => o.tier === 'Warteliste' && !istTerminWarte(o));
     else if (F.tier) { const gl = (topfTier(S, F.tier) || {}).glieder || [F.tier]; os = os.filter(o => gl.includes(o.tier)); }
@@ -749,10 +766,15 @@ function viewBestellungen() {
     const imArchiv = mitArchiv ? 0 : os.filter(o => archivNamen.has(o.tier)).length;
     if (!mitArchiv) os = os.filter(o => !archivNamen.has(o.tier));
     const checks = {}; [...new Set(os.map(o => o.tier))].forEach(t => Object.assign(checks, mengencheckTier(S, t)));
+    const chOf = o => o.tier === 'Warteliste' ? mengencheck(S, o) : tier(S, o.tier) ? (checks[o.nr] || '') : 'Tier unbekannt';
+    const ST = { offen: 1, gepackt: 2, abgeholt: 3 };
+    os = sortiere(os, SB, (o, k) => k === 'nr' ? (o.teilVon || o.nr) + (o.teilVon ? (o.teilNr || 2) / 1000 : 0) : k === 'eingang' ? o.eingang || '' : k === 'wunsch' ? o.wunsch || '' : k === 'name' ? o.name || ''
+      : k === 'tier' ? ((terminVon(S, o) || {}).datum || '9999') + ' ' + tierText(S, o) : k === 'pakete' ? num(o.pakete) : k === 'preis' ? num(schaetzpreis(S, o)) : k === 'status' ? (ST[o.status || 'offen'] || 0) + (zahlungOffen(o) ? 0.5 : 0)
+      : k === 'check' ? (rotZeile(chOf(o), o) ? 0 : chOf(o) === 'ok' ? 2 : 1) : '');
     $('#liste').innerHTML = !os.length ? '<div class="karte">Keine Bestellungen gefunden.</div>' :
-      `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Eingang</th><th>Wunschtermin</th><th>Name</th><th>Tier</th><th class="r">Pakete</th><th>Bestellung</th><th class="r">Schätzpreis</th><th>Status</th><th>Mengencheck</th></tr></thead><tbody>` +
+      `<div class="tabwrap"><table class="tab"><thead><tr>${thSort(SB, 'nr', 'Nr.', 'r')}${thSort(SB, 'eingang', 'Eingang')}${thSort(SB, 'wunsch', 'Wunschtermin')}${thSort(SB, 'name', 'Name')}${thSort(SB, 'tier', 'Abholung / Tier')}${thSort(SB, 'pakete', 'Pakete', 'r')}<th>Bestellung</th>${thSort(SB, 'preis', 'Schätzpreis', 'r')}${thSort(SB, 'status', 'Status')}${thSort(SB, 'check', 'Mengencheck')}</tr></thead><tbody>` +
       os.map(o => {
-        const ch = o.tier === 'Warteliste' ? mengencheck(S, o) : tier(S, o.tier) ? (checks[o.nr] || '') : 'Tier unbekannt';
+        const ch = chOf(o);
         return `<tr class="klick ${rotZeile(ch, o) ? 'rot' : ''}" data-act="oeffnen" data-nr="${o.nr}"><td class="r fett">${nrText(o)}</td><td>${fmtDate(o.eingang)}</td><td>${o.wunsch ? fmtDate(o.wunsch) : ''}</td><td>${esc(o.name)}</td><td>${esc(tierText(S, o))}</td><td class="r">${num(o.pakete) || ''}</td><td class="klein" style="max-width:380px">${esc(kurzText(o))}</td><td class="r">${fmtEur(schaetzpreis(S, o))}</td><td>${statusMarke(o.status)}${zahlMarke(o)}${o.lagerOrt ? `<div class="klein">${esc(lagerText(o))}</div>` : ''}</td><td>${checkMarke(ch, o)}</td></tr>`;
       }).join('') + '</tbody></table></div>';
     $('#anzahl').textContent = `${os.length} Bestellung${os.length === 1 ? '' : 'en'}` + (imArchiv ? ` · ${imArchiv} weitere im Archiv (Häkchen „mit Archiv“)` : '');
@@ -769,6 +791,7 @@ function viewBestellungen() {
   ui.acts.ft = el => { F.tier = el.value; liste(); };
   ui.acts.fs = el => { F.status = el.value; liste(); };
   ui.acts.oeffnen = el => gehe('#/bestellung/' + el.dataset.nr);
+  ui.acts.sort = el => { sortKlick(SB, el.dataset.k, ['nr', 'eingang', 'pakete', 'preis']); liste(); };
   liste();
 }
 function kurzText(o) {
@@ -784,15 +807,19 @@ function viewKunden() {
   const liste = () => {
     const q = ui.kfilter.trim().toLowerCase();
     const idx = bestellIndex(S);
-    const ks = S.kunden.filter(k => !q || k.name.toLowerCase().includes(q) || (k.tel || '').includes(q)).sort((a, b) => a.name.localeCompare(b.name));
+    const SK = ui.sortK = ui.sortK || { k: 'name', d: 1 };
+    const stat = new Map(S.kunden.map(k => [k, kundenStat(S, k, idx)]));
+    const ks = sortiere(S.kunden.filter(k => !q || k.name.toLowerCase().includes(q) || (k.tel || '').includes(q)), SK, (k, f) => f === 'nr' ? num(k.nr) : f === 'name' ? k.name || '' : f === 'tel' ? k.tel || '' : f === 'mail' ? k.mail || ''
+      : f === 'anzahl' ? stat.get(k).anzahl : f === 'letzte' ? kundeLetzte(S, k, idx) || '' : f === 'pakete' ? num(stat.get(k).pakete) : f === 'umsatz' ? num(stat.get(k).umsatz) : '');
     $('#liste').innerHTML = !ks.length ? '<div class="karte">Keine Kunden gefunden. Neue Kunden entstehen automatisch beim Speichern einer Bestellung.</div>' :
-      `<div class="tabwrap"><table class="tab"><thead><tr><th class="r">Kd-Nr.</th><th>Name</th><th>Telefon</th><th>Mail</th><th class="r">Bestellungen</th><th>letzte</th><th class="r">Pakete</th><th class="r">Summe Endbeträge</th></tr></thead><tbody>` +
-      ks.map(k => { const s = kundenStat(S, k, idx); return `<tr class="klick" data-act="oeffnen" data-nr="${k.nr}"><td class="r">${k.nr}</td><td class="fett">${esc(k.name)}</td><td>${esc(k.tel)}</td><td>${esc(k.mail)}</td><td class="r">${s.anzahl}</td><td>${fmtDate(kundeLetzte(S, k, idx))}</td><td class="r">${s.pakete || ''}</td><td class="r">${s.umsatz ? fmtEur(s.umsatz) : ''}</td></tr>`; }).join('') + '</tbody></table></div>';
+      `<div class="tabwrap"><table class="tab"><thead><tr>${thSort(SK, 'nr', 'Kd-Nr.', 'r')}${thSort(SK, 'name', 'Name')}${thSort(SK, 'tel', 'Telefon')}${thSort(SK, 'mail', 'Mail')}${thSort(SK, 'anzahl', 'Bestellungen', 'r')}${thSort(SK, 'letzte', 'letzte')}${thSort(SK, 'pakete', 'Pakete', 'r')}${thSort(SK, 'umsatz', 'Summe Endbeträge', 'r')}</tr></thead><tbody>` +
+      ks.map(k => { const s = stat.get(k); return `<tr class="klick" data-act="oeffnen" data-nr="${k.nr}"><td class="r">${k.nr}</td><td class="fett">${esc(k.name)}</td><td>${esc(k.tel)}</td><td>${esc(k.mail)}</td><td class="r">${s.anzahl}</td><td>${fmtDate(kundeLetzte(S, k, idx))}</td><td class="r">${s.pakete || ''}</td><td class="r">${s.umsatz ? fmtEur(s.umsatz) : ''}</td></tr>`; }).join('') + '</tbody></table></div>';
   };
   inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Kunden</h1><a class="btn" href="#/kunde/neu">+ Kunde anlegen</a></div>
     <div class="suchzeile"><input class="feld" type="search" placeholder="Suchen: Name oder Telefon" data-in="q" value="${esc(ui.kfilter)}"></div><div id="liste"></div>`;
   ui.ins.q = el => { ui.kfilter = el.value; liste(); };
   ui.acts.oeffnen = el => gehe('#/kunde/' + el.dataset.nr);
+  ui.acts.sort = el => { sortKlick(ui.sortK, el.dataset.k, ['anzahl', 'letzte', 'pakete', 'umsatz']); liste(); };
   liste();
 }
 function viewKunde(id) {

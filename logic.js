@@ -1032,6 +1032,12 @@ function terminTiere(S, x) {
 }
 // archivierte Tiere des Termins (nur zur Anzeige)
 const terminArchivTiere = (S, x) => x ? S.tiere.filter(t => t.archiv && t.abhol === x.datum) : [];
+// abgearbeitet (seit 3.5.3): alle Tiere des Termins abgeschlossen/archiviert, kein aktives Tier und keine Bestellung ohne Tier mehr
+const terminAbgeschlossen = (S, x) => !!x && !terminTiere(S, x).length && terminArchivTiere(S, x).length > 0 && !S.bestellungen.some(o => istTerminWarte(o) && o.termin === x.id);
+const terminArchivBestellungen = (S, x) => { const n = new Set(terminArchivTiere(S, x).map(t => t.name)); return S.bestellungen.filter(o => o.name && n.has(o.tier)); };
+// Zusagen Schlachter / Metzger (seit 3.5.3): x.zusageSchlachter / x.zusageMetzger = Datum der Zusage (ISO) oder leer
+const zusageText = (x, f) => x && x[f] ? '✓ ' + fmtDate(x[f]) : 'offen';
+function zusageSetzen(S, id, f, ja) { const x = terminById(S, id); if (!x || !['zusageSchlachter', 'zusageMetzger'].includes(f)) return; if (ja) x[f] = todayISO(); else delete x[f]; }
 // Termin einer Bestellung: o.termin (noch ohne Tier) oder über das Abholdatum ihres Tiers
 function terminVon(S, o) {
   if (!o) return null;
@@ -1271,7 +1277,7 @@ function passtAufZiel(S, o, ziel) {
 }
 // Termin-Ziele in Datumsreihenfolge (je Termin ein Ziel: erstes Tier oder der Termin selbst); fest = Kistenplan schon da
 function terminZiele(S, abDatum) {
-  return termine(S).filter(x => x.datum >= (abDatum || todayISO())).map(x => {
+  return termine(S).filter(x => x.datum >= (abDatum || todayISO()) && !terminAbgeschlossen(S, x)).map(x => {
     const gl = terminTiere(S, x);
     return { x, ziel: gl.length ? gl[0].name : 'termin:' + x.id, fest: gl.some(t => kistenRows(S, t.name).length) };
   });
@@ -1303,7 +1309,7 @@ const naechsteTeilNr = (S, wurzel) => S.bestellungen.filter(o => o.teilVon === w
 // Kandidaten zum Vorziehen auf einen Termin (z. B. ungeplantes Tier): Bestellungen mit „früher möglich“ von späteren Terminen,
 // dazu die Warteliste (unverbindlich). Je Kandidat: passt er allein dazu? Nur Anzeige – vorgezogen wird nur von Hand.
 function vorziehKandidaten(S, x) {
-  if (!x) return [];
+  if (!x || terminAbgeschlossen(S, x)) return [];
   const gl = terminTiere(S, x), ziel = gl.length ? gl[0].name : 'termin:' + x.id;
   if (gl.some(t => kistenRows(S, t.name).length)) return [];
   const out = [];
@@ -2570,7 +2576,7 @@ if (typeof module !== 'undefined') module.exports = {
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, topfTier, topfAus, topfN, ordersOfTopf, tierAnzeige, kistenKontext, abschlussNamen, mengencheckT, TOPF_SEP, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
-  sonderMetzger, terminZiele, zielTermin, zielVon, zielText, zielSetzen, passtAufZiel, terminAuto, naechsterTermin, terminFehlmengen, nrText, vorziehKandidaten, vorziehen, terminObergrenze,
+  terminAbgeschlossen, terminArchivBestellungen, zusageText, zusageSetzen, sonderMetzger, terminZiele, zielTermin, zielVon, zielText, zielSetzen, passtAufZiel, terminAuto, naechsterTermin, terminFehlmengen, nrText, vorziehKandidaten, vorziehen, terminObergrenze,
   tierText, termine, terminById, terminAm, istTerminWarte, terminTiere, terminArchivTiere, terminVon, ordersOfTermin, termineAbgleichen, terminBinden, terminAnlegen, terminDatumAendern, terminLoeschen, terminTierZuordnen, terminVorschlag,
   gewichtsvorschlag, mindestGewicht, terminMengenliste, siedHackAnteil, fleischBilanz, SIED, BRATEN,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
