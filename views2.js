@@ -122,6 +122,8 @@ function innZuschnittKarte(ii) {
 // Tabellen eines Zettels zum Abhaken klickbar machen: listen = { hack|inn|innrest: [Schlüssel je Zeile] }
 function abhakenAn(ziel, listen) {
   const tabs = [...ziel.querySelectorAll('table.doc-tab')];
+  // seit 3.4: Hinweis sichtbar (Tooltip gibt es am Tablet nicht)
+  if (tabs.length && !ziel.querySelector('.abhakhinweis')) { const d = ziel.querySelector('.doc'); if (d) d.insertAdjacentHTML('beforebegin', '<p class="klein abhakhinweis">Zeile antippen = erledigt ✓ · nochmal antippen = wieder offen</p>'); }
   const reihen = { innrest: tabs.length > 1 ? tabs[0] : null, inn: tabs[tabs.length - 1], hack: tabs[tabs.length - 1] };
   for (const [art, keys] of Object.entries(listen)) {
     const tab = reihen[art]; if (!tab) continue;
@@ -396,7 +398,7 @@ function tabKisten(tn, ziel) {
             <td style="width:58px"><input class="feld zahl" inputmode="numeric" data-ch="kf" data-f="nr" value="${c.k.nr}">${zeigTier ? `<div class="klein fett" style="text-align:center">${esc(c.tier)}</div>` : ''}</td>
             <td><select class="feld" style="max-width:205px" data-ch="kf" data-f="art">${kistenArtOpt(c.k.art)}</select>${c.teile ? `<div class="klein teile">${esc(c.teile)}</div>` : ''}</td>
             <td class="r klein">${has(c.k.plan) ? (c.k.art === OCHS ? fmtNum(c.k.plan, 0) + ' Stk' : fmtNum(c.k.plan, 1)) : ''}</td>
-            <td style="width:96px">${c.k.art === OCHS ? `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="gew" value="${has(c.k.gew) ? fmtIn(c.k.gew, 2) : ''}" placeholder="kg" title="Ochsenschwanz gewogen (kg)"><div class="klein">Stück: <input class="feld zahl klein" style="width:44px;padding:2px 4px;min-height:0" inputmode="numeric" data-ch="kf" data-f="kg" value="${fmtIn(c.k.kg, 0)}" title="Anzahl Ochsenschwänze"></div>` : `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="kg" value="${gw ? fmtIn(c.k.kg, 2) : ''}" placeholder="${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}">`}</td>
+            <td style="width:96px">${c.k.art === OCHS ? `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="gew" value="${has(c.k.gew) ? fmtIn(c.k.gew, 2) : ''}" placeholder="kg" title="Ochsenschwanz gewogen (kg)"><div class="klein">Stück: <input class="feld zahl klein" style="width:52px;padding:2px 6px;min-height:40px;margin-top:4px" inputmode="numeric" data-ch="kf" data-f="kg" value="${fmtIn(c.k.kg, 0)}" title="Anzahl Ochsenschwänze"></div>` : `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="kg" value="${gw ? fmtIn(c.k.kg, 2) : ''}" placeholder="${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}">`}</td>
             <td style="width:172px"><select class="feld klein" style="min-width:168px;padding-left:6px;padding-right:2px" data-ch="kf" data-f="platz">${stellplatzOptionen(c.k.platz)}</select></td>
             <td class="r fett">${c.k.art === OCHS ? fmtNum(c.rest, 0) + ' Stk' : fmtNum(c.rest, 1)}</td>
             <td style="width:44px"><button class="btn klein rot" data-act="kweg" data-id="${c.k.id}">✕</button></td></tr>`; }).join('')}
@@ -432,7 +434,7 @@ function tabKisten(tn, ziel) {
     else k[f] = el.value;
     speichern(); render();
   };
-  ui.acts.kweg = el => { S.kisten = S.kisten.filter(k => k.id !== +el.dataset.id); speichern(); render(); };
+  ui.acts.kweg = async el => { const k0 = S.kisten.find(k => k.id === +el.dataset.id); if (k0 && !(await frage('Kistenzeile löschen', `Kiste <b>${esc(k0.nr)}</b> – ${esc(k0.art)}${k0.gewogen && has(k0.kg) ? ' (gewogen ' + fmtNum(k0.kg, 2) + ' kg)' : ''} aus dem Kistenplan löschen?`, 'Löschen', 'Abbrechen', 'rot'))) return; S.kisten = S.kisten.filter(k => k.id !== +el.dataset.id); speichern(); render(); };
   ui.acts.kneu = () => {
     const id = S.kisten.reduce((m, k) => Math.max(m, k.id || 0), 0) + 1;
     const nr = Math.min(99, calc.reduce((m, c) => Math.max(m, c.k.nr), 0) + 1);
@@ -467,7 +469,7 @@ function tabPackliste(tn, ziel) {
     <div class="klein" style="margin-bottom:8px">Endbetrag nach dem Wiegen eintragen. Status antippen: offen → gepackt (mit Lagerplatz) → abgeholt.</div>
     <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>Bestellung</th><th>Sonderfälle</th><th>Lagerplatz</th><th class="r">Schätzpreis</th><th class="r">Endbetrag</th><th>Status</th></tr></thead><tbody>
     ${pl.rows.map(r => `<tr data-nr="${r.nr}"><td class="r"><a href="#/bestellung/${r.nr}">${r.nr}</a></td><td class="fett">${esc(r.name)}</td><td>${r.tel ? `<a href="tel:${esc(r.tel)}">${esc(r.tel)}</a>` : ''}</td><td class="klein">${esc(r.text)}${r.notiz ? `<div class="packnotiz-k">Notiz: ${esc(r.notiz)}</div>` : ''}</td><td class="klein">${esc(r.sonder)}</td><td>${r.lager ? `<b>${esc(r.lager)}</b>` : `<span class="klein">Vorschlag: ${esc(r.lagerVorschlag)}</span>`}</td><td class="r">${fmtEur(r.schaetz)}</td>
-      <td style="width:120px"><input class="feld zahl" inputmode="decimal" data-ch="betrag" value="${r.endbetrag !== null ? fmtIn(r.endbetrag, 2, 2) : ''}"></td><td><button class="btn klein" data-act="status">${statusMarke(r.status)}</button>${r.status === 'abgeholt' ? `<button class="btn klein" data-act="zahl" style="margin-left:4px">${r.zahlOffen ? '<span class="marke rot">Zahlung offen</span>' : '<span class="marke gruen">bezahlt</span>'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="klein">Keine Bestellungen für dieses Tier.</td></tr>'}
+      <td style="width:120px"><input class="feld zahl" inputmode="decimal" data-ch="betrag" value="${r.endbetrag !== null ? fmtIn(r.endbetrag, 2, 2) : ''}"></td><td><button class="btn klein" data-act="status">${statusMarke(r.status)}</button>${r.status === 'abgeholt' ? `<button class="btn klein" data-act="zahl">${r.zahlOffen ? '<span class="marke rot">Zahlung offen</span>' : '<span class="marke gruen">bezahlt</span>'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="klein">Keine Bestellungen für dieses Tier.</td></tr>'}
     </tbody></table></div>`;
   const best = el => S.bestellungen.find(o => o.nr === +el.closest('tr').dataset.nr);
   ui.acts.betrag = el => { const o = best(el); o.endbetrag = el.value.trim() === '' ? null : r2(num(el.value)); speichern(); };
@@ -479,7 +481,11 @@ function tabPackliste(tn, ziel) {
         [{ k: 'x', t: 'Abbrechen' }, { k: 'offen', t: 'Bezahlung offen', cls: 'rot' }, { k: 'ok', t: 'Bezahlt ✓', cls: 'haupt' }]);
       if (k !== 'ok' && k !== 'offen') return;
       statusSetzen(S, o, 'abgeholt', k === 'offen'); speichern();
-    } else { statusSetzen(S, o, neu); speichern(); }
+    } else {
+      // zurück auf „offen“ (seit 3.4 nur nach Nachfrage – ein versehentlicher Tipp löschte Lagerplatz, Abholdatum, Zahlung und Preis)
+      if (!(await frage('Status zurücksetzen', `Nr. ${o.nr} – <b>${esc(o.name)}</b> wieder auf <b>offen</b> setzen?<br><span class="klein">Lagerplatz${o.status === 'abgeholt' ? ', Abholdatum, „Bezahlung offen“ und der festgehaltene Preis' : ''} werden dabei gelöscht.</span>`, 'Auf offen setzen', 'Abbrechen', 'rot'))) return;
+      statusSetzen(S, o, neu); speichern();
+    }
     render();
   };
   ui.acts.zahl = el => { const o = best(el); o.zahlungOffen = !o.zahlungOffen; speichern(); meldung(`Nr. ${o.nr}: ${o.zahlungOffen ? 'Bezahlung offen' : 'bezahlt'}.`); render(); };
@@ -565,6 +571,10 @@ function viewKommissionierung(q) {
       </tbody></table></div>
     <div class="karte" style="padding:0"><h3 style="margin:14px 16px 4px">Pickliste – antippen, wiegen, bestätigen <span class="klein">${offenZeilen ? offenZeilen + ' offen' : 'alles erledigt ✓'}</span></h3>
       ${ko.picks.map((p, i) => `<div class="pick ${p.ist ? 'erledigt' : ''}" data-act="pick" data-i="${i}"><div class="kiste${p.hackTisch ? ' hack' : ''}${p.innTisch ? ' inn' : ''}${p.sonderfall ? ' sonder' : ''}">${p.hackTisch ? 'Hack' : p.innTisch ? 'Inn.' : p.kiste === null ? '–' : p.kiste}</div><div class="menge">${fmtNum(p.menge, 2)} ${p.einheit}${p.stkSoll && p.einheit !== 'Stk' ? `<div class="klein">ca. ${fmtNum(p.stkSoll)} Stk</div>` : ''}</div><div><b>${esc(p.art)}</b>${p.verpacken ? `<div class="klein">${esc(p.verpacken)}</div>` : ''}${p.ist && p.ist.vermerk ? `<div class="klein warn">Vermerk: ${esc(p.ist.vermerk)}</div>` : ''}</div><div class="klein r">${p.ist ? `<span class="ist">✓ ${istText(p.ist, p)}</span><br>` : p.wiegen ? '<span class="klein">wiegen</span><br>' : ''}${esc(p.platz)}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts aus den Kisten zu holen.</div>'}
+      <div class="knopfleiste pickende">${offenZeilen ? `<span class="klein platz">${offenZeilen} ${offenZeilen === 1 ? 'Zeile' : 'Zeilen'} offen</span>` : '<span class="klein platz ok">alles erledigt ✓</span>'}
+        <button class="btn" data-act="vor" data-d="-1" ${idx <= 0 ? 'disabled' : ''}>◀ vorige</button>
+        <button class="btn haupt" data-act="gepackt">Gepackt ✓ und weiter</button>
+        <button class="btn" data-act="vor" data-d="1" ${idx >= ords.length - (ohneKisten ? 1 : 0) ? 'disabled' : ''}>nächste ▶</button></div>
     </div></div>`;
   inhalt().innerHTML = h;
   ui.acts.pick = async el => { const p = ko.picks[+el.dataset.i]; const o = S.bestellungen.find(x => x.nr === nr); if (!p || !o) return; if (await pickDialog(o, p)) render(); };
@@ -601,7 +611,7 @@ function viewHofladen() {
     ${jahre.length > 1 ? `<select class="feld" style="width:auto" data-ch="jahr">${jahre.map(j => opt(j, j, j === jahr)).join('')}</select>` : ''}</div>
     <div class="klein" style="margin-bottom:10px">Wird von „Tier abgeschlossen“ (Schlachttag → Kisten & Ladeplan) gefüllt: die beim Kommissionieren gewogenen Hofladen-Päckchen (mit Kühlhaus-Kiste) – wo keine gewogen wurden, der rechnerische Rest in den Kisten.</div>
     <div class="spalten2"><div class="karte"><h3 style="margin-top:0">Summe ${jahr}</h3><table class="tab"><tbody>${sum.map(s => `<tr><td>${esc(s.art)}</td><td class="r fett">${fmtNum(s.summe, 2)} ${esc(s.einheit)}</td></tr>`).join('') || '<tr><td class="klein">noch nichts</td></tr>'}</tbody></table></div>
-    <div>${gruppen.map((g, gi) => `<details class="karte" data-g="${gi}" style="padding:10px 14px;margin-bottom:8px"${ui.hofOffen === g.key ? ' open' : ''}><summary class="zeile" style="cursor:pointer;gap:14px"><span class="fett">${esc(g.tier)}</span><span>${fmtDate(g.datum)}</span><span class="klein">${g.l.length} ${g.l.length === 1 ? 'Eintrag' : 'Einträge'}${g.pk ? ` · ${g.pk} Päckchen` : ''} · ca. ${fmtNum(g.kg, 1)} kg${g.stk ? ` + ${fmtNum(g.stk)} Stk` : ''}</span></summary><div class="hofrows"></div></details>`).join('') || '<div class="karte klein">keine Einträge</div>'}</div></div>`;
+    <div>${gruppen.map((g, gi) => `<details class="karte hofgr" data-g="${gi}" style="padding:4px 14px;margin-bottom:8px"${ui.hofOffen === g.key ? ' open' : ''}><summary class="zeile" style="cursor:pointer;gap:14px"><span class="fett">${esc(g.tier)}</span><span>${fmtDate(g.datum)}</span><span class="klein">${g.l.length} ${g.l.length === 1 ? 'Eintrag' : 'Einträge'}${g.pk ? ` · ${g.pk} Päckchen` : ''} · ca. ${fmtNum(g.kg, 1)} kg${g.stk ? ` + ${fmtNum(g.stk)} Stk` : ''}</span><span class="klein" style="margin-left:auto">antippen ▾</span></summary><div class="hofrows"></div></details>`).join('') || '<div class="karte klein">keine Einträge</div>'}</div></div>`;
   // Zeilen erst beim Aufklappen aufbauen (seit 3.3 – ein Jahr hat schnell über 2000 Einträge, das ist auf dem Tablet zu langsam)
   const zeilen = g => `<div class="tabwrap" style="margin-top:8px"><table class="tab"><thead><tr><th class="r">Kiste</th><th>Artikel</th><th class="r">Rest</th><th></th></tr></thead><tbody>
     ${g.l.map(({ h, i }) => `<tr><td class="r">${h.kiste}${h.kuehlhaus ? `<div class="klein">→ Kühlhaus ${h.kuehlhaus}</div>` : ''}</td><td>${esc(h.art)}${h.teil ? ` <span class="klein">– ${esc(h.teil)}</span>` : ''}${h.paeckchen ? ' <span class="klein">(Päckchen)</span>' : ''}</td><td class="r">${fmtNum(h.rest, h.paeckchen ? 3 : 2)} ${esc(h.einheit)}${h.stk ? ` <span class="klein">· ${fmtNum(h.stk)} Stk</span>` : ''}${h.kg ? ` <span class="klein">· ${fmtNum(h.kg, 2)} kg</span>` : ''}</td><td><button class="btn klein rot" data-act="weg" data-i="${i}">✕</button></td></tr>`).join('')}
@@ -904,7 +914,7 @@ function tabAusbeute(z) {
   };
   ui.acts.ganz = el => { S.artikel[+el.closest('tr').dataset.i].ganzeStuecke = Math.max(0, Math.round(num(el.value))); speichern(); render(); };
   ui.acts.bt = el => { const x = S.settings.bratenTeile[+el.closest('tr').dataset.i], f = el.dataset.f; x[f] = f === 'name' ? el.value : f === 'bug' ? el.checked : f === 'kgBulle' && el.value.trim() === '' ? null : num(el.value); speichern(); render(); };
-  ui.acts.btweg = el => { S.settings.bratenTeile.splice(+el.dataset.i, 1); speichern(); render(); };
+  ui.acts.btweg = async el => { const b0 = S.settings.bratenTeile[+el.dataset.i]; if (!(await frage('Teilstück löschen', `Braten-Teilstück <b>${esc((b0 && b0.name) || '')}</b> aus der Liste löschen? Es fehlt dann im Kistenplan und bei den Sonderwünschen.`, 'Löschen', 'Abbrechen', 'rot'))) return; S.settings.bratenTeile.splice(+el.dataset.i, 1); speichern(); render(); };
   ui.acts.btneu = () => { if (!Array.isArray(S.settings.bratenTeile)) S.settings.bratenTeile = []; S.settings.bratenTeile.push({ name: 'neues Teilstück', stueck: 2, kg: 1, bug: false }); speichern(); render(); };
   ui.acts.anteil = el => { if (el.readOnly) return; S.artikel[+el.closest('tr').dataset.i][el.dataset.f] = num(el.value) / 100; speichern(); render(); };
   ui.acts.rindwie = el => {
@@ -941,7 +951,7 @@ function tabPaket(z) {
      <div class="karte klein">Preis: ${fmtEur(st.preisPaketKg)} je kg × ${fmtNum(sum, 2)} kg = ca. <b>${fmtEur(sum * num(st.preisPaketKg))}</b> je Paket (Preis unter „Preisliste“). Änderungen gelten sofort für Mengencheck, Metzgerauftrag, Ladeplan, Kommissionieren und Schätzpreise.</div></div></div>`;
   ui.acts.pk = el => { const p = P[+el.closest('tr').dataset.i]; const f = el.dataset.f; p[f] = f === 'art' ? el.value : num(el.value); speichern(); render(); };
   ui.acts.eg = el => { const v = num(el.value); if (!(v > 0)) { meldung('Bitte ein Gewicht größer 0 eintragen.', true); return render(); } S.artikel[+el.closest('tr').dataset.i][el.dataset.f] = v; speichern(); meldung('Gespeichert.'); render(); };
-  ui.acts.pkweg = el => { P.splice(+el.dataset.i, 1); speichern(); render(); };
+  ui.acts.pkweg = async el => { const p0 = P[+el.dataset.i]; if (!(await frage('Genusspaket ändern', `<b>${esc((p0 && p0.art) || 'Zeile')}</b> aus dem Genusspaket nehmen? Das ändert die Zusammensetzung für alle offenen Pakete.`, 'Herausnehmen', 'Abbrechen', 'rot'))) return; P.splice(+el.dataset.i, 1); speichern(); render(); };
   ui.acts.pkneu = () => { P.push({ art: 'Braten', anzahl: 1, g: 1000 }); speichern(); render(); };
   ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
 }

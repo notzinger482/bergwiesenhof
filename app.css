@@ -35,14 +35,14 @@ h3 { font-size: 16px; margin: 14px 0 6px; }
 .spalten2 { display: grid; grid-template-columns: minmax(330px, 1fr) minmax(480px, 1.5fr); gap: 16px; align-items: start; }
 @media (max-width: 1000px) { .spalten2 { grid-template-columns: 1fr; } }
 .platz { flex: 1; }
-.klein { font-size: 13px; color: var(--grau); }
+.klein { font-size: 14.5px; color: var(--grau); } /* seit 3.4: 14,5 statt 13 px – besser lesbar am Tablet */
 .fett { font-weight: 700; }
 .r { text-align: right; }
 .c { text-align: center; }
 .ok { color: var(--gruen-d); font-weight: 600; }
 .warn { color: var(--rot); font-weight: 600; }
 .knapp { color: #9a6a00; font-weight: 600; }
-.marke { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 13px; font-weight: 600; background: #eee; color: #444; white-space: nowrap; }
+.marke { display: inline-block; padding: 2px 9px; border-radius: 20px; font-size: 14px; font-weight: 600; background: #eee; color: #444; white-space: nowrap; }
 .marke.gruen { background: var(--gruen-h); color: var(--gruen-d); }
 .marke.rot { background: var(--rot-h); color: var(--rot); }
 .marke.gelb { background: var(--gelb-h); color: #8a6100; }
@@ -57,13 +57,13 @@ h3 { font-size: 16px; margin: 14px 0 6px; }
 .btn.haupt:active { background: var(--gruen-d); }
 .btn.braun { background: var(--braun); border-color: var(--braun); color: #fff; }
 .btn.rot { color: var(--rot); border-color: #efb4b4; }
-.btn.klein { min-height: 36px; padding: 0 12px; font-size: 14px; }
+.btn.klein { min-height: 44px; min-width: 44px; padding: 0 14px; font-size: 15px; } /* seit 3.4: Fingergröße (vorher 36 px) */
 .btn.voll { width: 100%; }
 .btn[disabled] { opacity: .45; pointer-events: none; }
 .knopfleiste { display: flex; gap: 10px; flex-wrap: wrap; }
 
 /* Formulare */
-label.f { display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: var(--grau); font-weight: 600; }
+label.f { display: flex; flex-direction: column; gap: 4px; font-size: 14px; color: var(--grau); font-weight: 600; }
 .feld, select.feld, textarea.feld { min-height: 46px; padding: 8px 12px; border: 1px solid #c9c3b6; border-radius: 9px; background: #fffdf6; font-size: 17px; color: var(--text); width: 100%; }
 textarea.feld { min-height: 70px; }
 .feld:focus { outline: 3px solid #cfe6ad; border-color: var(--gruen); background: #fff; }
@@ -81,7 +81,7 @@ textarea.feld { min-height: 70px; }
 
 /* Tabellen */
 .tab { width: 100%; border-collapse: collapse; background: #fff; }
-.tab th { text-align: left; font-size: 13px; color: var(--grau); font-weight: 600; padding: 8px 8px; border-bottom: 2px solid var(--linie); background: #faf9f5; position: sticky; top: 56px; z-index: 2; }
+.tab th { text-align: left; font-size: 14px; color: var(--grau); font-weight: 600; padding: 8px 8px; border-bottom: 2px solid var(--linie); background: #faf9f5; position: sticky; top: 56px; z-index: 2; }
 .tab td { padding: 8px 8px; border-bottom: 1px solid #eee9de; vertical-align: middle; }
 .tab tr.klick { cursor: pointer; }
 .tab tr.klick:active { background: var(--gruen-h); }
@@ -134,6 +134,7 @@ textarea.feld { min-height: 70px; }
 /* Dialog / Meldung */
 #dialog { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: none; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
 #dialog.auf { display: flex; }
+#dialog.oben { align-items: flex-start; padding-top: 12px; } /* seit 3.4: Fenster mit Eingabe oben – Platz für die Bildschirmtastatur */
 #dialog .box { background: #fff; border-radius: 14px; max-width: 640px; width: 100%; max-height: 90vh; overflow: auto; padding: 20px; box-shadow: 0 10px 40px rgba(0,0,0,.25); }
 #dialog .box h2 { margin-top: 0; }
 #dialog .box .knopfleiste { justify-content: flex-end; margin-top: 16px; }
@@ -329,3 +330,20 @@ details.karte summary { cursor: pointer; }
 .pick .kiste.sonder { background: #7a5a2b; color: #fff; }
 .pick .kiste.inn { background: #7b2d4f; font-size: 18px; padding: 10px 0; }
 .fehlerfeld { border-color: var(--rot) !important; background: #fdecec !important; }
+
+/* seit 3.4: Knöpfe auch unter der Pickliste */
+.pickende { padding: 14px 16px; align-items: center; border-top: 2px solid var(--linie); background: #faf9f5; border-radius: 0 0 12px 12px; }
+/* seit 3.4 – Tippflächen für Finger */
+#inhalt td a:not(.btn), #inhalt p a:not(.btn), #inhalt .klein a:not(.btn), #inhalt a[href^="tel:"] { padding: 12px 0; }
+#inhalt td.r > a:not(.btn) { display: inline-block; min-width: 44px; padding: 10px 0; } /* Bestell-Nr. als Link */ /* größere Trefferfläche bei Links (Telefon, Nr.), ohne die Zeilen zu verschieben */
+summary { padding: 12px 0; cursor: pointer; } /* Aufklappen: ganze Zeile in Fingerhöhe */
+details.hofgr > summary { min-height: 48px; padding: 6px 0; }
+.btn + .btn.klein, .btn.klein + .btn.klein { margin-left: 6px; }
+td .btn.klein + .btn.klein { margin-left: 0; margin-top: 8px; }
+.ktab input[data-f=nr] { min-width: 46px; padding-left: 4px; padding-right: 4px; text-align: center; }
+.ktab .btn.klein { padding: 0 8px; }
+.packinfo { margin-top: 3px; line-height: 1.2; }
+.packinfo.warn { color: #b3261e; }
+.abhakhinweis { margin: 0 0 8px; }
+.ktab td:last-child, .ktab th:last-child { padding-left: 2px; padding-right: 4px; }
+.ktab td:first-child, .ktab th:first-child { padding-left: 4px; padding-right: 4px; }

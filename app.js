@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.3.2';
+const APP_VERSION = '3.4';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '', archiv: false }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -40,10 +40,20 @@ function dialog(titel, html, knoepfe = [{ k: 'ok', t: 'OK', cls: 'haupt' }]) {
   return new Promise(res => {
     const d = $('#dialog');
     d.innerHTML = `<div class="box"><h2>${esc(titel)}</h2><div>${html}</div><div class="knopfleiste">${knoepfe.map(b => `<button class="btn ${b.cls || ''}" data-k="${b.k}">${esc(b.t)}</button>`).join('')}</div></div>`;
+    // Fenster mit Eingabefeldern (seit 3.4, Tablet): oben statt in der Mitte – sonst verdeckt die Bildschirmtastatur die Knöpfe;
+    // Tipp neben das Fenster schließt es dann NICHT (Eingabe ginge verloren); Enter/„Fertig“ auf der Tastatur = Hauptknopf
+    const mitEingabe = !!$('input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea', d);
+    d.classList.toggle('oben', mitEingabe);
     d.classList.add('auf');
-    const fertig = k => { d.classList.remove('auf'); d.innerHTML = ''; res(k); };
-    d.onclick = e => { const b = e.target.closest('[data-k]'); if (b) fertig(b.dataset.k); else if (e.target === d) fertig(null); };
-    const f = $('input,select', d); if (f) setTimeout(() => f.focus(), 50);
+    const fertig = k => { d.classList.remove('auf', 'oben'); d.innerHTML = ''; d.onkeydown = null; res(k); };
+    d.onclick = e => { const b = e.target.closest('[data-k]'); if (b) fertig(b.dataset.k); else if (e.target === d && !mitEingabe) fertig(null); };
+    $$('input:not([type=checkbox]):not([type=radio]):not([type=file])', d).forEach(i => i.setAttribute('enterkeyhint', 'done'));
+    d.onkeydown = e => {
+      if (e.key !== 'Enter' || e.target.tagName !== 'INPUT') return;
+      const h = $('.knopfleiste [data-k].haupt', d); if (!h) return;
+      e.preventDefault(); e.target.blur(); h.click();
+    };
+    const f = $('input:not([type=checkbox]),select', d); if (f) setTimeout(() => f.focus(), 50);
   });
 }
 // Dialog mit Eingabefeldern: liefert den Knopf und die Werte aller Felder mit id (vor dem Schließen gelesen)
@@ -97,6 +107,7 @@ function titel(t) { $('#kopf .titel').textContent = t; document.title = t + ' �
 function render() {
   const { teile, q } = route();
   const seite = teile[0] || 'start';
+  ui.renderY = window.scrollY;
   ui.acts = {}; ui.ins = {};
   if (seite !== 'neu' && seite !== 'bestellung') ui.formDirty = false;
   const navKey = seite === 'bestellung' ? 'bestellungen' : seite === 'kunde' ? 'kunden' : seite === 'tier' || seite === 'archiv' ? 'tiere' : seite === 'warteliste' ? 'bestellungen' : seite === 'vordrucke' ? 'start' : seite;
@@ -109,7 +120,9 @@ function render() {
   };
   try { (V[seite] || viewStart)(); }
   catch (e) { console.error(e); inhalt().innerHTML = `<div class="fehlerbox">Fehler beim Anzeigen: ${esc(e.message)}</div>`; }
-  window.scrollTo(0, 0);
+  // gleiche Seite neu aufgebaut (z. B. nach Wiegen/Abhaken): Position halten (seit 3.4) – sonst sprang die Seite nach jedem Tipp nach oben
+  if (ui.renderHash === location.hash) window.scrollTo(0, ui.renderY || 0); else window.scrollTo(0, 0);
+  ui.renderHash = location.hash;
 }
 
 // Ereignisse (delegiert)
@@ -299,7 +312,7 @@ function viewBestellung(nr, q, vorlage) {
       <td style="width:86px">${kgArt ? `<input class="feld zahl" inputmode="numeric" data-in="pos" data-f="g" value="${has(p.g) ? fmtIn(p.g, 0) : ''}" placeholder="g">` : ''}</td>
       <td style="width:96px"><input class="feld zahl" inputmode="decimal" data-in="pos" data-f="menge" value="${has(p.menge) ? fmtIn(p.menge, 3) : ''}" placeholder="${eh === 'kg' ? 'kg' : eh}"></td>
       <td class="einh">${eh === 'Btl' ? `Btl<br><span class="klein">à ${a.beutelG} g</span>` : eh}</td>
-      <td style="width:150px">${kgArt ? `<input class="feld klein" data-in="pos" data-f="pack" value="${esc(p.pack || '')}" placeholder="${a.name === HACK ? 'z. B. 2x500+700' : a.name === 'Rouladen' ? 'z. B. 4+4 Stk' : ''}">` : ''}</td>
+      <td style="width:150px">${kgArt ? `<input class="feld klein" data-in="pos" data-f="pack" value="${esc(p.pack || '')}" placeholder="${a.name === HACK ? 'z. B. 2x500+700' : a.name === 'Rouladen' ? 'z. B. 4+4 Stk' : ''}"><div class="klein packinfo">${(() => { const r = p.pack ? packParse(S, a, p.pack) : null; return r ? esc(r.fehler || '= ' + r.text) : ''; })()}</div>` : ''}</td>
       <td class="c">${a.amStueck ? `<label class="check"><input type="checkbox" data-in="pos" data-f="amStueck"${p.amStueck ? ' checked' : ''}></label>` : ''}</td>
       <td class="c"><label class="check"><input type="checkbox" data-in="pos" data-f="vak"${istVak(o.pos[a.name] || {}) ? ' checked' : ''}></label></td>
     </tr>`;
@@ -457,6 +470,7 @@ function viewBestellung(nr, q, vorlage) {
       // Packungen frei: Menge daraus berechnen, Anzahl/g leeren
       const txt = el.value.trim(), r = txt ? packParse(S, a, txt) : null;
       el.classList.toggle('fehlerfeld', !!(r && r.fehler)); el.title = r && r.fehler ? r.fehler : r ? r.text : '';
+      { const pi = el.parentElement.querySelector('.packinfo'); if (pi) { pi.textContent = r ? (r.fehler || '= ' + r.text) : ''; pi.classList.toggle('warn', !!(r && r.fehler)); } }
       if (!txt) delete p.pack;
       else { p.pack = txt; if (r && !r.fehler) { p.menge = r.kg; p.anzahl = null; p.g = null; feldEl('menge').value = fmtIn(r.kg, 3); if (feldEl('anzahl')) feldEl('anzahl').value = ''; if (feldEl('g')) feldEl('g').value = ''; } }
     }
@@ -472,7 +486,7 @@ function viewBestellung(nr, q, vorlage) {
     $(`[data-in=kopf][data-f=${f}]`).value = o[f] || ''; ui.formDirty = true; aktualisieren();
   };
   ui.acts.sonderNeu = () => { o.sonder.push({ art: '', menge: null, wunsch: '' }); $('#sonderliste').innerHTML = o.sonder.map(sonderZeile).join(''); ui.formDirty = true; };
-  ui.acts.sonderWeg = el => { o.sonder.splice(+el.dataset.i, 1); $('#sonderliste').innerHTML = o.sonder.map(sonderZeile).join(''); ui.formDirty = true; aktualisieren(); };
+  ui.acts.sonderWeg = async el => { const s0 = o.sonder[+el.dataset.i]; if (s0 && s0.art && !(await frage('Sonderwunsch entfernen', `Sonderwunsch <b>${esc(s0.art)}</b>${s0.wunsch ? ' – ' + esc(s0.wunsch) : ''} aus der Bestellung nehmen?`, 'Entfernen', 'Abbrechen', 'rot'))) return; o.sonder.splice(+el.dataset.i, 1); $('#sonderliste').innerHTML = o.sonder.map(sonderZeile).join(''); ui.formDirty = true; aktualisieren(); };
   ui.ins.sonder = el => {
     const i = +el.closest('[data-si]').dataset.si, s = o.sonder[i], f = el.dataset.f;
     // gespeicherte Sonderwünsche: angezeigte Menge übernehmen, sonst ginge sie beim Ändern von Text/Artikel verloren
@@ -569,7 +583,7 @@ function sonderZeile(s, i) {
     ${ganzArt(S, s.art) ? `<label style="white-space:nowrap;flex:none;display:inline-flex;align-items:center;gap:6px;height:46px;padding-right:4px"><input type="checkbox" style="width:26px;height:26px;accent-color:var(--gruen-d)" data-in="sonder" data-f="ganz"${num(s.ganz) > 0 ? ' checked' : ''}> ganz</label>` : ''}</div>
     ${num(s.ganz) > 0 ? `<div class="klein" style="margin:-2px 0 6px;color:#777">${(() => { const g = ganzStueckKg(S, (ui.o || {}).tier, s.art, s.teil); return g ? `ganzes Stück je ca. ${fmtNum(g.kg, 1)} kg (mind. ${fmtNum(g.min, 1)} kg) – rechts die Menge passend eintragen` : 'bitte das Teilstück wählen'; })()}</div>` : ''}` : ''}
     <div class="zeile" style="flex-wrap:nowrap">
-    <select class="feld sonder-sorte" style="width:170px;${s.art === HACK ? '' : 'display:none'}" data-in="sonder" data-f="sorte" title="fettig: zählt zur Hälfte als Siedfleisch · mager: zählt als Bugstück">${opt('', 'Hack normal', !s.sorte)}${opt('fettig', 'besonders fettig', s.sorte === 'fettig')}${opt('mager', 'besonders mager', s.sorte === 'mager')}</select>
+    <select class="feld sonder-sorte" style="width:250px;${s.art === HACK ? '' : 'display:none'}" data-in="sonder" data-f="sorte" title="fettig: zählt zur Hälfte als Siedfleisch · mager: zählt als Bugstück">${opt('', 'Hack normal', !s.sorte)}${opt('fettig', 'besonders fettig (½ Siedfleisch)', s.sorte === 'fettig')}${opt('mager', 'besonders mager (Bugstück)', s.sorte === 'mager')}</select>
     <input class="feld" style="flex:1" data-in="sonder" data-f="wunsch" value="${esc(s.wunsch || '')}" placeholder="Wunsch / Vorgabe"></div></div>`;
 }
 async function bestellungSpeichern(o) {
@@ -620,7 +634,7 @@ async function bestellungSpeichern(o) {
   if (warnSelbst || gekippt.length) {
     await dialog('Achtung – Mengencheck', `<p>${esc(txt)}</p>${warnSelbst ? `<p class="warn">${esc(check)}</p><p>Die Bestellung ist gespeichert. Bitte prüfen, ob sie aufs nächste Tier umgestellt werden soll (Tier im Formular ändern).</p>` : ''}${gekipptHtml}`);
   } else meldung(txt + (check ? ' – Mengencheck: ' + (o.ueberbelegt && check !== 'ok' ? 'bewusst überbelegt' : check) : ''));
-  if (neu) render(); else history.back();
+  if (neu) { ui.renderHash = null; render(); } else history.back();
 }
 
 // =====================================================================
@@ -823,7 +837,7 @@ function viewArchiv() {
     <p class="klein">Abgeschlossene Tiere mit ihren Bestellungen, der gewogenen Ausbeute und dem Kistenstand am Ende. Tiere mit echtem Schlachtgewicht und gewogenen Teilen fließen in die Ausbeute (Einstellungen), sobald ${STAT_MIN_TIERE} Tiere eines Typs erfasst sind – außer „nicht in die Statistik“.</p>
     ${liste.length ? '' : '<div class="karte">Noch keine Tiere im Archiv. Tiere kommen hierher über Schlachttag → Kisten & Ladeplan → „Tier abgeschlossen“ oder über „Ins Archiv“ beim Tier.</div>'}
     ${liste.length ? `<div class="tabwrap"><table class="tab"><thead><tr><th>Tier</th><th>Typ</th><th>Abholung</th><th>Archiv seit</th><th class="r">SG (kg)</th><th class="r">Bestellungen</th><th class="r">gewogen</th><th>Statistik</th><th>Kommentar</th></tr></thead><tbody>
-    ${liste.map(t => { const su = erfassungSumme(t, S); return `<tr class="klick" data-act="oeffnen" data-t="${esc(t.name)}"><td class="fett">${esc(t.name)}</td><td>${esc(t.typ)}</td><td>${fmtDate(t.abhol)}</td><td>${fmtDate(t.archiv)}</td><td class="r">${num(t.sg) > 0 ? fmtNum(t.sg) : '<span class="warn">fehlt</span>'}</td><td class="r">${ordersOfTier(S, t.name).length}</td><td class="r">${su.teile ? `${fmtNum(su.kg, 1)} kg · ${su.teile} ${su.teile === 1 ? 'Teil' : 'Teile'}` : '–'}</td><td>${zaehltStatistik(t, S) ? (unvollstaendig(t).length ? `<span class="marke gelb" title="nicht vollständig gewogen: ${esc(unvollstaendig(t).join(', '))}">zählt teilweise</span>` : '<span class="marke gruen">zählt</span>') : t.ohneStatistik ? '<span class="marke">ausgeblendet</span>' : '<span class="marke gelb">zählt nicht</span>'}</td><td class="klein">${esc(t.kommentar || '')}</td></tr>`; }).join('')}
+    ${liste.map(t => { const su = erfassungSumme(t, S); return `<tr class="klick" data-act="oeffnen" data-t="${esc(t.name)}"><td class="fett">${esc(t.name)}</td><td>${esc(t.typ)}</td><td>${fmtDate(t.abhol)}</td><td>${fmtDate(t.archiv)}</td><td class="r">${num(t.sg) > 0 ? fmtNum(t.sg) : '<span class="warn">fehlt</span>'}</td><td class="r">${ordersOfTier(S, t.name).length}</td><td class="r">${su.teile ? `${fmtNum(su.kg, 1)} kg · ${su.teile} ${su.teile === 1 ? 'Teil' : 'Teile'}` : '–'}</td><td>${zaehltStatistik(t, S) ? (unvollstaendig(t).length ? `<span class="marke gelb">zählt teilweise</span><div class="klein">ohne ${esc(unvollstaendig(t).join(', '))}</div>` : '<span class="marke gruen">zählt</span>') : t.ohneStatistik ? '<span class="marke">ausgeblendet</span>' : '<span class="marke gelb">zählt nicht</span>'}</td><td class="klein">${esc(t.kommentar || '')}</td></tr>`; }).join('')}
     </tbody></table></div>` : ''}`;
   ui.acts.oeffnen = el => gehe('#/tier/' + encodeURIComponent(el.dataset.t));
 }
