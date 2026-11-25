@@ -1483,7 +1483,9 @@ function packplanKisten(S, tierName, f = 1) {
       let start = 0;
       for (const c of kisten) {
         const z = {}; c.st.forEach(s => { z[s.name] = (z[s.name] || 0) + 1; });
-        const info = Object.entries(z).map(([n, c]) => n === a.art ? (c > 1 ? `${c} ganze Stücke` : '1 ganzes Stück') : `${c}× ${n.replace(/ \(.*\)$/, '')}`).join(', ');
+        let info = Object.entries(z).map(([n, c]) => n === a.art ? (a.art !== BRATEN && k < 0.995 ? `${c} Stück${c > 1 ? 'e' : ''}` : c > 1 ? `${c} ganze Stücke` : '1 ganzes Stück') : `${c}× ${n.replace(/ \(.*\)$/, '')}`).join(', ');
+        // Sonderfälle in kg werden von diesen Stücken abgeschnitten (seit 3.2.2) – sonst sähe es nach vollen Stücken aus
+        if (a.art !== BRATEN && k < 0.995 && c.w > 0) info += ` – davon ca. ${fmtNum(c.w / k - c.w, 1)} kg als Sonderfall ab`;
         P.push({ art: a.art, w: c.w, need: ersteBestellung(i, start, start + c.w), info });
         start += c.w;
       }
