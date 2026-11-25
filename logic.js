@@ -257,11 +257,11 @@ function sonderOf(S, o) {
       const g = ganzStueckKg(S, o.tier, s.art, teil);
       if (g) {
         menge = r3(nG * g.kg); ca = true;
-        // Filet/Tafelspitz ganz (seit 3.2.5, Wunsch Nutzer): ist das der einzige Sonderwunsch dieses Artikels, ist die rechts
+        // Ganze Stücke (Filet/Tafelspitz seit 3.2.5, Braten-Teilstücke seit 3.2.6, Wunsch Nutzer): ist das der einzige Sonderwunsch dieses Artikels, ist die rechts
         // bestellte Menge (z. B. 2000 g für „1 ganzes Filet“) das Soll beim Kommissionieren. Kistenplan/Mengencheck ziehen weiter
         // das geschätzte Stück ab (es geht ja genau ein ganzes Stück weg)
         const q = qty(S, o, s.art);
-        if (s.art !== BRATEN && (o.sonder || []).filter(x => x && x.art === s.art).length === 1 && q >= nG * g.min - 0.05) soll = r3(q);
+        if ((o.sonder || []).filter(x => x && x.art === s.art).length === 1 && q >= nG * g.min - 0.05) soll = r3(q); // seit 3.2.6 auch Braten
       }
     }
     const teilTxt = nG ? (s.art === BRATEN ? `${nG === 1 ? '1 ganzes Stück' : nG + '× ganzes Stück'} ${teil}` : `${nG === 1 ? '1 ganzes' : nG + '× ganzes'} ${s.art}`) : teil ? 'aus ' + teil : '';
