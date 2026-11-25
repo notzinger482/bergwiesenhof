@@ -21,7 +21,7 @@ function docWarteliste(w) {
         rows: w.rows.map(r => [r.art, r.einzeln > 0 ? mg(r.einzeln, r.einheit) : '', r.ausPak > 0 ? mg(r.ausPak, r.einheit) : '', mg(r.gesamt, r.einheit),
           mg(r.rind, r.einheit) + (r.dehnbar ? ` (bis ${fmtNum(r.rindMax, 0)})` : ''), mg(r.bulle, r.einheit) + (r.dehnbar ? ` (bis ${fmtNum(r.bulleMax, 0)})` : ''), r.status]),
         rowClass: w.rows.map(r => r.status === 'zu viel für 1 Tier' ? 'rot' : '') },
-      { type: 'text', text: `Gesamt ca. ${fmtNum(w.kgGesamt, 0)} kg, davon ${fmtNum(w.pakete)} Genusspakete. Hackfleisch „bis“: mit Gulasch (Kamm/Hals) und Bug. Innereien/Ochsenschwanz: vorhanden je Tier laut Einstellungen.` },
+      { type: 'text', text: `Gesamt ca. ${fmtNum(w.kgGesamt, 0)} kg, davon ${fmtNum(w.pakete)} Genusspakete. Hackfleisch „bis“: mit Gulasch (Kamm/Hals), Bug und höchstens ${fmtNum(siedHackAnteil(S) * 100, 0)} % des Siedfleischs. Innereien/Ochsenschwanz: vorhanden je Tier laut Einstellungen.` },
       { type: 'h', text: 'Rind oder Bulle?' },
       { type: 'table', head: ['', 'Rind', 'Bulle'], widths: [3.5, 4, 4], align: ['', '', ''],
         rows: [['Schlachtgewicht (Standard)', `${fmtNum(w.rind.sg)} kg`, `${fmtNum(w.bulle.sg)} kg`],
@@ -32,7 +32,7 @@ function docWarteliste(w) {
           ['Engpass', eng(w.rind), eng(w.bulle)]] },
       { type: 'h', text: 'Bestellungen auf der Warteliste' },
       { type: 'table', head: ['Nr.', 'Name', 'Eingang', 'Wunsch', 'Pakete', 'Bestellung', 'Rind', 'Bulle'], widths: [0.8, 2.4, 1.4, 1.4, 0.9, 5, 1.4, 1.4], align: ['r', '', '', '', 'r', '', '', ''],
-        rows: w.ords.map(o => [o.nr, o.name, fmtDate(o.eingang), o.wunsch ? fmtDate(o.wunsch) : '', num(o.pakete) || '', bestellText(S, o), ja(w.rind, o.nr), ja(w.bulle, o.nr)]),
+        rows: w.ords.map(o => [nrText(o), o.name, fmtDate(o.eingang), o.wunsch ? fmtDate(o.wunsch) : '', num(o.pakete) || '', bestellText(S, o), ja(w.rind, o.nr), ja(w.bulle, o.nr)]),
         rowClass: w.ords.map(o => w.bulle.nicht.includes(o.nr) ? 'rot' : '') },
       { type: 'text', text: `Probeweise Zuordnung in der Reihenfolge der Warteliste (Genusspakete zuerst), Standard-Schlachtgewichte aus den Einstellungen. Schlachten empfohlen ab ${fmtNum(w.schwelle)} % verkauft.` });
   }
@@ -46,6 +46,188 @@ function viewWarteliste() {
     <div class="zeile oben" style="margin-bottom:6px"><label class="f" style="width:300px">Schlachten empfohlen ab … % verkauft<input class="feld zahl" inputmode="decimal" data-ch="wlschwelle" value="${fmtIn(w.schwelle)}"></label></div>
     ${knopfTeilen()}${docHtml(doc)}`;
   ui.acts.wlschwelle = el => { S.settings.wlSchwelle = num(el.value) > 0 ? num(el.value) : 60; speichern(); render(); };
+  ui.acts.teilen = async () => { const r = await docTeilen(doc, doc.title); if (r === 'gespeichert') meldung('Bild gespeichert (Teilen wird hier nicht unterstützt).'); };
+  ui.acts.drucken = () => docDrucken(doc);
+}
+// =====================================================================
+//  Abholtermine (seit 3.5) – Bestellungen auf den Termin, Tier später drüberlegen
+// =====================================================================
+const terminTxt = x => `Abholtermin ${fmtDate(x.datum)}`;
+function viewTermine() {
+  titel('Abholtermine');
+  const heute = todayISO(), alt = isoOf(new Date(Date.now() - 14 * 864e5));
+  const liste = termine(S).filter(x => x.datum >= alt || ordersOfTermin(S, x).some(o => (o.status || 'offen') === 'offen'));
+  const zeile = x => {
+    const gl = terminTiere(S, x), os = ordersOfTermin(S, x);
+    const pak = os.reduce((s, o) => s + num(o.pakete), 0);
+    let status = '';
+    if (gl.length) { const T = topfAus(S, gl.map(t => t.name)) || gl[0]; const ch = mengencheckT(S, T); const n = os.filter(o => (ch[o.nr] || '').startsWith('reicht') && !o.ueberbelegt).length; status = n ? `<span class="marke rot">${n} reicht nicht</span>` : os.length ? '<span class="marke gruen">ok</span>' : ''; }
+    else status = os.length ? '<span class="marke gelb">Tier fehlt – Vorschlag ansehen</span>' : '<span class="klein">noch keine Bestellungen</span>';
+    return `<tr class="klick${x.datum < heute ? ' grau' : ''}" data-act="oeffnen" data-id="${esc(x.id)}"><td class="fett">${fmtDate(x.datum)}</td><td>${gl.length ? gl.map(t => `${esc(t.name)} <span class="klein">(${esc(t.typ)}${num(t.sg) ? ', ' + fmtNum(t.sg) + ' kg' : ''})</span>`).join(' + ') : '<span class="klein">noch kein Tier</span>'}</td>
+      <td class="r">${os.length}</td><td class="r">${fmtNum(pak)}</td><td>${status}</td><td class="klein">${esc(x.notiz || '')}</td></tr>`;
+  };
+  const ohne = S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name && !istTerminWarte(o)).length;
+  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Abholtermine</h1>${ohne ? `<a class="btn" href="#/warteliste">Warteliste ohne Termin (${ohne})</a>` : ''}<button class="btn" data-act="mehrere">Mehrere anlegen …</button><button class="btn haupt" data-act="neu">+ Neuer Abholtermin</button></div>
+    ${(() => { const bis = isoOf(new Date(Date.now() + 80 * 864e5)), letzter = termine(S).filter(x => x.datum >= heute).pop(); return !letzter || letzter.datum < bis ? `<div class="hinweis">Termine reichen nur bis ${letzter ? fmtDate(letzter.datum) : '–'} – bitte Termine für die nächsten ca. 3 Monate anlegen.</div>` : ''; })()}
+    <p class="klein" style="margin-top:0">Wir sagen „nächste Woche gibt es Fleisch“: Abholtermin anlegen, Bestellungen darauf legen – das passende Tier kommt später dazu. Die App sagt, wie schwer ein Rind bzw. ein Bulle mindestens sein muss. Unverbindliche Anfragen („melde mich nochmal“) bleiben auf der Warteliste.</p>
+    ${liste.length ? `<div class="tabwrap"><table class="tab"><thead><tr><th>Abholung</th><th>Tier(e)</th><th class="r">Bestellungen</th><th class="r">Pakete</th><th>Stand</th><th>Notiz</th></tr></thead><tbody>${liste.map(zeile).join('')}</tbody></table></div>` : '<div class="karte">Noch keine Abholtermine.</div>'}`;
+  ui.acts.oeffnen = el => gehe('#/termin/' + encodeURIComponent(el.dataset.id));
+  ui.acts.neu = () => terminNeuDialog();
+  ui.acts.mehrere = () => termineMehrereDialog();
+}
+async function terminNeuDialog() {
+  const { k, werte } = await dialogFelder('Neuer Abholtermin', `<label class="f">Datum der Abholung<input class="feld" type="date" id="tdat"></label>
+    <label class="f" style="margin-top:10px">Notiz <span class="klein">(optional, z. B. „Rind von Hof X“)</span><input class="feld" id="tnot"></label>`, [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Anlegen', cls: 'haupt' }]);
+  if (k !== 'ok') return;
+  try { const x = terminAnlegen(S, werte.tdat, werte.tnot); speichern(); meldung(`${terminTxt(x)} angelegt.`); gehe('#/termin/' + x.id); }
+  catch (e) { meldung(e.message, true); }
+}
+// Kandidaten zum Vorziehen (seit 3.5, Entscheidung Nutzer 25.11.): wenn ein Tier dazwischenkommt (z. B. Verletzung).
+// Nur eine Liste – vorgezogen wird ausschließlich von Hand nach Rücksprache mit dem Kunden (Gefriertruhe, Abholung).
+function kandidatenKarte(x) {
+  if (!x || x.datum < todayISO()) return '';
+  const k = vorziehKandidaten(S, x);
+  if (!k.length) return '';
+  const zeile = c => `<tr class="${c.passt ? '' : 'grau'}"><td class="r fett">${esc(nrText(c.o))}</td><td class="fett">${esc(c.o.name)}</td><td>${c.o.tel ? `<a href="tel:${esc(c.o.tel)}">${esc(c.o.tel)}</a>` : ''}</td><td>${esc(c.von)}${c.o.wunsch ? `<div class="klein">Wunsch ${fmtDate(c.o.wunsch)}</div>` : ''}</td>
+    <td class="r">${num(c.o.pakete) || ''}</td><td class="klein" style="max-width:320px">${esc(kurzText(c.o))}</td><td>${c.passt ? '<span class="marke gruen">passt</span>' : '<span class="marke rot">passt nicht ganz</span>'}</td>
+    <td class="r"><button class="btn klein" data-act="vorziehen" data-nr="${c.o.nr}">Vorziehen …</button></td></tr>`;
+  const fr = k.filter(c => !c.warte), wl = k.filter(c => c.warte);
+  return `<div class="karte"><h3 style="margin-top:0">Kandidaten zum Vorziehen auf ${fmtDate(x.datum)} <span class="klein">– nur nach Rücksprache mit dem Kunden, nie automatisch</span></h3>
+    ${fr.length ? `<p class="klein" style="margin:0 0 6px">Bestellungen mit Häkchen „früher möglich“ von späteren Terminen (der Reihe nach). „passt“ = reicht hier allein – nach jedem Vorziehen neu gerechnet.</p>
+    <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>jetzt</th><th class="r">Pakete</th><th>Bestellung</th><th>hier</th><th></th></tr></thead><tbody>${fr.map(zeile).join('')}</tbody></table></div>` : '<p class="klein" style="margin:0">Keine Bestellung mit „früher möglich“ auf späteren Terminen.</p>'}
+    ${wl.length ? `<p class="klein" style="margin:10px 0 6px">Warteliste (unverbindliche Anfragen):</p><div class="tabwrap"><table class="tab"><tbody>${wl.map(zeile).join('')}</tbody></table></div>` : ''}</div>`;
+}
+function kandidatenAktionen(x) {
+  ui.acts.vorziehen = async el => {
+    const o = S.bestellungen.find(y => y.nr === +el.dataset.nr); if (!o || !x) return;
+    const fd = passtAufZiel(S, o, (terminTiere(S, x)[0] || {}).name || 'termin:' + x.id);
+    if (!(await frage('Vorziehen', `Nr. ${esc(nrText(o))} – <b>${esc(o.name)}</b>${o.tel ? ' (' + esc(o.tel) + ')' : ''}<br>von <b>${esc(tierText(S, o))}</b> auf den <b>Abholtermin ${fmtDate(x.datum)}</b> vorziehen?<br><br>Mit dem Kunden geklärt (Gefriertruhe, Abholung am ${fmtDate(x.datum)})?${fd && !fd.ok ? '<br><span class="warn">Achtung: reicht hier nicht ganz – ' + esc([...fd.zeilen.map(z => z.art), ...fd.sonst].join(', ')) + '.</span>' : ''}`, 'Ja, geklärt – vorziehen', 'Abbrechen'))) return;
+    vorziehen(S, o.nr, x); speichern(); meldung(`Nr. ${nrText(o)} ist jetzt beim Abholtermin ${fmtDate(x.datum)}.`); render();
+  };
+}
+async function termineMehrereDialog() {
+  const felder = [1, 2, 3, 4, 5, 6].map(i => `<input class="feld" type="date" id="td${i}" style="max-width:220px">`).join('');
+  const { k, werte } = await dialogFelder('Mehrere Abholtermine anlegen', `<p class="klein" style="margin-top:0">Termine für die nächsten ca. 3 Monate – leere Felder werden übersprungen.</p><div class="zeile oben" style="flex-wrap:wrap;gap:8px">${felder}</div>`, [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Anlegen', cls: 'haupt' }]);
+  if (k !== 'ok') return;
+  const ok = [], fehl = [];
+  for (let i = 1; i <= 6; i++) { const d = werte['td' + i]; if (!d) continue; try { terminAnlegen(S, d, ''); ok.push(fmtDate(d)); } catch (e) { fehl.push(e.message); } }
+  if (ok.length) speichern();
+  meldung((ok.length ? `Angelegt: ${ok.join(', ')}.` : 'Nichts angelegt.') + (fehl.length ? ' ' + fehl.join(' ') : ''), !ok.length && fehl.length > 0);
+  render();
+}
+// Gewichtsvorschlag + Mengenliste als Dokument (teilen/drucken)
+function docTermin(x, gv, ml) {
+  const gl = terminTiere(S, x);
+  const mg = v => v.mindest ? `${v.n > 1 ? v.n + ' × ' : ''}${fmtNum(v.mindest)} kg` : 'reicht nicht';
+  const bl = [{ type: 'h', text: 'Vorschlag Schlachtgewicht' }];
+  gv.hinweis.forEach((t, i) => bl.push({ type: 'text', text: t, bold: i === 0 }));
+  if (gv.anzahl) {
+    const R = gv.rind, B = gv.bulle;
+    const arts = [...new Set(R.artikel.concat(B.artikel).map(a => a.art))];
+    const z = (v, a) => { const r = v.artikel.find(y => y.art === a); return !r ? '' : r.minSG === null ? 'zu viel' : fmtNum(r.minSG) + ' kg'; };
+    const best = a => { const r = R.artikel.find(y => y.art === a) || B.artikel.find(y => y.art === a); return r && r.bestellt !== null ? fmtNum(r.bestellt, 1) + ' kg' : ''; };
+    bl.push({ type: 'table', head: ['Artikel', 'bestellt (mit Paketen)', `Rind braucht mind.${R.n > 1 ? ' (je Tier, ' + R.n + ' Tiere)' : ''}`, `Bulle braucht mind.${B.n > 1 ? ' (je Tier, ' + B.n + ' Tiere)' : ''}`], align: ['', 'r', 'r', 'r'],
+      rows: arts.map(a => [a, best(a), z(R, a), z(B, a)]).concat([['Mindest-Schlachtgewicht', '', mg(R), mg(B)]]),
+      rowClass: arts.map(a => R.grenze.includes(a) || B.grenze.includes(a) ? 'fett' : '').concat(['fett']) });
+    const st = [...new Set(R.stueck.concat(B.stueck))];
+    if (st.length) bl.push({ type: 'text', warn: true, text: 'Für ein Tier zu viele Stücke: ' + st.join('; ') + '.' });
+    bl.push({ type: 'text', text: `Gerechnet wie der Mengencheck: Genusspakete zuerst, dann die Bestellungen der Reihe nach. Hackfleisch darf nicht bestelltes Gulasch, den Bug und zuletzt höchstens ${fmtNum(siedHackAnteil(S) * 100, 0)} % des Siedfleischs aufbrauchen – falsches Filet und Keule bleiben Braten. Innereien und Ochsenschwanz sind nicht dabei.` });
+  }
+  if (ml) {
+    bl.push({ type: 'h', text: `Mengenliste – ${ml.n > 1 ? ml.n + ' × ' : ''}${ml.typ} mit ${fmtNum(ml.sgJe)} kg Schlachtgewicht` });
+    bl.push({ type: 'table', head: ['Artikel', 'aus dem Tier ca.', 'bestellt', 'frei', 'fehlt', 'reicht ab'], align: ['', 'r', 'r', 'r', 'r', 'r'],
+      rows: ml.rows.map(r => [r.art, fmtNum(r.ausbeute, 1) + ' kg', r.gesamt > 0 ? fmtNum(r.gesamt, 1) + ' kg' : '', fmtNum(Math.max(0, r.frei), 1) + ' kg', r.fehlt > 0.001 ? '−' + fmtKgFehl(r.fehlt) : '', r.minSG ? fmtNum(r.minSG) + ' kg SG' : r.gesamt > 0 && r.minSG === null ? 'zu viel' : '']),
+      rowClass: ml.rows.map(r => r.fehlt > 0.001 ? 'rot' : '') });
+    const rs = ml.reserven, teile = [];
+    if (rs.gulasch > 0.05) teile.push(`${fmtNum(rs.gulasch, 1)} kg Gulasch (Kamm/Hals)`);
+    if (rs.bug > 0.05) teile.push(`${fmtNum(rs.bug, 1)} kg Bug`);
+    if (rs.sied > 0.05) teile.push(`${fmtNum(rs.sied, 1)} kg Siedfleisch (höchstens ${fmtNum(rs.siedReserve, 1)} kg möglich)`);
+    bl.push({ type: 'text', text: teile.length ? 'Fürs Hack aufgelöst: ' + teile.join(', ') + '.' : 'Hack reicht ohne Gulasch, Bug oder Siedfleisch.' });
+    bl.push({ type: 'text', text: `Hack „aus dem Tier“: mit den Reserven, die noch frei sind. Verkauft ca. ${fmtNum((ml.summen.gesamt.quote || 0) * 100, 0)} % (Fleisch + Knochen), Rest ca. ${fmtNum(Math.max(0, ml.summen.gesamt.frei), 0)} kg → Hofladen.` });
+    if (ml.stueck.length) bl.push({ type: 'text', warn: true, text: 'Reicht bei dieser Anzahl Tiere nicht: ' + ml.stueck.join('; ') + '.' });
+    bl.push({ type: 'h', text: `Bestellungen (${ords0(x).length})` });
+  } else bl.push({ type: 'h', text: `Bestellungen (${ords0(x).length})` });
+  const os = ords0(x);
+  bl.push({ type: 'table', head: ['Nr.', 'Name', 'Wunsch', 'Pakete', 'Bestellung'].concat(ml ? ['Probe'] : []), align: ['r', '', '', 'r', ''],
+    rows: os.map(o => [nrText(o), o.name, o.wunsch ? fmtDate(o.wunsch) : '', num(o.pakete) || '', bestellText(S, o)].concat(ml ? [ml.checks[o.nr] || ''] : [])),
+    rowClass: os.map(o => ml && (ml.checks[o.nr] || '').startsWith('reicht') ? 'rot' : '') });
+  return { title: `${terminTxt(x)}${gl.length ? ' – ' + gl.map(t => t.name).join(' + ') : ' – Tier gesucht'}`, sub: [`Stand ${fmtDate(todayISO())} · ${gv.anzahl} Bestellung${gv.anzahl === 1 ? '' : 'en'} · ${fmtNum(gv.pakete)} Genusspakete${x.notiz ? ' · ' + x.notiz : ''}`], blocks: bl, footer: fussZeile() };
+}
+const ords0 = x => ordersOfTermin(S, x);
+const fmtKgFehl = kg => fehlKgText(kg);
+function viewTermin(id) {
+  const x = terminById(S, id);
+  if (!x) { inhalt().innerHTML = '<div class="fehlerbox">Abholtermin nicht gefunden.</div>'; return; }
+  titel(terminTxt(x));
+  const gl = terminTiere(S, x), ords = ordersOfTermin(S, x);
+  ui.terminProbe = ui.terminProbe || {};
+  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">${terminTxt(x)}</h1><a class="btn" href="#/termine">Alle Termine</a></div><div id="tinhalt"><div class="karte">wird berechnet …</div></div>`;
+  // Rechnen kann auf dem Tablet etwas dauern – Seite erst zeigen
+  setTimeout(() => { if (location.hash.startsWith('#/termin/') && $('#tinhalt')) terminInhalt(x, gl, ords); }, 30);
+}
+function terminInhalt(x, gl, ords) {
+  const gv = gewichtsvorschlag(S, ords, gl.length || 1);
+  // Probe: Vorgabe = Tiere des Termins, sonst der Vorschlag (Rind, wenn ein übliches Rind reicht, sonst Bulle)
+  let p = ui.terminProbe[x.id];
+  if (!p) {
+    const R = gv.rind, B = gv.bulle;
+    const v = R.mindest && R.n === 1 && R.mindest <= R.std * 1.15 ? R : B.mindest ? B : R;
+    p = gl.length ? { typ: gl[0].typ === 'Bulle' ? 'Bulle' : 'Rind', sg: Math.round(gl.reduce((s, t) => s + sgRechnung(S, t), 0) / gl.length), n: gl.length }
+      : { typ: v.typ, sg: Math.max(v.mindest ? Math.ceil(v.mindest / 5) * 5 : 0, v.typ === 'Bulle' ? num(S.settings.sgBulle) : num(S.settings.sgRind)), n: v.n || 1 }; // übliches Tier, schwerer nur wenn nötig
+  }
+  const mgP = (p.typ === 'Bulle' ? gv.bulle : gv.rind);
+  const ml = ords.length ? terminMengenliste(S, ords, p.typ, p.sg, p.n, mgP) : null;
+  const doc = docTermin(x, gv, ml);
+  const freieTiere = tiereSortiert().filter(t => !gl.includes(t) && !kistenRows(S, t.name).length);
+  const vorschlagTyp = (gv.rind.mindest && gv.rind.n === 1 && gv.rind.mindest <= gv.rind.std * 1.15) ? 'Rind' : 'Bulle';
+  $('#tinhalt').innerHTML = `<div class="spalten2"><div class="karte"><h3 style="margin-top:0">Termin</h3>
+      <div class="zeile oben"><label class="f" style="width:200px">Datum<input class="feld" type="date" data-ch="tdatum" value="${esc(x.datum)}"></label><label class="f platz">Notiz<input class="feld" data-ch="tnotiz" value="${esc(x.notiz || '')}"></label></div>
+      <div class="knopfleiste" style="margin-top:10px"><a class="btn haupt" href="#/neu?termin=${encodeURIComponent(x.id)}">+ Bestellung für diesen Termin</a><a class="btn" href="#/bestellungen" data-act="liste">Bestellliste</a>${gl.length ? '' : '<button class="btn rot" data-act="loeschen">Termin löschen</button>'}</div></div>
+    <div class="karte"><h3 style="margin-top:0">Tier${gl.length > 1 ? 'e' : ''}</h3>
+      ${gl.length ? `<p style="margin-top:0">${gl.map(t => `<a href="#/tier/${encodeURIComponent(t.name)}"><b>${esc(t.name)}</b></a> – ${esc(t.typ)}, ${fmtNum(sgRechnung(S, t))} kg${num(t.sg) ? '' : ' (Standard)'}`).join('<br>')}</p><div class="knopfleiste"><a class="btn" href="#/schlachttag/menge?tier=${encodeURIComponent(gl[0].name)}">Mengenprüfung</a></div>` : `<p class="klein" style="margin-top:0">Noch kein Tier. Vorschlag: <b>${vorschlagTyp}</b> – Mindestgewicht siehe unten.</p>`}
+      <div class="zeile oben" style="margin-top:8px"><label class="f platz">${gl.length ? 'weiteres Tier dazunehmen' : 'vorhandenes Tier zuordnen'}<select class="feld" id="tzu">${opt('', '– Tier wählen –', true)}${freieTiere.map(t => opt(t.name, `${t.name} (${t.typ}${num(t.sg) ? ', ' + fmtNum(t.sg) + ' kg' : ''})${t.abhol ? ' – bisher ' + fmtDate(t.abhol) : ' – ohne Termin'}`, false)).join('')}</select></label><button class="btn" data-act="zuordnen" style="margin-top:22px">Zuordnen</button></div>
+      <div class="knopfleiste" style="margin-top:6px"><a class="btn" href="#/tier/neu?abhol=${encodeURIComponent(x.datum)}&typ=${encodeURIComponent(p.typ)}">+ Neues Tier für diesen Termin</a></div></div></div>
+    ${ords.length ? `<div class="karte"><h3 style="margin-top:0">Probe-Tier <span class="klein">– Gewicht eintippen und sehen, ob es reicht</span></h3><div class="zeile oben">
+      <label class="f" style="width:140px">Typ<select class="feld" data-ch="ptyp">${['Rind', 'Bulle'].map(v => opt(v, v, p.typ === v)).join('')}</select></label>
+      <label class="f" style="width:200px">Schlachtgewicht je Tier (kg)<input class="feld zahl" inputmode="decimal" data-ch="psg" value="${fmtIn(p.sg)}"></label>
+      <label class="f" style="width:140px">Anzahl Tiere<select class="feld" data-ch="pn">${[1, 2, 3, 4].map(v => opt(v, v, p.n === v)).join('')}</select></label>
+      <div style="margin-top:22px" class="knopfleiste"><button class="btn" data-act="pmin" data-t="Rind">Rind mit Mindestgewicht</button><button class="btn" data-act="pmin" data-t="Bulle">Bulle mit Mindestgewicht</button></div></div>
+      ${ml ? `<p class="${ml.nicht.length || ml.stueck.length ? 'warn' : 'ok'}" style="margin:6px 0 0">${ml.nicht.length || ml.stueck.length ? `Reicht nicht für ${ml.nicht.length} Bestellung${ml.nicht.length === 1 ? '' : 'en'}${ml.nicht.length ? ': ' + ml.nicht.map(n => 'Nr. ' + (n.nrT || n.nr)).join(', ') : ''}` : 'Reicht für alle Bestellungen.'}</p>` : ''}</div>` : ''}
+    ${kandidatenKarte(x)}${knopfTeilen()}${docHtml(doc)}`;
+  kandidatenAktionen(x);
+  const neuRechnen = () => { ui.terminProbe[x.id] = p; terminInhalt(x, gl, ords); };
+  ui.acts.ptyp = el => { p = Object.assign({}, p, { typ: el.value }); neuRechnen(); };
+  ui.acts.psg = el => { const v = num(el.value); if (!(v > 0)) return meldung('Bitte ein Schlachtgewicht in kg eintragen.', true); p = Object.assign({}, p, { sg: v }); neuRechnen(); };
+  ui.acts.pn = el => { p = Object.assign({}, p, { n: +el.value || 1 }); neuRechnen(); };
+  ui.acts.pmin = el => { const v = el.dataset.t === 'Bulle' ? gv.bulle : gv.rind; if (!v.mindest) return meldung(`Mit bis zu 4 ${el.dataset.t === 'Bulle' ? 'Bullen' : 'Rindern'} reicht es nicht.`, true); p = { typ: v.typ, sg: v.mindest, n: v.n }; neuRechnen(); };
+  ui.acts.liste = () => { ui.filter.tier = 'termin:' + x.id; ui.filter.archiv = false; gehe('#/bestellungen'); };
+  ui.acts.tnotiz = el => { x.notiz = el.value.trim(); speichern(); meldung('Notiz gespeichert.'); };
+  ui.acts.tdatum = async el => {
+    const neu = el.value; if (!neu || neu === x.datum) return;
+    if (!(await frage('Datum ändern', `Abholtermin von ${fmtDate(x.datum)} auf <b>${fmtDate(neu)}</b> verlegen?${gl.length ? ' Die Tiere des Termins gehen mit.' : ''} Alle Bestellungen bleiben auf dem Termin.`, 'Verlegen', 'Abbrechen'))) { el.value = x.datum; return; }
+    try {
+      const unpass = terminDatumAendern(S, x.id, neu); speichern();
+      if (unpass.length) await dialog('Wunschtermine prüfen', `<p>Der Termin ist verlegt. Bei diesen Bestellungen passt der neue Termin nicht mehr zum Wunschtermin (danach oder mehr als ${fmtNum(has(S.settings.verteilenMaxTage) ? num(S.settings.verteilenMaxTage) : 5)} Tage davor):</p><p>${unpass.map(o => `Nr. ${nrText(o)} – ${esc(o.name)} (Wunsch ${fmtDate(o.wunsch)})`).join('<br>')}</p><p class="klein">Bitte mit den Kunden klären oder die Bestellungen auf einen anderen Termin legen.</p>`);
+      else meldung('Termin verlegt.');
+      render();
+    } catch (e) { el.value = x.datum; meldung(e.message, true); }
+  };
+  ui.acts.loeschen = async () => {
+    const n = ords.length;
+    if (!(await frage('Termin löschen', `${terminTxt(x)} löschen?${n ? ` ${n} Bestellung${n === 1 ? '' : 'en'} kommen auf die Warteliste (ohne Termin).` : ''}`, 'Löschen', 'Abbrechen', 'rot'))) return;
+    terminLoeschen(S, x.id); speichern(); gehe('#/termine');
+  };
+  ui.acts.zuordnen = async () => {
+    const tn = $('#tzu').value; if (!tn) return meldung('Bitte ein Tier wählen.', true);
+    const t = tier(S, tn);
+    const alt = t.abhol ? ordersOfTier(S, t.name).length : 0;
+    if (!(await frage('Tier zuordnen', `<b>${esc(t.name)}</b> (${esc(t.typ)}${num(t.sg) ? ', ' + fmtNum(t.sg) + ' kg' : ''}) zum ${terminTxt(x)} nehmen?${t.abhol && t.abhol !== x.datum ? ` Bisheriger Abholtermin ${fmtDate(t.abhol)}${alt ? ` – seine ${alt} Bestellung${alt === 1 ? ' geht' : 'en gehen'} mit` : ''}.` : ''}${gl.length ? ` Das Tier läuft dann mit ${gl.map(y => esc(y.name)).join(' + ')} wie ein Topf.` : ''}`, 'Zuordnen', 'Abbrechen'))) return;
+    try {
+      const geb = terminTierZuordnen(S, x.id, tn); termineAbgleichen(S); speichern();
+      meldung(`${t.name} ist beim ${terminTxt(x)}${geb.length ? ` – ${geb.length} Bestellung${geb.length === 1 ? '' : 'en'} jetzt bei ${t.name}` : ''}.`);
+      delete ui.terminProbe[x.id]; render();
+    } catch (e) { meldung(e.message, true); }
+  };
   ui.acts.teilen = async () => { const r = await docTeilen(doc, doc.title); if (r === 'gespeichert') meldung('Bild gespeichert (Teilen wird hier nicht unterstützt).'); };
   ui.acts.drucken = () => docDrucken(doc);
 }
@@ -70,20 +252,21 @@ function docMenge(mp) {
       rowClass: mp.rows.map(r => r.status === 'reicht nicht' ? 'rot' : '') },
       ...mengenSummen(mp),
       { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel in der Reihenfolge, in der die Bestellungen dem Tier zugeordnet wurden. Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Innereien werden nicht geprüft.' }]
-      .concat(mp.rows.some(r => r.ausbeute > r.ausbeuteStd + 0.05) ? [{ type: 'text', text: 'Hackfleisch „bis“: normale Hack-Ausbeute; wenn nötig zusätzlich nicht bestelltes Gulasch und der Bug (wird dann im Metzgerauftrag aufgelöst).' }] : []), footer: fussZeile() };
+      .concat(mp.rows.some(r => r.ausbeute > r.ausbeuteStd + 0.05) ? [{ type: 'text', text: 'Hackfleisch „bis“: normale Hack-Ausbeute; wenn nötig zusätzlich nicht bestelltes Gulasch, der Bug und zuletzt höchstens ${fmtNum(siedHackAnteil(S) * 100, 0)} % des nicht bestellten Siedfleischs (wird dann im Metzgerauftrag aufgelöst).' }] : []), footer: fussZeile() };
 }
 function docMetzger(ma) {
   const t = ma.tier;
   const bl = [{ type: 'h', text: 'Gesamtmengen' },
     { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, [ma.hack.kistenText ? `(${ma.hack.kistenText})` : '', `davon bestellt ${fmtNum(ma.hack.bestelltKiste, 1)} kg (ohne Sonderwünsche)`].filter(Boolean).join(' – ')], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', ma.gulasch.vorgabe > 0 ? `(erwartet) – davon bestellt ${fmtNum(ma.gulasch.bestelltKiste, 1)} kg${ma.gulasch.mitSonder ? ' (ohne Sonderwünsche)' : ''}` : '']]
       .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Nr. siehe unten']] : [])
-      .concat(ma.ochs.ganz > 0 ? [['Ochsenschwanz', `${fmtNum(ma.ochs.ganz)} Stück ganz lassen`, `kommt zu den Beinscheiben in die Kiste – ${ma.ochs.ganzListe.map(x => 'Nr. ' + x.nr).join(', ')}`]] : [])
+      .concat(ma.ochs.ganz > 0 ? [['Ochsenschwanz', `${fmtNum(ma.ochs.ganz)} Stück ganz lassen`, `kommt zu den Beinscheiben in die Kiste – ${ma.ochs.ganzListe.map(x => 'Nr. ' + (x.nrT || x.nr)).join(', ')}`]] : [])
       .concat(ma.ochs.bestellt > ma.ochs.vorhanden ? [['Ochsenschwanz', `ACHTUNG: ${fmtNum(ma.ochs.bestellt)} Stück bestellt`, `aber nur ca. ${fmtNum(ma.ochs.vorhanden)}${t.glieder ? ' bei ' + t.name : ' je Tier'}`]] : []) }];
   if (ma.gulasch.insHack > 0.05) bl.push({ type: 'text', text: `Kein Gulasch bestellt: ca. ${fmtNum(ma.gulasch.insHack, 0)} kg Kamm/Hals ins Hackfleisch.` });
+  if (ma.siedInsHack > 0.05) bl.push({ type: 'text', text: `Siedfleisch: ca. ${fmtNum(ma.siedInsHack, 0)} kg ins Hackfleisch (Hack reicht sonst nicht).` });
   bl.push({ type: 'text', text: (ma.waden > 0 ? 'Übrige Hesse als Beinscheiben. ' : 'Hesse wie immer als Beinscheiben. ') + 'Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
     { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit der Bestell-Nr. beschriften' + (ma.mitPlan ? ' und in die angegebene Kiste legen' : '') },
     { type: 'table', head: ['Nr.', 'Artikel', 'Menge', 'Hinweis', 'Kiste'], widths: [1.2, 3.4, 1.8, 5.2, 1.2], align: ['r', '', 'r', '', 'r'],
-      rows: ma.separat.map(s => [s.nr, s.art, s.menge, s.hinweis, s.kiste ? String(s.kiste) : istOrgan(s.art) ? 'Innereien' : '–']), leer: '– keine –' });
+      rows: ma.separat.map(s => [s.nrT || s.nr, s.art, s.menge, s.hinweis, s.kiste ? String(s.kiste) : istOrgan(s.art) ? 'Innereien' : '–']), leer: '– keine –' });
   if (ma.separat.length && !ma.mitPlan) bl.push({ type: 'text', text: 'Kistennummern stehen hier, sobald der Kistenplan berechnet ist (Kisten & Ladeplan).' });
   if (t.glieder) bl.unshift({ type: 'text', bold: true, text: `Gemeinsame Abholung: ${t.name} (zusammen ca. ${fmtNum(t.sg)} kg Schlachtgewicht) – Mengen für alle Tiere zusammen, die Stücke müssen nicht nach Tieren getrennt werden.` });
   return { title: `Auftrag Metzger – ${t.name}`, sub: [abholTxt(t)], blocks: bl, footer: fussZeile() };
@@ -108,7 +291,7 @@ function docHack(hz) {
   return { title: `Hackfleisch-Zettel – ${hz.tier.name}`, sub: [abholTxt(hz.tier), `Summe einzeln ${fmtNum(hz.sumEinzeln, 2)} kg · aus Paketen ${fmtNum(hz.sumPak, 1)} kg`],
     blocks: [{ type: 'text', text: 'Unabhängig von den Bestellungen vorab verpacken; Tüten mit Bestell-Nr. und Namen beschriften. Mageres Hack (Sonderfall) kommt separat vom Metzger.' },
       { type: 'table', head: ['Nr.', 'Name', 'EINZELN kg', 'verpacken als', 'vak.?', 'Pakete', 'aus PAKET kg', 'verpacken als', 'vak.?', '✓'], widths: [0.8, 2.6, 1.2, 2, 1.2, 0.9, 1.2, 1.6, 2, 0.6], align: ['r', '', 'r', '', '', 'r', 'r', '', '', ''],
-        rows: hz.rows.map(r => [r.nr, r.name, fmtNum(r.einzeln, 3), r.einzelnAls, r.einzelnVak, r.pakete || '', fmtNum(r.ausPak, 1), r.ausPakAls, r.pakVak, r.ok ? '✓' : '☐'])
+        rows: hz.rows.map(r => [r.nrT || r.nr, r.name, fmtNum(r.einzeln, 3), r.einzelnAls, r.einzelnVak, r.pakete || '', fmtNum(r.ausPak, 1), r.ausPakAls, r.pakVak, r.ok ? '✓' : '☐'])
           .concat(hz.hof.text ? [['', 'HOFLADEN', fmtNum(hz.hof.rest, 1), hz.hof.text, 'VAKUUM', '', '', '', '', hz.hof.ok ? '✓' : '☐']] : []),
         rowClass: hz.rows.map(r => r.ok ? 'erledigt' : '').concat(hz.hof.text ? [hz.hof.ok ? 'erledigt' : 'fett'] : []), abhaken: 'hack' },
       { type: 'text', text: hz.hof.text ? `Hofladen: übriges Hack nach allen Bestellungen – Hack ${hz.hof.gewogen ? 'gewogen' : 'geplant'} ${fmtNum(hz.hof.gesamt, 1)} kg − bestellt ${fmtNum(hz.sumEinzeln + hz.sumPak, 1)} kg = ${fmtNum(hz.hof.rest, 1)} kg, alles vakuumieren (${fmtNum(has(S.settings.hackHof500Prozent) ? num(S.settings.hackHof500Prozent) : 50, 0)} % in 500-g-Päckchen, Rest 1 kg).` : (hz.hof.rest < -0.25 ? `Achtung: bestellt ist ${fmtNum(-hz.hof.rest, 1)} kg mehr Hack, als in den Kisten ist.` : 'Kein Hack für den Hofladen übrig.') }], footer: fussZeile() };
@@ -137,13 +320,13 @@ function docInnereien(ii) {
         rows: ii.uebersicht.map(u => [u.art, (u.gewogen ? '' : 'ca. ') + fmtNum(u.vorhanden, 2) + ' ' + u.einheit + (u.gewogen ? (u.einheit === 'kg' ? ' gewogen' : ' gezählt') : ''), fmtNum(u.bestellt, 3), fmtNum(u.rest, 3), u.txt, u.ok ? '✓' : '☐']), rowClass: ii.uebersicht.map(u => u.rest < -1e-9 ? 'rot' : u.ok ? 'erledigt' : ''), abhaken: 'innrest' },
       { type: 'h', text: 'Bestellungen' },
       { type: 'table', head: ['Nr.', 'Name', 'Leber kg', 'Leber verpacken', 'Nieren', 'Herz', 'Zunge', 'Bäckle', 'vakuumieren', '✓'], widths: [0.8, 2.6, 1, 1.7, 0.9, 0.8, 0.8, 0.9, 1.7, 0.5], align: ['r', '', 'r', '', 'r', 'r', 'r', 'r', '', ''],
-        rows: ii.rows.map(r => [r.nr, r.name + (Object.keys(r.fehlt).length ? '\nfehlt: ' + Object.entries(r.fehlt).map(([n, q]) => n + ' ' + (n === 'Leber' ? fmtNum(q, 2) + ' kg' : fmtNum(q) + ' Stk')).join(', ') : ''), fmtNum(r.leber, 3), r.leberAls, r.nieren || '', r.herz || '', r.zunge || '', r.baeckle || '', r.vak, r.ok ? '✓' : '☐']), rowClass: ii.rows.map(r => r.ok ? 'erledigt' : Object.keys(r.fehlt).length ? 'rot' : ''), abhaken: 'inn' },
+        rows: ii.rows.map(r => [r.nrT || r.nr, r.name + (Object.keys(r.fehlt).length ? '\nfehlt: ' + Object.entries(r.fehlt).map(([n, q]) => n + ' ' + (n === 'Leber' ? fmtNum(q, 2) + ' kg' : fmtNum(q) + ' Stk')).join(', ') : ''), fmtNum(r.leber, 3), r.leberAls, r.nieren || '', r.herz || '', r.zunge || '', r.baeckle || '', r.vak, r.ok ? '✓' : '☐']), rowClass: ii.rows.map(r => r.ok ? 'erledigt' : Object.keys(r.fehlt).length ? 'rot' : ''), abhaken: 'inn' },
       { type: 'text', text: '„ca.“ = Schätzwert aus den Einstellungen (Innereien je Tier); „gewogen/gezählt“ = nach dem Zuschnitt eingetragen. Reicht es nicht, fehlt es den zuletzt zugeordneten Bestellungen.' }], footer: fussZeile() };
 }
 function docPackliste(pl) {
   return { title: `Packliste Kühlhaus – ${pl.tier.name}`, sub: [abholTxt(pl.tier)], quer: true,
     blocks: [{ type: 'table', head: ['Nr.', 'Name', 'Telefon', 'Bestellung', 'Sonderfälle (separat)', 'Lagerplatz', 'Schätzpreis', 'Endbetrag', 'gepackt', 'abgeholt'], fest: true, widths: [0.7, 2.4, 2.3, 6.6, 2.4, 2.2, 1.5, 1.5, 1.1, 1.1], align: ['r', '', '', '', '', '', 'r', 'r', '', ''],
-      rows: pl.rows.map(r => [r.nr, r.name, r.tel, r.text + (r.notiz ? '\nNOTIZ: ' + r.notiz : ''), r.sonder, r.lager || `(${r.lagerVorschlag})`, fmtEur(r.schaetz), r.endbetrag !== null ? fmtEur(r.endbetrag) : '', r.status !== 'offen' ? '☑' : '☐', r.status === 'abgeholt' ? '☑' : '☐']) }], footer: fussZeile() };
+      rows: pl.rows.map(r => [r.nrT || r.nr, r.name, r.tel, r.text + (r.notiz ? '\nNOTIZ: ' + r.notiz : ''), r.sonder, r.lager || `(${r.lagerVorschlag})`, fmtEur(r.schaetz), r.endbetrag !== null ? fmtEur(r.endbetrag) : '', r.status !== 'offen' ? '☑' : '☐', r.status === 'abgeholt' ? '☑' : '☐']) }], footer: fussZeile() };
 }
 // Ist-Wert einer Pick-Zeile als Text
 function istText(e, p) {
@@ -167,7 +350,7 @@ async function pickDialog(o, p) {
   for (;;) {
     const sollTxt = `${fmtNum(p.menge, 2)} ${p.einheit}${p.stkSoll && p.einheit !== 'Stk' ? ` (ca. ${fmtNum(p.stkSoll)} Stück)` : ''}`;
     const { k, werte } = await dialogFelder(`${p.kiste !== null ? 'Kiste ' + p.kiste + ' – ' : ''}${p.art}`, `
-      <p>Nr. ${o.nr} ${esc(o.name)} · Soll <b>${esc(sollTxt)}</b> · Toleranz ±${fmtNum(tol * 100, 0)} %</p>
+      <p>Nr. ${nrText(o)} ${esc(o.name)} · Soll <b>${esc(sollTxt)}</b> · Toleranz ±${fmtNum(tol * 100, 0)} %</p>
       ${fehler ? `<div class="fehlerbox">${esc(fehler)}</div>` : ''}
       <div class="zeile oben">
         <label class="f" style="width:200px">Gewicht in Gramm${p.einheit === 'Stk' ? ' (optional)' : ''}<input class="feld zahl" id="pg" inputmode="numeric" style="font-size:24px" value="${esc(w.pg)}" placeholder="z. B. 1450"></label>
@@ -248,7 +431,7 @@ async function hofDialog(tn, r) {
 }
 function docPick(ko) {
   const o = ko.o;
-  return { title: `Kommissionierung Nr. ${o.nr} – ${o.name}`, sub: [`Tier: ${o.tier}`, `Genusspakete: ${fmtNum(o.pakete)}${num(o.pakVak) ? ` (davon ${fmtNum(o.pakVak)} vakuumieren)` : ''}${ko.nichtVak.length ? ' · nicht vakuumieren: ' + ko.nichtVak.join(', ') : ''}`],
+  return { title: `Kommissionierung Nr. ${nrText(o)} – ${o.name}`, sub: [`Tier: ${o.tier}`, `Genusspakete: ${fmtNum(o.pakete)}${num(o.pakVak) ? ` (davon ${fmtNum(o.pakVak)} vakuumieren)` : ''}${ko.nichtVak.length ? ' · nicht vakuumieren: ' + ko.nichtVak.join(', ') : ''}`],
     blocks: [{ type: 'kv', rows: [['Lagerplatz', lagerText(o) || lagerVorschlag(S, o).ort, lagerText(o) ? '' : '(' + lagerVorschlag(S, o).grund + ')'], ['Sonderfälle (Metzger)', ko.sonder.join('; ') || '–']] },
       ...(o.packNotiz ? [{ type: 'text', bold: true, text: 'Notiz: ' + o.packNotiz }] : []),
       { type: 'table', head: ['✓', 'Kiste', 'Soll', 'Ist', 'Inhalt', 'verpacken', 'Stellplatz'], widths: [0.5, 0.9, 1.1, 1.3, 2.2, 3.8, 2.2], align: ['', 'r', 'r', 'r', '', '', ''],
@@ -276,7 +459,7 @@ function viewSchlachttag(tab, q) {
     ui.acts.teilen = async () => { const r = await docTeilen(doc, doc.title); if (r === 'gespeichert') meldung('Bild gespeichert (Teilen wird hier nicht unterstützt).'); };
     ui.acts.drucken = () => docDrucken(doc);
   };
-  if (tab === 'menge') zeige(docMenge(mengenpruefung(S, tn)));
+  if (tab === 'menge') { const xK = tier(S, tn) && tier(S, tn).abhol ? terminAm(S, tier(S, tn).abhol) : null; zeige(docMenge(mengenpruefung(S, tn)), '', kandidatenKarte(xK)); kandidatenAktionen(xK); }
   else if (tab === 'metzger') tabMetzger(tn, ziel, zeige);
   else if (tab === 'kisten' || tab === 'packplan') tabKisten(tn, ziel);
   else if (tab === 'hack') { const hz = hackZettel(S, tn); zeige(docHack(hz)); abhakenAn(ziel, { hack: hz.rows.map(r => r.nr).concat(hz.hof.text ? ['hof'] : []) }); }
@@ -453,7 +636,7 @@ function tabKisten(tn, ziel) {
     const offen = namen.flatMap(n => ordersOfTier(S, n)).filter(o => (o.status || 'offen') === 'offen');
     const ohneSg = namen.filter(n => !(num((tier(S, n) || {}).sg) > 0));
     if (ohneSg.length) return dialog('Schlachtgewicht fehlt', `<p>Bitte zuerst das echte Schlachtgewicht von ${ohneSg.map(esc).join(' und ')} eintragen (z. B. von der Metzgerrechnung). Es wird für die Ausbeute-Statistik gebraucht.</p>${ohneSg.map(n => `<p><a href="#/tier/${encodeURIComponent(n)}">Tier ${esc(n)} öffnen</a></p>`).join('')}`);
-    if (offen.length) return dialog('Noch nicht fertig', `<p>${esc(wer)} kann erst abgeschlossen werden, wenn alle Bestellungen gepackt sind.</p><p class="warn">Noch offen: ${offen.map(o => 'Nr. ' + o.nr + ' ' + esc(o.name)).join(', ')}</p>`);
+    if (offen.length) return dialog('Noch nicht fertig', `<p>${esc(wer)} kann erst abgeschlossen werden, wenn alle Bestellungen gepackt sind.</p><p class="warn">Noch offen: ${offen.map(o => 'Nr. ' + nrText(o) + ' ' + esc(o.name)).join(', ')}</p>`);
     // seit 3.3: was nicht vollständig gewogen ist, zählt bei diesem Tier nicht für die Ausbeute-Statistik
     const lk = erfassungLuecken(S, tn), lArt = [...new Set(lk.map(l => l.art))];
     const lueckenHtml = lk.length ? `<span class="hinweis" style="display:block;margin-top:10px"><b>Nicht vollständig gewogen – zählt bei ${namen.length > 1 ? 'diesen Tieren' : 'diesem Tier'} nicht für die Ausbeute-Statistik:</b><br>${lArt.map(a => `${esc(a)}: ${esc(lk.filter(l => l.art === a).map(l => l.grund).join(', '))}`).join('<br>')}<br><span class="klein">Wer das noch nachholen will: abbrechen, beim Kommissionieren die offenen Zeilen wiegen bzw. die Hofladen-Reste verpacken und „fertig“ setzen.</span></span>` : '';
@@ -469,7 +652,7 @@ function tabPackliste(tn, ziel) {
   ziel.innerHTML = `<div class="knopfleiste" style="margin-bottom:10px"><button class="btn haupt" data-act="teilen">Als Bild teilen</button><button class="btn" data-act="drucken">Drucken</button></div>
     <div class="klein" style="margin-bottom:8px">Endbetrag nach dem Wiegen eintragen. Status antippen: offen → gepackt (mit Lagerplatz) → abgeholt.</div>
     <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>Bestellung</th><th>Sonderfälle</th><th>Lagerplatz</th><th class="r">Schätzpreis</th><th class="r">Endbetrag</th><th>Status</th></tr></thead><tbody>
-    ${pl.rows.map(r => `<tr data-nr="${r.nr}"><td class="r"><a href="#/bestellung/${r.nr}">${r.nr}</a></td><td class="fett">${esc(r.name)}</td><td>${r.tel ? `<a href="tel:${esc(r.tel)}">${esc(r.tel)}</a>` : ''}</td><td class="klein">${esc(r.text)}${r.notiz ? `<div class="packnotiz-k">Notiz: ${esc(r.notiz)}</div>` : ''}</td><td class="klein">${esc(r.sonder)}</td><td>${r.lager ? `<b>${esc(r.lager)}</b>` : `<span class="klein">Vorschlag: ${esc(r.lagerVorschlag)}</span>`}</td><td class="r">${fmtEur(r.schaetz)}</td>
+    ${pl.rows.map(r => `<tr data-nr="${r.nr}"><td class="r"><a href="#/bestellung/${r.nr}">${r.nrT || r.nr}</a></td><td class="fett">${esc(r.name)}</td><td>${r.tel ? `<a href="tel:${esc(r.tel)}">${esc(r.tel)}</a>` : ''}</td><td class="klein">${esc(r.text)}${r.notiz ? `<div class="packnotiz-k">Notiz: ${esc(r.notiz)}</div>` : ''}</td><td class="klein">${esc(r.sonder)}</td><td>${r.lager ? `<b>${esc(r.lager)}</b>` : `<span class="klein">Vorschlag: ${esc(r.lagerVorschlag)}</span>`}</td><td class="r">${fmtEur(r.schaetz)}</td>
       <td style="width:120px"><input class="feld zahl" inputmode="decimal" data-ch="betrag" value="${r.endbetrag !== null ? fmtIn(r.endbetrag, 2, 2) : ''}"></td><td><button class="btn klein" data-act="status">${statusMarke(r.status)}</button>${r.status === 'abgeholt' ? `<button class="btn klein" data-act="zahl">${r.zahlOffen ? '<span class="marke rot">Zahlung offen</span>' : '<span class="marke gruen">bezahlt</span>'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="klein">Keine Bestellungen für dieses Tier.</td></tr>'}
     </tbody></table></div>`;
   const best = el => S.bestellungen.find(o => o.nr === +el.closest('tr').dataset.nr);
@@ -478,18 +661,18 @@ function tabPackliste(tn, ziel) {
     const o = best(el); const f = ['offen', 'gepackt', 'abgeholt']; const neu = f[(f.indexOf(o.status || 'offen') + 1) % 3];
     if (neu === 'gepackt') { if (!(await lagerDialog(o))) return; }
     else if (neu === 'abgeholt') {
-      const k = await dialog(`Nr. ${o.nr} abgeholt`, `<p>${esc(o.name)}${has(o.endbetrag) ? ' · Endbetrag <b>' + fmtEur(o.endbetrag) + '</b>' : ''}</p><p>Ist schon bezahlt?</p>`,
+      const k = await dialog(`Nr. ${nrText(o)} abgeholt`, `<p>${esc(o.name)}${has(o.endbetrag) ? ' · Endbetrag <b>' + fmtEur(o.endbetrag) + '</b>' : ''}</p><p>Ist schon bezahlt?</p>`,
         [{ k: 'x', t: 'Abbrechen' }, { k: 'offen', t: 'Bezahlung offen', cls: 'rot' }, { k: 'ok', t: 'Bezahlt ✓', cls: 'haupt' }]);
       if (k !== 'ok' && k !== 'offen') return;
       statusSetzen(S, o, 'abgeholt', k === 'offen'); speichern();
     } else {
       // zurück auf „offen“ (seit 3.4 nur nach Nachfrage – ein versehentlicher Tipp löschte Lagerplatz, Abholdatum, Zahlung und Preis)
-      if (!(await frage('Status zurücksetzen', `Nr. ${o.nr} – <b>${esc(o.name)}</b> wieder auf <b>offen</b> setzen?<br><span class="klein">Lagerplatz${o.status === 'abgeholt' ? ', Abholdatum, „Bezahlung offen“ und der festgehaltene Preis' : ''} werden dabei gelöscht.</span>`, 'Auf offen setzen', 'Abbrechen', 'rot'))) return;
+      if (!(await frage('Status zurücksetzen', `Nr. ${nrText(o)} – <b>${esc(o.name)}</b> wieder auf <b>offen</b> setzen?<br><span class="klein">Lagerplatz${o.status === 'abgeholt' ? ', Abholdatum, „Bezahlung offen“ und der festgehaltene Preis' : ''} werden dabei gelöscht.</span>`, 'Auf offen setzen', 'Abbrechen', 'rot'))) return;
       statusSetzen(S, o, neu); speichern();
     }
     render();
   };
-  ui.acts.zahl = el => { const o = best(el); o.zahlungOffen = !o.zahlungOffen; speichern(); meldung(`Nr. ${o.nr}: ${o.zahlungOffen ? 'Bezahlung offen' : 'bezahlt'}.`); render(); };
+  ui.acts.zahl = el => { const o = best(el); o.zahlungOffen = !o.zahlungOffen; speichern(); meldung(`Nr. ${nrText(o)}: ${o.zahlungOffen ? 'Bezahlung offen' : 'bezahlt'}.`); render(); };
   ui.acts.teilen = async () => { const d = docPackliste(packliste(S, tn)); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
   ui.acts.drucken = () => docDrucken(docPackliste(packliste(S, tn)));
 }
@@ -513,7 +696,7 @@ function viewKommissionierung(q) {
   const ohneKisten = !kistenRows(S, tn).length;
   h += `<div class="zeile" style="margin-bottom:12px">
       <button class="btn" data-act="vor" data-d="-1" ${idx <= 0 ? 'disabled' : ''}>◀ vorige</button>
-      <select class="feld platz" data-ch="nrwahl">${ords.map(o => opt(o.nr, `Nr. ${o.nr} – ${o.name} (${o.status || 'offen'})`, o.nr === nr)).join('')}${ohneKisten ? '' : opt('hof', '▣ Hofladen – Reste verpacken (zum Schluss)', nr === 'hof')}</select>
+      <select class="feld platz" data-ch="nrwahl">${ords.map(o => opt(o.nr, `Nr. ${nrText(o)} – ${o.name} (${o.status || 'offen'})`, o.nr === nr)).join('')}${ohneKisten ? '' : opt('hof', '▣ Hofladen – Reste verpacken (zum Schluss)', nr === 'hof')}</select>
       <button class="btn" data-act="vor" data-d="1" ${idx >= ords.length - (ohneKisten ? 1 : 0) ? 'disabled' : ''}>nächste ▶</button></div>`;
   ui.acts.tierwahl = el => { ui.tierWahl = el.value; ui.kommiNr = null; render(); };
   ui.acts.nrwahl = el => { ui.kommiNr = el.value === 'hof' ? 'hof' : +el.value; gehe('#/kommissionierung?nr=' + el.value); };
@@ -858,7 +1041,7 @@ function tabAusbeute(z) {
       <td class="klein">${n === BRATEN ? 'Teilstück wird abgefragt · Bürgermeisterstück ganz' : ''}</td></tr>`; }).join('')}</tbody></table></div></div>
    <div class="karte"><h3 style="margin-top:0">Einstellungen</h3><div class="zeile oben">
     ${feld('sgBulle', 'Standard-Schlachtgewicht Bulle (kg)')}${feld('sgRind', 'Standard-Schlachtgewicht Rind/Färse (kg)')}
-    ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('fettSiedProzent', 'Fettiges Hack: Anteil Siedfleisch (%)')}${feld('hackHof500Prozent', 'Hack für Hofladen: Anteil 500-g-Päckchen (%)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
+    ${feld('hackKiste', 'Hackfleisch je Metzgerkiste (kg)')}${feld('fettSiedProzent', 'Fettiges Hack: Anteil Siedfleisch (%)')}${feld('siedHackProzent', 'Siedfleisch, das bei Hack-Mangel ins Hack darf (höchstens %)')}${feld('terminMaxSG', 'Termin ohne Tier gilt als voll ab: Bulle mit … kg (leer = Standard Bulle)')}${feld('hackHof500Prozent', 'Hack für Hofladen: Anteil 500-g-Päckchen (%)')}${feld('kisteMax', 'Kiste max. (kg) – Packplan')}${feld('kisteAusnahme', 'Kiste in Ausnahmen bis (kg)')}
 
 </div></div>
    <div class="karte"><h3 style="margin-top:0">Lagerplatz nach dem Packen</h3><p class="klein">Kühlschrank, wenn weniger Artikel als … <b>und</b> leichter als … kg – sonst Metzgerkiste im Kühlraum. Ein Genusspaket zählt als ein Artikel.</p><div class="zeile oben">
@@ -1020,7 +1203,7 @@ async function lagerDialog(o) {
     if (n) { e.stopPropagation(); nr = n.dataset.nr ? +n.dataset.nr : null; $('#lnrbox').innerHTML = nrKnoepfe(); }
   };
   d.addEventListener('click', klick, true);
-  const k = await dialog(`Nr. ${o.nr} gepackt – wohin?`, `<p>${esc(o.name)} · ${esc(lv.grund)} → Vorschlag: <b>${lv.ort}</b></p>
+  const k = await dialog(`Nr. ${nrText(o)} gepackt – wohin?`, `<p>${esc(o.name)} · ${esc(lv.grund)} → Vorschlag: <b>${lv.ort}</b></p>
     <div class="knopfleiste" style="margin-bottom:12px">${LAGER.map(x => `<button class="btn ${x === ort ? 'haupt' : ''}" data-ort="${x}" style="min-height:60px;font-size:18px">${x === 'Kühlschrank' ? '❄ Kühlschrank' : '▣ Kühlraum (Metzgerkiste)'}</button>`).join('')}</div>
     <div id="lnrbox">${nrKnoepfe()}</div>`,
     [{ k: 'x', t: 'Abbrechen' }, { k: 'ok', t: 'Gepackt ✓', cls: 'haupt' }]);

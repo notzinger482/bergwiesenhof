@@ -194,7 +194,7 @@ function excelExport(S) {
       { h: 'Sonderwünsche', w: 30 }, { h: 'Schätzpreis', typ: 'eur', w: 11 }, { h: 'Endbetrag', typ: 'eur', w: 11 },
       { h: 'Status', w: 9 }, { h: 'Zahlung offen', w: 9 }, { h: 'abgeholt am', typ: 'date', w: 11 }, { h: 'Lagerort', w: 12 }, { h: 'Fach / Kiste', w: 10 }, { h: 'gepackt am', typ: 'date', w: 11 }, { h: 'Mengencheck', w: 22 }, { h: 'Notiz intern', w: 24 }, { h: 'Notiz zur Bestellung', w: 28 }, { h: 'Wunschtermin', typ: 'date', w: 11 }, { h: 'vakuumieren (Artikel)', w: 24 }, { h: 'Bestellung (Text)', w: 60 }
     ],
-    rows: best.map(o => [o.nr, o.eingang, o.tier, o.name, o.tel, o.mail, o.weg, n(o.pakete), n(o.pakVak),
+    rows: best.map(o => [o.nr, o.eingang, istTerminWarte(o) ? tierText(S, o) : o.tier, o.name, o.tel, o.mail, o.weg, n(o.pakete), n(o.pakVak),
       ...S.artikel.map(a => { const q = qty(S, o, a.name); return q > 0 ? q : ''; }),
       sonderOf(S, o).map(s => sonderText(S, s)).join('; '), schaetzpreis(S, o), n(o.endbetrag),
       o.status || 'offen', zahlungOffen(o) ? 'ja' : '', o.abgeholtAm || '', o.lagerOrt || '', lagerPlatzText(o), o.gepacktAm || '', mengencheck(S, o), o.notiz, o.packNotiz || '', o.wunsch, vakArtikel(S, o).join('; '), bestellText(S, o)])
@@ -202,7 +202,7 @@ function excelExport(S) {
   const SW = { name: 'Sonderwünsche', cols: [{ h: 'Bestell-Nr.', typ: 'num' }, { h: 'Name', w: 22 }, { h: 'Tier' }, { h: 'Artikel', w: 20 }, { h: 'Menge', typ: 'num' }, { h: 'Einheit' }, { h: 'Wunsch / Vorgabe', w: 30 }], rows: [] };
   const PO = { name: 'Portionen', cols: [{ h: 'Bestell-Nr.', typ: 'num' }, { h: 'Name', w: 22 }, { h: 'Artikel', w: 20 }, { h: 'Anzahl', typ: 'num' }, { h: 'je Portion (g)', typ: 'num' }, { h: 'verpacken als', w: 18 }, { h: 'ergibt ca. kg', typ: 'num' }], rows: [] };
   for (const o of best) {
-    for (const s of sonderOf(S, o)) { const a = art(S, s.art); SW.rows.push([o.nr, o.name, o.tier, s.art, has(s.menge) ? num(s.menge) : '', a ? a.einheit : '', s.wunsch]); }
+    for (const s of sonderOf(S, o)) { const a = art(S, s.art); SW.rows.push([o.nr, o.name, istTerminWarte(o) ? tierText(S, o) : o.tier, s.art, has(s.menge) ? num(s.menge) : '', a ? a.einheit : '', s.wunsch]); }
     for (const p of portionenOf(S, o)) PO.rows.push([o.nr, o.name, p.art, p.anzahl, p.g || '', p.text, p.kg || '']);
   }
   const K = { name: 'Kunden', cols: [{ h: 'Kd-Nr.', typ: 'num' }, { h: 'Name', w: 24 }, { h: 'Telefon', w: 15 }, { h: 'Mail', w: 24 }, { h: 'Notiz', w: 30 }, { h: 'angelegt', typ: 'date' }, { h: 'Bestellungen', typ: 'num' }, { h: 'letzte Bestellung', typ: 'date' }, { h: 'Pakete gesamt', typ: 'num' }, { h: 'Summe Endbeträge', typ: 'eur' }],

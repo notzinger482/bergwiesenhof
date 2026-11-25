@@ -119,7 +119,7 @@ const statCache = typeof WeakMap !== 'undefined' ? new WeakMap() : null;
 const KISTEN_AUSBEUTE = [HACK, SK, FK];
 const kisteGewogen = k => k.art === OCHS ? has(k.gew) : k.gewogen !== undefined ? !!k.gewogen : (has(k.plan) && has(k.kg) && Math.abs(num(k.kg) - num(k.plan)) > 0.001);
 function hackAbzugPlan(S, t) {
-  try { const T = topfTier(S, t.name) || t; const b = fleischBilanz(S, T, ordersOfTopf(S, T)); return Math.max(0, num(b.gul.insHack) + num(b.hack.ausBug)); } catch (e) { return 0; }
+  try { const T = topfTier(S, t.name) || t; const b = fleischBilanz(S, T, ordersOfTopf(S, T)); return Math.max(0, num(b.gul.insHack) + num(b.hack.ausBug) + num(b.hack.ausSied)); } catch (e) { return 0; }
 }
 function kistenAusbeute(t, S) {
   let rows, abzug = 0, f = 1; // f = Anteil des Tiers an gemeinsamen Kisten (Topf)
@@ -143,7 +143,7 @@ function umleitung(t, S) {
   try {
     const T = topfTier(S, t.name) || t, b = fleischBilanz(S, T, ordersOfTopf(S, T));
     const f = T.glieder ? sgRechnung(S, t) / (sgRechnung(S, T) || 1) : 1;
-    const u = {}; if (num(b.hack.fettSied) > 0) u[SIED] = r2(b.hack.fettSied * f); if (num(b.braten.bugMager) > 0) u[BRATEN] = r2(b.braten.bugMager * f);
+    const u = {}; const sd = num(b.hack.fettSied) + num(b.hack.ausSied); if (sd > 0) u[SIED] = r2(sd * f); if (num(b.braten.bugMager) > 0) u[BRATEN] = r2(b.braten.bugMager * f);
     return u;
   } catch (e) { return {}; }
 }
@@ -337,6 +337,9 @@ const specSum = (S, o, name) => sonderOf(S, o).filter(s => s.art === name).reduc
 // gerechnet wird sie aber gegen das Material, aus dem sie wirklich gemacht wird.
 const SIED = 'Siedfleisch';
 const HACK_SORTEN = { mager: 'besonders mager', fettig: 'besonders fettig' };
+// Siedfleisch als letzte Hack-Reserve (seit 3.5, Entscheidung Nutzer 25.11.): höchstens ein Drittel des Siedfleischs,
+// und nur was nicht bestellt ist (einzeln, Pakete, fettiges Hack) – sonst wird das Hack zu fett
+const siedHackAnteil = S => { const p = S && S.settings && has(S.settings.siedHackProzent) ? num(S.settings.siedHackProzent) : 33; return Math.min(100, Math.max(0, p)) / 100; };
 const fettSiedAnteil = S => { const p = S && S.settings && has(S.settings.fettSiedProzent) ? num(S.settings.fettSiedProzent) : 50; return Math.min(100, Math.max(0, p)) / 100; };
 function hackSorten(S, o) {
   let fett = 0, mager = 0;
@@ -424,6 +427,8 @@ function preislisteAm(S, iso) {
 function preisDatum(S, o) {
   const t = o && o.tier && o.tier !== 'Warteliste' ? tier(S, o.tier) : null;
   if (t && t.abhol) return t.abhol;
+  const x = istTerminWarte(o) && S.termine ? terminById(S, o.termin) : null; // Abholtermin ohne Tier (seit 3.5)
+  if (x) return x.datum;
   if (o && o.wunsch) return o.wunsch;
   return todayISO();
 }
@@ -567,6 +572,7 @@ function teilZeilen(S, o) {
 }
 // Fehlmenge je Artikel, die bei dieser Bestellung nicht mehr aus dem Tier kommt (in Eingabeeinheit der Zeile)
 function teilFehlmengen(S, o) {
+  if (istTerminWarte(o) && S.termine) return terminFehlmengen(S, o); // Termin ohne Tier (seit 3.5)
   const t0 = tier(S, o.tier);
   if (!t0) return {};
   // seit 3.3: gemeinsame Abholung = ein Topf – Fehlmenge wie im Mengencheck über alle Tiere des Topfs
@@ -595,7 +601,8 @@ function teilVorschlag(S, o, prozent) {
 // führt die Teilung aus: verschiebt die angegebenen Mengen in eine neue Bestellung für „ziel“
 function bestellungTeilen(S, o, mengen, ziel) {
   const z = teilZeilen(S, o);
-  const neu = { nr: nextNr(S), rang: nextRang(S), eingang: o.eingang, tier: ziel, name: o.name, tel: o.tel, mail: o.mail, weg: o.weg, notiz: `Teil von Nr. ${o.nr}`, packNotiz: o.packNotiz || '', wunsch: '', pakete: 0, pakVak: 0, tuetenManuell: null, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
+  const wurzel = o.teilVon || o.nr; // Rest bekommt die Nummer mit Zusatz: 112-2, 112-3 … (seit 3.5, Wunsch Nutzer)
+  const neu = { nr: nextNr(S), teilVon: wurzel, teilNr: naechsteTeilNr(S, wurzel), rang: nextRang(S), eingang: o.eingang, tier: ziel, name: o.name, frueher: !!o.frueher, wunsch: '', tel: o.tel, mail: o.mail, weg: o.weg, notiz: `Teil von Nr. ${nrText(o)}`, packNotiz: o.packNotiz || '', pakete: 0, pakVak: 0, tuetenManuell: null, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
   let bewegt = 0;
   for (const r of z) {
     const m = teilRunden(r, mengen[r.key]);
@@ -615,7 +622,9 @@ function bestellungTeilen(S, o, mengen, ziel) {
     else { np.menge = m; p.menge = r3(num(p.menge) - m); if (!(p.menge > 0)) delete o.pos[r.key]; }
   }
   if (!bewegt) return null;
-  o.notiz = ((o.notiz ? o.notiz + ' · ' : '') + `Teil verschoben → Nr. ${neu.nr} (${ziel})`).trim();
+  // Ziel Abholtermin ohne Tier (seit 3.5): „termin:<id>“
+  if (String(ziel).startsWith('termin:')) { neu.tier = 'Warteliste'; neu.termin = String(ziel).slice(7); const x = S.termine && terminById(S, neu.termin); ziel = x ? 'Termin ' + fmtDate(x.datum) : 'Warteliste'; if (!x) delete neu.termin; }
+  o.notiz = ((o.notiz ? o.notiz + ' · ' : '') + `Teil verschoben → Nr. ${nrText(neu)} (${ziel})`).trim();
   S.bestellungen.push(neu);
   return neu;
 }
@@ -682,7 +691,7 @@ function fleischBilanz(S, t, ords) {
     const ausPak = pak * paketKgArt(S, name);
     return { einzeln, separat, ausPak, bestellt: einzeln + ausPak, ausbeute: yieldArt(S, t, name) };
   };
-  const hack = calc(HACK), gul = calc(GULASCH), braten = calc(BRATEN);
+  const hack = calc(HACK), gul = calc(GULASCH), braten = calc(BRATEN), sied = calc(SIED);
   // Hack-Sorten: fettig/mager kommt nicht (ganz) aus dem Hack-Material
   const sorten = ords.reduce((a, o) => { const h = hackSorten(S, o); a.sied += h.sied; a.mager += h.mager; return a; }, { sied: 0, mager: 0 });
   hack.einzeln -= sorten.sied + sorten.mager; hack.separat -= sorten.sied + sorten.mager; hack.bestellt -= sorten.sied + sorten.mager;
@@ -694,6 +703,9 @@ function fleischBilanz(S, t, ords) {
   const bugAnteil = bugAnteilVon(S, t.typ);
   braten.bugKg = braten.ausbeute * bugAnteil;
   hack.ausbeuteMitGulasch = hack.ausbeute + gul.insHack;
+  // dritte Hack-Reserve (seit 3.5): Siedfleisch – höchstens siedHackAnteil der Ausbeute und nur, was nicht bestellt ist
+  sied.reserve = Math.max(0, Math.min(sied.ausbeute * siedHackAnteil(S), sied.ausbeute - sied.bestellt - sorten.sied));
+  let siedFrei = sied.reserve, siedInsHack = 0;
   // Töpfe nach Abzug der Paket-Anteile
   const topf = {};
   for (const a of ausbeuteArtikel(S)) topf[a.name] = yieldArt(S, t, a.name) - pak * paketKgArt(S, a.name);
@@ -708,7 +720,7 @@ function fleischBilanz(S, t, ords) {
   const pakFehlt = {};
   for (const a of ausbeuteArtikel(S)) {
     const pk = paketKgArt(S, a.name); if (!(pk > 0)) continue;
-    const y = yieldArt(S, t, a.name) + (a.name === HACK ? yieldArt(S, t, GULASCH) + braten.bugKg : 0);
+    const y = yieldArt(S, t, a.name) + (a.name === HACK ? yieldArt(S, t, GULASCH) + braten.bugKg + sied.reserve : 0);
     let c = 0;
     for (const o of ords) { c += num(o.pakete) * pk; if (num(o.pakete) > 0 && c > y + 0.001) (pakFehlt[o.nr] = pakFehlt[o.nr] || []).push(a.name); }
   }
@@ -733,6 +745,7 @@ function fleischBilanz(S, t, ords) {
       if (name === HACK) {
         const a = Math.min(q, Math.max(0, hackTopf)); hackTopf -= a; q -= a;
         const b = Math.min(q, Math.max(0, bug)); bug -= b; bugInsHack += b; q -= b;
+        const c = Math.min(q, Math.max(0, siedFrei)); siedFrei -= c; siedInsHack += c; q -= c; // zuletzt Siedfleisch (max. ein Drittel)
       } else if (name === BRATEN) {
         q -= bratenBug;
         const a = Math.min(q, Math.max(0, keule)); keule -= a; q -= a;
@@ -749,10 +762,13 @@ function fleischBilanz(S, t, ords) {
   braten.bugFuerBraten = bugFuerBraten;
   braten.bugMager = bugMager; // Bug für mageres Hack (Sonderfall)
   hack.fettSied = sorten.sied; // Siedfleisch für fettiges Hack (Sonderfall)
+  hack.ausSied = siedInsHack; // Siedfleisch als Hack-Reserve (seit 3.5)
+  hack.siedReserve = sied.reserve;
   // Obergrenzen (für die Anzeige in der Mengenprüfung)
   const kap = {};
-  kap[HACK] = hack.ausbeuteMitGulasch + braten.bugKg - bugFuerBraten - bugMager;
+  kap[HACK] = hack.ausbeuteMitGulasch + braten.bugKg - bugFuerBraten - bugMager + sied.reserve;
   kap[BRATEN] = braten.ausbeute - bugInsHack;
+  if (siedInsHack > 0.001) kap[SIED] = sied.ausbeute - siedInsHack;
   return { hack, gul, braten, kap, fehlt, pakUeber };
 }
 // Archiv ist Archiv: beim Archivieren Mengencheck, Pakete und Plan-Ausbeute festhalten – danach wird nichts mehr nachgerechnet
@@ -846,6 +862,7 @@ function fehlDetail(S, o) {
 }
 function mengencheck(S, o) {
   if (!o.name || !o.tier) return '';
+  if (istTerminWarte(o)) { const x = terminById(S, o.termin); return x ? `Abholtermin ${fmtDate(x.datum)} – noch kein Tier` : 'Warteliste – noch kein Tier'; }
   if (o.tier === 'Warteliste') return 'Warteliste – noch kein Tier';
   if (!tier(S, o.tier)) return 'Tier unbekannt';
   return mengencheckTier(S, o.tier)[o.nr] || '';
@@ -899,6 +916,7 @@ const tageZwischen = (von, bis) => Math.round((new Date(bis + 'T12:00:00') - new
 // Bezugstermin einer Bestellung fürs Verteilen: { datum, quelle: 'wunsch' | 'tier' | '' }
 function bezugstermin(S, o, tierName) {
   if (o.wunsch) return { datum: o.wunsch, quelle: 'wunsch' };
+  if (istTerminWarte(o) && S.termine) { const x = terminById(S, o.termin); if (x) return { datum: x.datum, quelle: 'termin' }; }
   const t = tierName && tierName !== 'Warteliste' ? tier(S, tierName) : null;
   if (t && t.abhol) return { datum: t.abhol, quelle: 'tier' };
   return { datum: '', quelle: t ? 'ohneTermin' : '' };
@@ -912,8 +930,9 @@ function neuVerteilenPlan(S, fest) {
   for (const t of T.tiere || []) if (!t.archiv && kistenRows(T, t.name).length && kommissionierBegonnen(T, [t.name])) mitKisten.add(t.name); // Kommissionieren läuft → fest
   const mitPlan = new Set((T.kisten || []).flatMap(keyNamen).filter(n => !mitKisten.has(n)));
   const freiesTier = t => !!t && !t.archiv && !mitKisten.has(t.name);
-  const beweglich = o => o.name && (o.status || 'offen') === 'offen' && !o.ueberbelegt && !(fest && fest.has(o.nr)) &&
-    (o.tier === 'Warteliste' || !o.tier || freiesTier(tier(T, o.tier)));
+  const beweglich = o => o.name && (o.status || 'offen') === 'offen' && !o.ueberbelegt && !(fest && fest.has(o.nr)) && !istTerminWarte(o) &&
+    (o.tier === 'Warteliste' || !o.tier || (!(T.termine && T.termine.length) && freiesTier(tier(T, o.tier))));
+  // seit 3.5 (Abholtermine): Bestellungen auf einem Termin/Tier bleiben, wo sie sind – verschoben wird nur nach Rücksprache
   const bew = T.bestellungen.filter(beweglich)
     .sort((a, b) => String(a.eingang || '').localeCompare(String(b.eingang || '')) || a.nr - b.nr);
   const vorher = new Map(bew.map(o => [o.nr, { tier: o.tier || 'Warteliste', check: o.tier && o.tier !== 'Warteliste' ? mengencheck(S, S.bestellungen.find(x => x.nr === o.nr)) : '', bezug: bezugstermin(S, o, o.tier) }]));
@@ -985,20 +1004,337 @@ function neuVerteilenUebernehmen(S, plan) {
 }
 function wartelistePassend(S, t) {
   if (!t.abhol || t.abhol < todayISO()) return [];
-  return S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name && (!o.wunsch || t.abhol <= o.wunsch));
+  return S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name && !istTerminWarte(o) && (!o.wunsch || t.abhol <= o.wunsch));
+}
+// =====================================================================
+// ---------- Abholtermine (seit 3.5, Entscheidung Nutzer 25.11.) ----------
+// Umgekehrte Logik: Wir sagen „nächste Woche gibt es Fleisch“, die Leute bestellen auf einen Abholtermin,
+// danach suchen wir das passende Tier (Rind oder Bulle, größer oder kleiner) und legen es über den Termin.
+// Umsetzung ohne Umbau der übrigen Rechnung: ein Termin ist ein Datum (S.termine). Tiere gehören über ihr
+// Abholdatum (t.abhol) zum Termin – mehrere Tiere am selben Termin sind der Topf aus 3.0. Bestellungen auf einem
+// Termin OHNE Tier stehen auf „Warteliste“ mit o.termin = id; sobald ein Tier zum Termin kommt, gehen sie auf dieses
+// Tier (terminBinden). Kisten, Metzgerauftrag, Kommissionieren usw. laufen dadurch unverändert über die Tiere.
+const terminId = () => 't' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const termine = S => (Array.isArray(S.termine) ? S.termine : []).filter(x => x && /^\d{4}-\d{2}-\d{2}$/.test(x.datum)).slice().sort((a, b) => a.datum.localeCompare(b.datum));
+const terminById = (S, id) => termine(S).find(x => x.id === id) || null;
+const terminAm = (S, datum) => termine(S).find(x => x.datum === datum) || null;
+const istTerminWarte = o => !!o && o.tier === 'Warteliste' && !!o.termin;
+// Anzeige „Tier“ einer Bestellung: Topf-Name, bei Termin ohne Tier „Termin 04.12.“
+const tierText = (S, o) => istTerminWarte(o) && terminById(S, o.termin) ? 'Termin ' + fmtDate(terminById(S, o.termin).datum) + ' (noch ohne Tier)' : tierAnzeige(S, o.tier);
+// aktive Tiere eines Termins (gleiches Abholdatum) – in der Reihenfolge der Abholgruppe
+function terminTiere(S, x) {
+  if (!x) return [];
+  const t0 = S.tiere.find(t => !t.archiv && t.abhol === x.datum);
+  return t0 ? abholGruppe(S, t0.name).map(n => tier(S, n)) : [];
+}
+// archivierte Tiere des Termins (nur zur Anzeige)
+const terminArchivTiere = (S, x) => x ? S.tiere.filter(t => t.archiv && t.abhol === x.datum) : [];
+// Termin einer Bestellung: o.termin (noch ohne Tier) oder über das Abholdatum ihres Tiers
+function terminVon(S, o) {
+  if (!o) return null;
+  if (istTerminWarte(o)) return terminById(S, o.termin);
+  const t = o.tier && o.tier !== 'Warteliste' ? tier(S, o.tier) : null;
+  return t && t.abhol ? terminAm(S, t.abhol) : null;
+}
+// alle Bestellungen eines Termins (gebundene ohne Tier + die der Tiere), Reihenfolge wie beim Tier (rang)
+function ordersOfTermin(S, x) {
+  if (!x) return [];
+  const gl = terminTiere(S, x).map(t => t.name);
+  return S.bestellungen.filter(o => o.name && ((istTerminWarte(o) && o.termin === x.id) || gl.includes(o.tier)))
+    .sort((a, b) => rangVon(a) - rangVon(b) || a.nr - b.nr);
+}
+// Termine anlegen für alle aktiven Tiere mit Abholdatum, die noch keinen haben (Umstellung, auch nach dem Einspielen).
+// Bestellungen auf einem unbekannten Termin kommen auf die normale Warteliste.
+function termineAbgleichen(S) {
+  if (!Array.isArray(S.termine)) S.termine = [];
+  let neu = 0;
+  for (const t of S.tiere) if (!t.archiv && t.abhol && !terminAm(S, t.abhol)) { S.termine.push({ id: terminId(), datum: t.abhol, notiz: '' }); neu++; }
+  const ids = new Set(S.termine.map(x => x.id));
+  for (const o of S.bestellungen) if (o.termin && (o.tier !== 'Warteliste' || !ids.has(o.termin))) delete o.termin;
+  return neu;
+}
+// Bestellungen eines Termins ohne Tier auf das (erste) Tier des Termins legen, sobald eins da ist
+function terminBinden(S) {
+  const out = [];
+  for (const x of termine(S)) {
+    const gl = terminTiere(S, x); if (!gl.length) continue;
+    const liste = S.bestellungen.filter(o => istTerminWarte(o) && o.termin === x.id).sort((a, b) => rangVon(a) - rangVon(b) || a.nr - b.nr);
+    for (const o of liste) { o.tier = gl[0].name; delete o.termin; out.push(o.nr); }
+  }
+  return out;
+}
+function terminAnlegen(S, datum, notiz) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum || '')) throw new Error('Bitte ein Datum wählen.');
+  if (terminAm(S, datum)) throw new Error(`Am ${fmtDate(datum)} gibt es schon einen Abholtermin.`);
+  if (!Array.isArray(S.termine)) S.termine = [];
+  const x = { id: terminId(), datum, notiz: String(notiz || '').trim() };
+  S.termine.push(x); return x;
+}
+// Datum ändern: Tiere des Termins gehen mit (Kistenplan fertig → nicht mehr)
+function terminDatumAendern(S, id, datum) {
+  const x = terminById(S, id); if (!x) throw new Error('Termin nicht gefunden.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum || '')) throw new Error('Bitte ein Datum wählen.');
+  if (datum === x.datum) return x;
+  if (terminAm(S, datum)) throw new Error(`Am ${fmtDate(datum)} gibt es schon einen Abholtermin.`);
+  const gl = terminTiere(S, x);
+  if (gl.some(t => kistenRows(S, t.name).length)) throw new Error('Für diesen Termin gibt es schon einen Kistenplan – das Datum lässt sich nicht mehr ändern.');
+  gl.forEach(t => { t.abhol = datum; });
+  // Wunschtermine, die nicht mehr passen (Abholung nach dem Wunsch oder mehr als … Tage davor)
+  const maxT = has(S.settings.verteilenMaxTage) && num(S.settings.verteilenMaxTage) >= 0 ? num(S.settings.verteilenMaxTage) : 5;
+  x.datum = datum;
+  return ordersOfTermin(S, x).filter(o => o.wunsch && (datum > o.wunsch || tageZwischen(datum, o.wunsch) > maxT));
+}
+function terminLoeschen(S, id) {
+  const x = terminById(S, id); if (!x) return;
+  if (terminTiere(S, x).length) throw new Error('Der Termin hat noch Tiere – erst die Tiere einem anderen Termin geben.');
+  S.bestellungen.forEach(o => { if (istTerminWarte(o) && o.termin === id) delete o.termin; }); // → normale Warteliste
+  S.termine = S.termine.filter(y => y.id !== id);
+}
+// Tier zum Termin nehmen (Abholdatum = Termin) und die Bestellungen des Termins darauf legen
+function terminTierZuordnen(S, id, tierName) {
+  const x = terminById(S, id), t = tier(S, tierName);
+  if (!x || !t || t.archiv) throw new Error('Tier oder Termin nicht gefunden.');
+  if (kistenRows(S, t.name).length && t.abhol !== x.datum) throw new Error(`${t.name} hat schon einen Kistenplan – der Abholtermin lässt sich nicht mehr ändern.`);
+  t.abhol = x.datum;
+  return terminBinden(S);
+}
+// Termin-Vorschlag für eine Bestellung ohne passendes Tier: wie die Tier-Wahl (Wunschtermin-Regel) –
+// mit Wunschtermin der letzte Termin am/vor dem Wunsch (höchstens … Tage davor), sonst der früheste ab heute.
+function terminVorschlag(S, wunschISO) {
+  const heute = todayISO();
+  const maxT = has(S.settings.verteilenMaxTage) && num(S.settings.verteilenMaxTage) >= 0 ? num(S.settings.verteilenMaxTage) : 5;
+  const kand = termine(S).filter(x => x.datum >= heute && !terminTiere(S, x).length && (!wunschISO || (x.datum <= wunschISO && tageZwischen(x.datum, wunschISO) <= maxT)));
+  if (!kand.length) return null;
+  return wunschISO ? kand[kand.length - 1] : kand[0];
+}
+
+// ---------- Gewichtsvorschlag und Mengenliste je Termin (seit 3.5, Wunsch Nutzer 25.11.) ----------
+// Aus den Bestellungen eines Termins: welches Schlachtgewicht braucht ein Rind bzw. ein Bulle MINDESTENS, damit jede
+// Bestellung reicht – je Artikel einzeln (Hack mit Reserven: erst nicht bestelltes Gulasch, dann Bug, zuletzt höchstens
+// ein Drittel Siedfleisch; falsches Filet und Keule bleiben Braten). Gerechnet wird mit genau derselben Zuteilung wie im
+// Mengencheck (fleischBilanz) an einem Probe-Tier – das Ergebnis passt also zum späteren Mengencheck mit echtem Tier.
+const PROBE = '\u0000Probe';
+const PROBE_MAX_SG = 1000; // kg je Tier – darüber gilt: ein Tier reicht nicht
+// Probe-Stand: n gleiche Probe-Tiere (Topf bei n > 1), alle Bestellungen darauf, Reihenfolge bleibt
+function probeStand(S, ords, typ, n) {
+  const namen = Array.from({ length: n }, (_, i) => PROBE + ' ' + typ + ' ' + (i + 1));
+  const tiere = namen.map(name => ({ name, typ, sg: 1, abhol: n > 1 ? '9999-12-31' : '', probe: true }));
+  const best = ords.map(o => Object.assign({}, o, { tier: namen[0], rang: rangVon(o) }));
+  const T = Object.assign({}, S, { tiere: S.tiere.filter(t => t.archiv).concat(tiere), bestellungen: best, kisten: [], packplaene: {} });
+  // gleiche Archiv-Tiere → Ausbeute-Statistik nicht neu rechnen (auf dem Tablet teuer)
+  if (statCache) { ausbeuteStatistik(S); const c = statCache.get(S); if (c) statCache.set(T, c); }
+  return { T, namen, tiere, best };
+}
+function probeRechnen(P, sg) {
+  P.tiere.forEach(t => { t.sg = sg; });
+  const t = P.namen.length > 1 ? topfAus(P.T, P.namen) : P.tiere[0];
+  const bil = fleischBilanz(P.T, t, P.best), gw = ganzWunschFehlt(P.T, t, P.best);
+  return { t, bil, gw };
+}
+// reicht es für Artikel name? (Fehlmenge bei keiner Bestellung, auch nicht bei den Genusspaketen)
+const probeArtOk = (r, name) => !Object.values(r.bil.fehlt).some(f => (f[name] || 0) > 0.001) && !Object.values(r.bil.pakUeber).some(l => l.includes(name));
+// Fehler, die nicht vom Gewicht abhängen (Stückzahlen je Tier): Pakete über „max. je Tier“, ganze Stücke, Waden am Stück
+function probeStueckFehler(S, P, r) {
+  const f = [];
+  const nen = (num(S.settings.nenner) > 0 ? num(S.settings.nenner) : 16) * P.namen.length;
+  const pak = P.best.reduce((s, o) => s + num(o.pakete), 0);
+  if (pak > nen) f.push(`${fmtNum(pak)} Genusspakete (höchstens ${fmtNum(nen)})`);
+  const maxW = (has(S.settings.maxWaden) ? num(S.settings.maxWaden) : 4) * P.namen.length;
+  const waden = P.best.reduce((s, o) => { const p = o.pos && o.pos[BEIN]; return s + (istWade(art(S, BEIN), p) ? num(p.anzahl) : 0); }, 0);
+  if (waden > maxW) f.push(`${fmtNum(waden)} Waden am Stück (höchstens ${fmtNum(maxW)})`);
+  // ganze Stücke nach Anzahl (z. B. 3 ganze Filets bei 2 je Tier) – auch bei sehr schwerem Tier
+  for (const l of Object.values(r.gw)) for (const txt of l) if (/^ganz/.test(txt) && !f.includes(txt)) f.push(txt);
+  return f;
+}
+// kleinstes Schlachtgewicht (ganze kg, je Tier), bei dem ok(r) gilt – null, wenn auch PROBE_MAX_SG nicht reicht
+function probeMinSG(P, ok) {
+  if (!ok(probeRechnen(P, PROBE_MAX_SG))) return null;
+  let lo = 0, hi = PROBE_MAX_SG;
+  while (hi - lo > 1) { const m = Math.floor((lo + hi) / 2); if (ok(probeRechnen(P, m))) hi = m; else lo = m; }
+  return hi;
+}
+// Mindest-Schlachtgewicht je Artikel und gesamt für einen Tiertyp (n Tiere gleicher Größe)
+function mindestGewicht(S, ords, typ, n = 1) {
+  const P = probeStand(S, ords, typ, n);
+  const artikel = [];
+  for (const a of ausbeuteArtikel(S)) {
+    const best = P.best.reduce((s, o) => s + qty(S, o, a.name), 0) + P.best.reduce((s, o) => s + num(o.pakete), 0) * paketKgArt(S, a.name);
+    if (!(best > 0.0001)) continue;
+    artikel.push({ art: a.name, bestellt: best, minSG: probeMinSG(P, r => probeArtOk(r, a.name)) });
+  }
+  // Fettiges Hack braucht Siedfleisch, mageres den Bug – zählen über Hack/Siedfleisch/Braten oben mit.
+  // Teilstück-Wünsche in kg (z. B. 3 kg aus der Kugel) hängen am Gewicht:
+  const teilOk = r => !Object.values(r.gw).some(l => l.some(txt => !/^ganz/.test(txt)));
+  const mitTeil = P.best.some(o => sonderOf(S, o).some(s => s.art === BRATEN && s.teil && !s.ganz));
+  if (mitTeil) artikel.push({ art: 'Braten-Teilstücke (Wünsche in kg)', bestellt: null, minSG: probeMinSG(P, teilOk), teil: true });
+  const stueck = probeStueckFehler(S, P, probeRechnen(P, PROBE_MAX_SG));
+  const offen = artikel.filter(x => x.minSG === null);
+  const mind = offen.length || stueck.length ? null : artikel.reduce((m, x) => Math.max(m, x.minSG || 0), 0);
+  const grenze = mind ? artikel.filter(x => x.minSG === mind).map(x => x.art) : [];
+  return { typ, n, mindest: mind, sgGesamt: mind ? mind * n : null, grenze, artikel: artikel.sort((x, y) => (y.minSG === null) - (x.minSG === null) || (y.minSG || 0) - (x.minSG || 0)), stueck, nichtMoeglich: offen.map(x => x.art) };
+}
+// Vorschlag für Rind und Bulle: erst ein Tier; reicht eins nicht (Stückzahlen oder mehr als PROBE_MAX_SG), zwei, drei …
+function gewichtsvorschlag(S, ords, nMin = 1) { // nMin: Termin hat schon so viele Tiere (Topf) – je Tier rechnen
+  const out = {};
+  for (const typ of ['Rind', 'Bulle']) {
+    // erst grob (nur beim Höchstgewicht) die Anzahl Tiere bestimmen, dann genau rechnen – auf dem Tablet sonst zu langsam
+    let n = Math.max(1, Math.min(4, nMin));
+    for (; n < 4; n++) {
+      const P = probeStand(S, ords, typ, n), r = probeRechnen(P, PROBE_MAX_SG);
+      if (!probeStueckFehler(S, P, r).length && ausbeuteArtikel(S).every(a => probeArtOk(r, a.name)) && !Object.values(r.gw).some(l => l.length)) break;
+    }
+    const v = mindestGewicht(S, ords, typ, n);
+    const std = typ === 'Bulle' ? num(S.settings.sgBulle) : num(S.settings.sgRind);
+    v.std = std;
+    v.ueberStd = v.mindest && std > 0 ? v.mindest / std : null;
+    out[typ] = v;
+  }
+  const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
+  const hinweis = [];
+  const R = out.Rind, B = out.Bulle;
+  if (!ords.length) hinweis.push('Noch keine Bestellungen auf diesem Termin.');
+  else {
+    const tx = v => v.mindest ? `${v.n > 1 ? v.n + ' Tiere je ' : ''}mind. ${fmtNum(v.mindest)} kg Schlachtgewicht` : 'nicht mit bis zu 4 Tieren';
+    hinweis.push(`Rind: ${tx(R)} · Bulle: ${tx(B)}.`);
+    if (nMin > 1) hinweis.push(`Gerechnet für ${nMin} Tiere gleicher Größe (wie beim Termin), Schlachtgewicht je Tier.`);
+    else if (R.mindest && R.n === 1 && R.mindest <= R.std * 1.15) hinweis.push(`Ein Rind in üblicher Größe (Standard ${fmtNum(R.std)} kg) reicht${R.mindest > R.std ? ' knapp – eher ein schwereres Rind' : ''}.`);
+    else if (B.mindest && B.n === 1 && B.mindest <= B.std * 1.15) hinweis.push(`Ein Rind müsste ungewöhnlich schwer sein – eher einen Bullen (Standard ${fmtNum(B.std)} kg) nehmen.`);
+    else if (R.n > 1 || B.n > 1) hinweis.push(`Ein Tier reicht nicht – ${Math.min(R.n, B.n) === 2 ? 'zwei' : Math.min(R.n, B.n)} Tiere zum Termin nehmen (laufen wie ein Topf) oder Bestellungen auf einen anderen Termin legen.`);
+    else if (R.mindest || B.mindest) hinweis.push('Ein Tier reicht nur, wenn es deutlich schwerer ist als üblich – Probe-Gewicht unten eintragen und die Mengenliste prüfen.');
+    const gR = R.grenze.join(', '), gB = B.grenze.join(', ');
+    if (gR && gR === gB) hinweis.push(`Begrenzt durch: ${gR}.`);
+    else if (gR || gB) hinweis.push(`Begrenzt durch: ${[gR ? 'Rind – ' + gR : '', gB ? 'Bulle – ' + gB : ''].filter(Boolean).join(' · ')}.`);
+  }
+  return { anzahl: ords.length, pakete: pak, rind: R, bulle: B, hinweis };
+}
+// Mengenliste für ein konkretes (Probe-)Tier: was theoretisch aus einem Tier mit sg kg kommt, gegen die Bestellungen.
+// Gleiche Zeilen wie die Mengenprüfung (bestellt / verfügbar / fehlt), Hack mit Reserven.
+function terminMengenliste(S, ords, typ, sg, n = 1, mg0) {
+  const P = probeStand(S, ords, typ, n);
+  P.tiere.forEach(t => { t.sg = num(sg) > 0 ? num(sg) : null; });
+  const mp = mengenpruefung(P.T, P.namen[0]);
+  const checks = mengencheckTier(P.T, P.namen[0]);
+  const r = probeRechnen(P, num(sg) > 0 ? num(sg) : sgRechnung(S, { typ }));
+  const fehltArt = {};
+  for (const f of Object.values(r.bil.fehlt)) for (const [k, v] of Object.entries(f)) fehltArt[k] = (fehltArt[k] || 0) + v;
+  const mg = mg0 && mg0.typ === typ && mg0.n === n ? mg0 : mindestGewicht(S, ords, typ, n);
+  const minArt = Object.fromEntries(mg.artikel.map(x => [x.art, x.minSG]));
+  const rows = mp.rows.filter(x => x.gesamt > 0.0001 || x.ausbeute > 0).map(x => Object.assign({}, x, { fehlt: fehltArt[x.art] || 0, minSG: minArt[x.art] !== undefined ? minArt[x.art] : null }));
+  const nicht = ords.filter(o => (checks[o.nr] || '').startsWith('reicht')).map(o => ({ nr: o.nr, nrT: nrText(o), name: o.name, text: checks[o.nr] }));
+  const hk = r.bil.hack;
+  return { typ, sg: n * (num(sg) > 0 ? num(sg) : sgRechnung(S, { typ })), sgJe: num(sg) > 0 ? num(sg) : sgRechnung(S, { typ }), n, rows, summen: mp.summen, nicht, checks, mindest: mg,
+    reserven: { gulasch: num(r.bil.gul.insHack), bug: num(hk.ausBug), sied: num(hk.ausSied), siedReserve: num(hk.siedReserve) }, stueck: probeStueckFehler(S, P, r) };
+}
+// ---------- Ergänzungen Abholtermine (Entscheidungen Nutzer 25.11.) ----------
+// Termine ca. 3 Monate im Voraus; Warteliste bleibt für unverbindliche Anfragen. Ist ein Termin beim Eintragen voll,
+// wird NICHT still verschoben – die Oberfläche meldet es (alles auf den nächsten Termin, dort gleich geprüft, oder
+// Teilbestellung + Rest als eigene Bestellung „112-2“ auf einen späteren Termin). Häkchen „früher möglich“ (o.frueher):
+// Kandidaten zum Vorziehen für ein ungeplantes Tier – nur als Liste, nie automatisch.
+// Ziel einer Bestellung als Text-Schlüssel: Tiername | 'termin:<id>' | 'Warteliste'
+const zielVon = o => istTerminWarte(o) ? 'termin:' + o.termin : (o.tier || '');
+const zielTermin = (S, ziel) => String(ziel || '').startsWith('termin:') ? terminById(S, String(ziel).slice(7)) : (tier(S, ziel) && tier(S, ziel).abhol ? terminAm(S, tier(S, ziel).abhol) : null);
+function zielText(S, ziel) {
+  if (!ziel || ziel === 'Warteliste') return 'Warteliste';
+  const x = zielTermin(S, ziel);
+  if (String(ziel).startsWith('termin:')) return x ? `Abholtermin ${fmtDate(x.datum)} (noch ohne Tier)` : 'Warteliste';
+  const t = tier(S, ziel);
+  return t ? `Abholtermin ${t.abhol ? fmtDate(t.abhol) : 'offen'} – ${tierAnzeige(S, t.name)}` : ziel;
+}
+function zielSetzen(o, ziel) {
+  if (String(ziel).startsWith('termin:')) { o.tier = 'Warteliste'; o.termin = String(ziel).slice(7); }
+  else { o.tier = ziel || 'Warteliste'; delete o.termin; }
+}
+// Termin ohne Tier gilt als „voll“, wenn selbst ein Bulle mit Standard-Schlachtgewicht nicht mehr reicht (Obergrenze)
+const terminObergrenze = S => ({ typ: 'Bulle', sg: num(S.settings.terminMaxSG) > 0 ? num(S.settings.terminMaxSG) : num(S.settings.sgBulle) || 420 });
+// Passt die Bestellung (Formular-Kopie o) auf das Ziel? → fehlDetail-Ergebnis (zeilen/sonst/ok) oder null (Warteliste)
+function passtAufZiel(S, o, ziel) {
+  if (!ziel || ziel === 'Warteliste') return null;
+  if (String(ziel).startsWith('termin:')) {
+    const x = terminById(S, String(ziel).slice(7)); if (!x) return null;
+    const gl = terminTiere(S, x);
+    if (gl.length) return passtAufZiel(S, o, gl[0].name);
+    const og = terminObergrenze(S);
+    const P = probeStand(S, ordersOfTermin(S, x), og.typ, 1); P.tiere[0].sg = og.sg;
+    const alt = o.nr ? S.bestellungen.find(y => y.nr === o.nr) : null;
+    const kopie = Object.assign({}, o, { tier: P.namen[0] });
+    // gleiche Reihenfolge wie später: schon auf diesem Termin → bisheriger Platz, sonst hinten
+    if (!(alt && istTerminWarte(alt) && alt.termin === x.id)) { P.T.bestellungen = P.T.bestellungen.filter(y => y.nr !== o.nr); kopie.rang = 1e12; }
+    const fd = fehlDetail(P.T, kopie);
+    if (fd) { fd.tier = `Abholtermin ${fmtDate(x.datum)}`; fd.obergrenze = og; }
+    return fd;
+  }
+  const t = tier(S, ziel); if (!t || t.archiv) return null;
+  return fehlDetail(S, Object.assign({}, o, { tier: t.name }));
+}
+// Termin-Ziele in Datumsreihenfolge (je Termin ein Ziel: erstes Tier oder der Termin selbst); fest = Kistenplan schon da
+function terminZiele(S, abDatum) {
+  return termine(S).filter(x => x.datum >= (abDatum || todayISO())).map(x => {
+    const gl = terminTiere(S, x);
+    return { x, ziel: gl.length ? gl[0].name : 'termin:' + x.id, fest: gl.some(t => kistenRows(S, t.name).length) };
+  });
+}
+// automatische Wahl: der Termin nach der Wunschtermin-Regel – OHNE nach Platz zu suchen (kein stilles Verschieben)
+function terminAuto(S, wunschISO) {
+  const maxT = has(S.settings.verteilenMaxTage) && num(S.settings.verteilenMaxTage) >= 0 ? num(S.settings.verteilenMaxTage) : 5;
+  const k = terminZiele(S).filter(z => !z.fest && (!wunschISO || (z.x.datum <= wunschISO && tageZwischen(z.x.datum, wunschISO) <= maxT)));
+  if (!k.length) return 'Warteliste';
+  return (wunschISO ? k[k.length - 1] : k[0]).ziel;
+}
+// nächster (späterer) Termin nach dem Ziel – für „alles auf den nächsten Termin“ bzw. den Rest einer Teilbestellung
+function naechsterTermin(S, ziel) {
+  const x = zielTermin(S, ziel);
+  const ab = x ? x.datum : todayISO();
+  const k = terminZiele(S, ab).filter(z => !z.fest && (!x || z.x.datum > x.datum));
+  return k.length ? k[0].ziel : null;
+}
+// Fehlmengen je Artikel einer Bestellung auf einem Termin ohne Tier (gegen die Obergrenze)
+function terminFehlmengen(S, o) {
+  const x = terminById(S, o.termin); if (!x) return {};
+  const og = terminObergrenze(S), P = probeStand(S, ordersOfTermin(S, x), og.typ, 1); P.tiere[0].sg = og.sg;
+  const t = P.tiere[0], b = fleischBilanz(P.T, t, P.best);
+  return Object.assign({}, b.fehlt[o.nr] || {});
+}
+// Nummer zur Anzeige: Teilbestellungen „112-2“ (o.teilVon = Ursprungs-Nr., o.teilNr = 2, 3 …); intern bleibt o.nr eine Zahl
+const nrText = o => o && o.teilVon ? `${o.teilVon}-${o.teilNr || 2}` : String(o && o.nr !== undefined && o.nr !== null ? o.nr : '');
+const naechsteTeilNr = (S, wurzel) => S.bestellungen.filter(o => o.teilVon === wurzel).reduce((m, o) => Math.max(m, num(o.teilNr) || 2), 1) + 1;
+// Kandidaten zum Vorziehen auf einen Termin (z. B. ungeplantes Tier): Bestellungen mit „früher möglich“ von späteren Terminen,
+// dazu die Warteliste (unverbindlich). Je Kandidat: passt er allein dazu? Nur Anzeige – vorgezogen wird nur von Hand.
+function vorziehKandidaten(S, x) {
+  if (!x) return [];
+  const gl = terminTiere(S, x), ziel = gl.length ? gl[0].name : 'termin:' + x.id;
+  if (gl.some(t => kistenRows(S, t.name).length)) return [];
+  const out = [];
+  for (const o of S.bestellungen) {
+    if (!o.name || (o.status || 'offen') !== 'offen') continue;
+    const y = terminVon(S, o);
+    const warte = o.tier === 'Warteliste' && !istTerminWarte(o);
+    if (!(warte || (o.frueher && y && y.datum > x.datum))) continue;
+    if (!warte) { const t = tier(S, o.tier); if (t && (kistenRows(S, t.name).length || kommissionierBegonnen(S, [t.name]))) continue; }
+    if (warte && o.wunsch && o.wunsch < x.datum) continue; // Wunsch schon vorbei
+    const fd = passtAufZiel(S, Object.assign({}, o, { nr: o.nr }), ziel);
+    out.push({ o, von: warte ? 'Warteliste' : `Abholtermin ${fmtDate(y.datum)}`, vonDatum: warte ? '9999' : y.datum, warte, passt: !fd || fd.ok, fd });
+  }
+  return out.sort((a, b) => (a.warte - b.warte) || a.vonDatum.localeCompare(b.vonDatum) || rangVon(a.o) - rangVon(b.o));
+}
+function vorziehen(S, nr, x) {
+  const o = S.bestellungen.find(y => y.nr === nr); if (!o || !x) return null;
+  const gl = terminTiere(S, x);
+  zielSetzen(o, gl.length ? gl[0].name : 'termin:' + x.id);
+  o.rang = nextRang(S); delete o.ueberbelegt; delete o.preisFest;
+  return o;
 }
 // ---------- Prüfliste Warteliste ----------
 // Alle Bestellungen auf der Warteliste zusammengezählt und probeweise einem Rind und einem Bullen
 // (Standard-Schlachtgewicht) zugeordnet – als Entscheidungshilfe: schlachten ja/nein, Rind oder Bulle.
 function wartelistePruefung(S) {
-  const ords = S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name).sort((a, b) => rangVon(a) - rangVon(b) || a.nr - b.nr);
+  const ords = S.bestellungen.filter(o => o.tier === 'Warteliste' && o.name && !istTerminWarte(o)).sort((a, b) => rangVon(a) - rangVon(b) || a.nr - b.nr);
   const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
   const schwelle = has(S.settings.wlSchwelle) && num(S.settings.wlSchwelle) > 0 ? num(S.settings.wlSchwelle) : 60;
   const wuensche = ords.map(o => o.wunsch).filter(Boolean).sort();
   // Probe-Tiere
   const sim = typ => {
     const t = { name: '\u0000Probe ' + typ, typ, sg: null };
-    const T = Object.assign({}, S, { tiere: S.tiere.concat([t]), bestellungen: S.bestellungen.filter(o => o.tier !== 'Warteliste').concat(ords.map(o => Object.assign({}, o, { tier: t.name }))) });
+    const T = Object.assign({}, S, { tiere: S.tiere.concat([t]), bestellungen: S.bestellungen.filter(o => o.tier !== 'Warteliste' || istTerminWarte(o)).concat(ords.map(o => Object.assign({}, o, { tier: t.name }))) });
     const ch = mengencheckTier(T, t.name);
     const bil = fleischBilanz(T, t, ordersOfTier(T, t.name));
     const nicht = ords.filter(o => (ch[o.nr] || '').startsWith('reicht'));
@@ -1019,7 +1355,8 @@ function wartelistePruefung(S) {
     for (const k in y) verkauft += Math.min(best[k], y[k]);
     const v = k => y[k] || 0, bq = k => best[k] || 0;
     const hackMehr = Math.max(0, bq(HACK) - v(HACK));
-    const frei = Math.max(0, v(GULASCH) - bq(GULASCH)) + Math.min(v(BRATEN) * bugAnteilVon(S, typ), Math.max(0, v(BRATEN) - bq(BRATEN)));
+    const frei = Math.max(0, v(GULASCH) - bq(GULASCH)) + Math.min(v(BRATEN) * bugAnteilVon(S, typ), Math.max(0, v(BRATEN) - bq(BRATEN)))
+      + Math.min(v(SIED) * siedHackAnteil(S), Math.max(0, v(SIED) - bq(SIED)));
     verkauft = Math.min(ausbeute, verkauft + Math.min(hackMehr, frei));
     return { typ, t, sg: sgRechnung(S, t), maxPak: maxPakete(S, t), ok: ords.length - nicht.length, nicht: nicht.map(o => o.nr), engpass,
       ausbeute, verkauft, auslastung: ausbeute > 0 ? verkauft / ausbeute : 0, rest: Math.max(0, ausbeute - verkauft) };
@@ -1038,7 +1375,7 @@ function wartelistePruefung(S) {
       if (!mitAusbeute) return has(vorhStk[a.name]) ? vorhStk[a.name] : null;
       const y = yieldArt(S, x.t, a.name);
       // Hack ist dehnbar: Gulasch (Kamm/Hals) und Bug können dazukommen
-      return { y, max: a.name === HACK ? y + yieldArt(S, x.t, GULASCH) + yieldArt(S, x.t, BRATEN) * bugAnteilVon(S, x.typ) : y };
+      return { y, max: a.name === HACK ? y + yieldArt(S, x.t, GULASCH) + yieldArt(S, x.t, BRATEN) * bugAnteilVon(S, x.typ) + yieldArt(S, x.t, SIED) * siedHackAnteil(S) : y };
     };
     const kr = kap(R), kb = kap(B);
     const yR = kr === null ? null : typeof kr === 'object' ? kr.y : kr, yB = kb === null ? null : typeof kb === 'object' ? kb.y : kb;
@@ -1218,7 +1555,7 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   const { hack, gul, braten } = fleischBilanz(S, t, ords);
   // Hackfleisch: Ausbeute + nicht bestelltes Gulasch – oder mehr, wenn mehr bestellt ist (dann Bug auflösen).
   // Separat vorbereitetes Hack (z. B. besonders mager) steht unten bei den Sonderfällen und geht hier ab.
-  hack.vorgabe = Math.max(0, roundUp(hack.ausbeuteMitGulasch + hack.ausBug - hack.separat));
+  hack.vorgabe = Math.max(0, roundUp(hack.ausbeuteMitGulasch + hack.ausBug + num(hack.ausSied) - hack.separat));
   const hk = num(hackKisteKg) > 0 ? num(hackKisteKg) : num(S.settings.hackKiste) || 20;
   // gleiche Aufteilung wie im Ladeplan (kein neuer Hack-Kiste für einen kleinen Rest)
   const hTeile = hackAufteilung(hack.vorgabe, hk, num(S.settings.kisteAusnahme) || 25);
@@ -1230,20 +1567,20 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   for (const o of ords) for (const s of sonderOf(S, o)) {
     const a = art(S, s.art);
     const sk = num(s.menge) > 0 && !istOrgan(s.art) ? skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null : null;
-    separat.push({ nr: o.nr, name: o.name, art: s.art, kiste: sk ? sk.nr : null, // ganze Stücke ohne Gewicht (seit 3.2.4, Wunsch Nutzer): der Metzger gibt das ganze Stück, das Gewicht ist nur eine Schätzung
+    separat.push({ nr: o.nr, nrT: nrText(o), name: o.name, art: s.art, kiste: sk ? sk.nr : null, // ganze Stücke ohne Gewicht (seit 3.2.4, Wunsch Nutzer): der Metzger gibt das ganze Stück, das Gewicht ist nur eine Schätzung
       menge: s.ganz ? s.ganz + ' Stück' : has(s.menge) ? (s.ca ? 'ca. ' + fmtNum(s.menge, 1) : fmtNum(s.menge, 3)) + ' ' + (a ? a.einheit : '') : '', hinweis: s.wunsch });
   }
   const waden = ords.reduce((s, o) => { const p = o.pos && o.pos[BEIN]; return s + (istWade(art(S, BEIN), p) ? num(p.anzahl) : 0); }, 0);
   const ochsB = ords.reduce((s, o) => s + qty(S, o, OCHS), 0);
   // Ochsenschwanz: nur „am Stück“ bestellte bleiben ganz (Zeile im Metzgerauftrag), alle anderen schneidet der Metzger wie gewohnt
-  const ochsGanzListe = ords.filter(o => qty(S, o, OCHS) > 0 && ochsGanz(S, o)).map(o => ({ nr: o.nr, name: o.name, stk: qty(S, o, OCHS) }));
+  const ochsGanzListe = ords.filter(o => qty(S, o, OCHS) > 0 && ochsGanz(S, o)).map(o => ({ nr: o.nr, nrT: nrText(o), name: o.name, stk: qty(S, o, OCHS) }));
   const ochs = { bestellt: ochsB, vorhanden: (has(S.settings.ochsStk) ? num(S.settings.ochsStk) : 1) * topfN(t), ganz: ochsGanzListe.reduce((s, x) => s + x.stk, 0), ganzListe: ochsGanzListe };
   // „davon bestellt“ (seit 3.3.2): was aus den Hack-/Gulasch-Kisten an die Bestellungen geht – einzeln + aus Paketen,
   // OHNE Sonderwünsche (die bereitet der Metzger separat vor, sie stecken auch nicht in der Vorgabe oben)
   const ausKiste = name => ords.reduce((s, o) => s + Math.max(0, qty(S, o, name) - specSum(S, o, name)), 0) + pak * paketKgArt(S, name);
   hack.bestelltKiste = ausKiste(HACK); gul.bestelltKiste = ausKiste(GULASCH);
   gul.mitSonder = ords.some(o => specSum(S, o, GULASCH) > 0.001);
-  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, mitPlan, waden, ochs, bugMager: num(braten.bugMager), fettSied: num(hack.fettSied) };
+  return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, mitPlan, waden, ochs, bugMager: num(braten.bugMager), fettSied: num(hack.fettSied), siedInsHack: num(hack.ausSied) };
 }
 
 // ---------- Packplan (Makro PackplanFuer) ----------
@@ -1463,7 +1800,7 @@ function packplanKisten(S, tierName, f = 1) {
     if (a.name === HACK) kg = ma.hack.vorgabe;
     else if (a.name === GULASCH) kg = ma.gulasch.vorgabe;
     else if (a.name === BRATEN) kg = Math.max(0, yt - ma.hack.ausBug - num(ma.bugMager) - (specT[a.name] || 0)); // Bug ging ins Hack (auch mageres Hack)
-    else if (a.name === SIED) kg = Math.max(0, yt - num(ma.fettSied) - (specT[a.name] || 0)); // Siedfleisch ging ins fettige Hack
+    else if (a.name === SIED) kg = Math.max(0, yt - num(ma.fettSied) - num(ma.siedInsHack) - (specT[a.name] || 0)); // Siedfleisch ging ins fettige Hack
     else if (!isOrg) kg = Math.max(0, yt - (specT[a.name] || 0));
     return { art: a.name, isOrg, shr, kg };
   });
@@ -2045,7 +2382,7 @@ function hackZettel(S, tierName) {
     const ausPak = pak > 0 && hackPk > 0 ? r3(pak * hackPk) : null;
     const pv = num(o.pakVak);
     rows.push({
-      nr: o.nr, name: o.name,
+      nr: o.nr, nrT: nrText(o), name: o.name,
       einzeln: ein > 0 ? r3(ein) : null,
       einzelnAls: ein > 0 ? hackPortionText(po, ein, qty(S, o, HACK)) : '',
       einzelnVak: ein > 0 ? (vak ? 'VAKUUM' : 'Tüte') : '',
@@ -2109,7 +2446,7 @@ function innereienZettel(S, tierName) {
     const lq = qty(S, o, 'Leber');
     const fehlt = {};
     for (const n of ORGANE) { const q = qty(S, o, n); if (!(q > 0)) continue; const a = Math.min(q, Math.max(0, pool[n])); pool[n] -= q; if (q - a > 0.001) fehlt[n] = q - a; }
-    return { nr: o.nr, name: o.name, fehlt, leber: lq || null, leberAls: lq > 0 ? (po ? po.text : fmtNum(lq, 3) + ' kg') : '',
+    return { nr: o.nr, nrT: nrText(o), name: o.name, fehlt, leber: lq || null, leberAls: lq > 0 ? (po ? po.text : fmtNum(lq, 3) + ' kg') : '',
       nieren: qty(S, o, 'Nieren') || null, herz: qty(S, o, 'Herz') || null, zunge: qty(S, o, 'Zunge') || null, baeckle: qty(S, o, 'Bäckle') || null,
       vak: v.length ? v.join(' ') : 'nein', ok: !!o.innOk };
   });
@@ -2121,7 +2458,7 @@ function packliste(S, tierName) {
   const t = topfTier(S, tierName);
   if (!t) return null;
   return { tier: t, rows: ordersOfTopf(S, t).map(o => ({
-    nr: o.nr, name: o.name, tel: o.tel, text: bestellText(S, o), sonder: sonderOf(S, o).map(s => sonderText(S, s)).join('; '),
+    nr: o.nr, nrT: nrText(o), name: o.name, tel: o.tel, text: bestellText(S, o), sonder: sonderOf(S, o).map(s => sonderText(S, s)).join('; '),
     schaetz: schaetzpreis(S, o), endbetrag: has(o.endbetrag) ? num(o.endbetrag) : null, status: o.status || 'offen', notiz: o.packNotiz || '', zahlOffen: zahlungOffen(o), lager: lagerText(o), lagerVorschlag: lagerVorschlag(S, o).ort })) };
 }
 
@@ -2168,16 +2505,16 @@ function hofladenSummen(S, jahr) {
 function leererStand() {
   const d = JSON.parse(JSON.stringify(DEFAULTS));
   const S0 = {
-    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 9, gespeichert: null,
+    app: 'Bestellsystem Bergwiesenhof', version: 1, schema: 10, gespeichert: null,
     artikel: d.artikel, settings: d.settings, auto: d.auto, wege: d.wege,
-    kunden: [], tiere: [], bestellungen: [], kisten: [], hofladen: [],
+    kunden: [], tiere: [], bestellungen: [], kisten: [], hofladen: [], termine: [],
     metzgerManuell: {}, packplaene: {}, letzteSicherung: null
   };
   S0.settings.preislisten = [preislisteAus(S0, parseDate(S0.settings.preiseAb) || '2000-01-01')];
   return S0;
 }
 function bewegungsdatenLeeren(S, mitKunden) {
-  S.bestellungen = []; S.tiere = []; S.kisten = []; S.hofladen = []; S.metzgerManuell = {}; S.packplaene = {};
+  S.bestellungen = []; S.tiere = []; S.termine = []; S.kisten = []; S.hofladen = []; S.metzgerManuell = {}; S.packplaene = {};
   if (mitKunden) S.kunden = [];
 }
 function standPruefen(x) {
@@ -2202,6 +2539,9 @@ function standPruefen(x) {
     const bk = (x.artikel || []).find(a => a.name === 'Bäckle'); if (bk && !(num(bk.preis) > 0)) bk.preis = 15;
     x.schema = 9;
   }
+  // Version 3.5 (Schema 10): Abholtermine – je Abholdatum der aktiven Tiere ein Termin (Bestellungen bleiben bei ihren Tieren)
+  if (!(altSchema >= 10)) x.schema = 10;
+  termineAbgleichen(x);
   // Version 1.9.5: Preislisten mit „gültig ab“ – bisherige Preise werden die erste Preisliste
   if (!hattePreislisten) {
     const ab = parseDate(x.settings.preiseAb) || '2000-01-01';
@@ -2221,5 +2561,8 @@ if (typeof module !== 'undefined') module.exports = {
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, topfTier, topfAus, topfN, ordersOfTopf, tierAnzeige, kistenKontext, abschlussNamen, mengencheckT, TOPF_SEP, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
+  terminZiele, zielTermin, zielVon, zielText, zielSetzen, passtAufZiel, terminAuto, naechsterTermin, terminFehlmengen, nrText, vorziehKandidaten, vorziehen, terminObergrenze,
+  tierText, termine, terminById, terminAm, istTerminWarte, terminTiere, terminArchivTiere, terminVon, ordersOfTermin, termineAbgleichen, terminBinden, terminAnlegen, terminDatumAendern, terminLoeschen, terminTierZuordnen, terminVorschlag,
+  gewichtsvorschlag, mindestGewicht, terminMengenliste, siedHackAnteil, fleischBilanz, SIED, BRATEN,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
 };

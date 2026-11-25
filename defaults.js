@@ -278,6 +278,7 @@ const DEFAULTS = {
   "nenner": 16,
   "hackKiste": 20,
   "fettSiedProzent": 50,
+  "siedHackProzent": 33,
   "hackHof500Prozent": 50,
   "kommToleranz": 15,
   "lagerKuehlhaus": 30,
