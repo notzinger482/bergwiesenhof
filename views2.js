@@ -153,8 +153,11 @@ function docTermin(x, gv, ml) {
     if (ml.stueck.length) bl.push({ type: 'text', warn: true, text: 'Reicht bei dieser Anzahl Tiere nicht: ' + ml.stueck.join('; ') + '.' });
     bl.push({ type: 'h', text: `Bestellungen (${ords0(x).length})` });
   } else bl.push({ type: 'h', text: `Bestellungen (${ords0(x).length})` });
-  const os = ords0(x);
-  bl.push({ type: 'table', head: ['Nr.', 'Name', 'Wunsch', 'Pakete', 'Bestellung'].concat(ml ? ['Probe'] : []), align: ['r', '', '', 'r', ''],
+  // Bestellungen des Termins sortierbar (seit 3.5.5, Wunsch Nutzer) – Standard: Reihenfolge der Zuteilung
+  const ST = ui.sortT = ui.sortT || { k: 'rang', d: 1 };
+  const chk = o => { const c = ml ? ml.checks[o.nr] || '' : ''; return c.startsWith('reicht') ? 0 : c === 'ok' ? 2 : 1; };
+  const os = sortiere(ords0(x), ST, (o, k) => k === 'rang' ? rangVon(o) : k === 'nr' ? (o.teilVon || o.nr) + (o.teilVon ? (o.teilNr || 2) / 1000 : 0) : k === 'name' ? o.name || '' : k === 'wunsch' ? o.wunsch || '' : k === 'pakete' ? num(o.pakete) : k === 'probe' ? chk(o) : k === 'kg' ? einzelKg(S, o) + num(o.pakete) * paketGewicht(S) : '');
+  bl.push({ type: 'table', head: ['Nr.', 'Name', 'Wunsch', 'Pakete', 'Bestellung'].concat(ml ? ['Probe'] : []), align: ['r', '', '', 'r', ''], sort: { st: ST, keys: ['nr', 'name', 'wunsch', 'pakete', 'kg', 'probe'] },
     rows: os.map(o => [nrText(o), o.name, o.wunsch ? fmtDate(o.wunsch) : '', num(o.pakete) || '', bestellText(S, o)].concat(ml ? [ml.checks[o.nr] || ''] : [])),
     rowClass: os.map(o => ml && (ml.checks[o.nr] || '').startsWith('reicht') ? 'rot' : '') });
   const anz = os.length, pak = os.reduce((s, o) => s + num(o.pakete), 0);
@@ -236,6 +239,7 @@ function terminInhalt(x, gl, ords) {
   ui.acts.liste = () => { ui.filter.tier = 'termin:' + x.id; ui.filter.archiv = false; gehe('#/bestellungen'); };
   ui.acts.tnotiz = el => { x.notiz = el.value.trim(); speichern(); meldung('Notiz gespeichert.'); };
   // Zusage: nur speichern und den Text daneben ändern – nichts neu rechnen (seit 3.5.4; vorher Sekunden je Haken, zweiter Haken ging verloren)
+  ui.acts.docsort = el => { sortKlick(ui.sortT, el.dataset.k, ['pakete', 'kg']); terminInhalt(x, gl, ords); };
   ui.acts.zusage = el => { zusageSetzen(S, x.id, el.dataset.f, el.checked); speichern(); const k = el.parentElement.querySelector('.klein'); if (k) k.textContent = el.checked ? 'am ' + fmtDate(x[el.dataset.f]) : 'offen'; meldung(el.checked ? 'Zusage eingetragen.' : 'Zusage entfernt.'); };
   ui.acts.tdatum = async el => {
     const neu = el.value; if (!neu || neu === x.datum) return;

@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.5.4';
+const APP_VERSION = '3.5.5';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '', archiv: false }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -874,12 +874,24 @@ function viewKunde(id) {
 // =====================================================================
 function viewTiere() {
   titel('Tiere');
-  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Tiere</h1><button class="btn" data-act="neuverteilen">Offene Bestellungen neu verteilen …</button><a class="btn" href="#/archiv">Archiv (${S.tiere.filter(t => t.archiv).length})</a><a class="btn haupt" href="#/tier/neu">+ Neues Tier</a></div>
-    ${tiereSortiert().length ? '' : '<div class="karte">Keine aktiven Tiere angelegt.</div>'}
-    <div class="tabwrap"><table class="tab"><thead><tr><th>Tier</th><th>Typ</th><th>Ohrmarke / Notiz</th><th>Schlachtung</th><th>Abholung</th><th class="r">SG (kg)</th><th class="r">Paket ca.</th><th class="r">Pakete bestellt / frei</th><th class="r">Bestellungen</th><th>Mengen</th></tr></thead><tbody>
-    ${tiereSortiert().map(t => { const i = tierInfo(S, t); return `<tr class="klick ${i.reichtNicht ? 'rot' : ''}" data-act="oeffnen" data-t="${esc(t.name)}"><td class="fett">${esc(t.name)}</td><td>${esc(t.typ)}</td><td>${esc(t.notiz)}</td><td>${fmtDate(t.schlacht)}</td><td>${fmtDate(t.abhol) || 'offen'}</td><td class="r">${fmtNum(i.sg)}${num(t.sg) ? '' : ' <span class="klein">(Std.)</span>'}</td><td class="r">${fmtNum(i.paketKg, 1)} kg</td><td class="r">${fmtNum(i.pakete)} / <b class="${i.frei < 0 ? 'warn' : ''}">${fmtNum(i.frei)}</b></td><td class="r">${i.anzahl}</td><td>${i.reichtNicht ? `<span class="marke rot">${i.reichtNicht} reicht nicht</span>` : i.anzahl ? '<span class="marke gruen">ok</span>' : ''}</td></tr>`; }).join('')}
+  // Suche + Sortieren per Spaltenüberschrift (seit 3.5.5, Wunsch Nutzer)
+  const ST = ui.sortTiere = ui.sortTiere || { k: 'abhol', d: 1 };
+  ui.tfilter = ui.tfilter || '';
+  const liste = () => {
+    const q = ui.tfilter.trim().toLowerCase();
+    const info = new Map(tiereSortiert().map(t => [t, tierInfo(S, t)]));
+    let ts = tiereSortiert().filter(t => !q || [t.name, t.typ, t.notiz, t.kommentar, fmtDate(t.abhol), fmtDate(t.schlacht)].some(v => String(v || '').toLowerCase().includes(q)));
+    ts = sortiere(ts, ST, (t, k) => { const i = info.get(t); return k === 'name' ? t.name : k === 'typ' ? t.typ || '' : k === 'notiz' ? t.notiz || '' : k === 'schlacht' ? t.schlacht || '' : k === 'abhol' ? t.abhol || '' : k === 'sg' ? num(i.sg) : k === 'paket' ? num(i.paketKg) : k === 'frei' ? num(i.frei) : k === 'anzahl' ? i.anzahl : k === 'mengen' ? (i.reichtNicht ? -i.reichtNicht : i.anzahl ? 1 : 2) : ''; });
+    $('#liste').innerHTML = !ts.length ? `<div class="karte">${q ? 'Kein Tier gefunden.' : 'Keine aktiven Tiere angelegt.'}</div>` : `<div class="tabwrap"><table class="tab"><thead><tr>${thSort(ST, 'name', 'Tier')}${thSort(ST, 'typ', 'Typ')}${thSort(ST, 'notiz', 'Ohrmarke / Notiz')}${thSort(ST, 'schlacht', 'Schlachtung')}${thSort(ST, 'abhol', 'Abholung')}${thSort(ST, 'sg', 'SG (kg)', 'r')}${thSort(ST, 'paket', 'Paket ca.', 'r')}${thSort(ST, 'frei', 'Pakete bestellt / frei', 'r')}${thSort(ST, 'anzahl', 'Bestellungen', 'r')}${thSort(ST, 'mengen', 'Mengen')}</tr></thead><tbody>
+    ${ts.map(t => { const i = info.get(t); return `<tr class="klick ${i.reichtNicht ? 'rot' : ''}" data-act="oeffnen" data-t="${esc(t.name)}"><td class="fett">${esc(t.name)}</td><td>${esc(t.typ)}</td><td>${esc(t.notiz)}</td><td>${fmtDate(t.schlacht)}</td><td>${fmtDate(t.abhol) || 'offen'}</td><td class="r">${fmtNum(i.sg)}${num(t.sg) ? '' : ' <span class="klein">(Std.)</span>'}</td><td class="r">${fmtNum(i.paketKg, 1)} kg</td><td class="r">${fmtNum(i.pakete)} / <b class="${i.frei < 0 ? 'warn' : ''}">${fmtNum(i.frei)}</b></td><td class="r">${i.anzahl}</td><td>${i.reichtNicht ? `<span class="marke rot">${i.reichtNicht} reicht nicht</span>` : i.anzahl ? '<span class="marke gruen">ok</span>' : ''}</td></tr>`; }).join('')}
     </tbody></table></div>`;
+  };
+  inhalt().innerHTML = `<div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">Tiere</h1><button class="btn" data-act="neuverteilen">Offene Bestellungen neu verteilen …</button><a class="btn" href="#/archiv">Archiv (${S.tiere.filter(t => t.archiv).length})</a><a class="btn haupt" href="#/tier/neu">+ Neues Tier</a></div>
+    <div class="suchzeile"><input class="feld" type="search" placeholder="Suchen: Name, Ohrmarke, Notiz, Typ oder Datum" data-in="tq" value="${esc(ui.tfilter)}"></div><div id="liste"></div>`;
+  ui.ins.tq = el => { ui.tfilter = el.value; clearTimeout(ui.qTimer); ui.qTimer = setTimeout(() => { if ($('#liste')) liste(); }, 250); };
+  ui.acts.sort = el => { sortKlick(ST, el.dataset.k, ['sg', 'paket', 'frei', 'anzahl']); liste(); };
   ui.acts.oeffnen = el => gehe('#/tier/' + encodeURIComponent(el.dataset.t));
+  liste();
 }
 function viewTier(name, q) {
   const neu = name === 'neu';

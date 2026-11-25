@@ -15,7 +15,9 @@ function docHtml(doc) {
     else if (b.type === 'kv') h += '<table class="doc-kv">' + b.rows.map(r => `<tr><td>${esc(r[0])}</td><td class="fett">${esc(r[1])}</td><td>${esc(r[2] || '')}</td></tr>`).join('') + '</table>';
     else if (b.type === 'table') {
       const sw = b.fest ? (b.widths || []).reduce((a, w) => a + w, 0) : 0; // feste Spaltenbreiten nur, wo ausdrücklich gewünscht
-      h += `<table class="doc-tab${sw ? ' fest' : ''}">` + (sw ? '<colgroup>' + b.widths.map(w => `<col style="width:${(100 * w / sw).toFixed(1)}%">`).join('') + '</colgroup>' : '') + '<thead><tr>' + b.head.map((c, i) => `<th class="${(b.align || [])[i] === 'r' ? 'r' : ''}">${esc(c)}</th>`).join('') + '</tr></thead><tbody>';
+      // sortierbare Spalten (seit 3.5.5): b.sort = { st: {k, d}, keys: [Schlüssel je Spalte oder null] } – nur am Bildschirm, im Bild/Ausdruck ohne Pfeile
+      const so = b.sort, th = (c, i) => { const k = so && so.keys[i]; return k ? `<th class="${(b.align || [])[i] === 'r' ? 'r ' : ''}sortierbar" data-act="docsort" data-k="${k}">${esc(c)}${so.st.k === k ? (so.st.d > 0 ? ' ▲' : ' ▼') : ''}</th>` : `<th class="${(b.align || [])[i] === 'r' ? 'r' : ''}">${esc(c)}</th>`; };
+      h += `<table class="doc-tab${sw ? ' fest' : ''}">` + (sw ? '<colgroup>' + b.widths.map(w => `<col style="width:${(100 * w / sw).toFixed(1)}%">`).join('') + '</colgroup>' : '') + '<thead><tr>' + b.head.map(th).join('') + '</tr></thead><tbody>';
       if (!b.rows.length) h += `<tr><td colspan="${b.head.length}" class="leer">${esc(b.leer || '– keine –')}</td></tr>`;
       b.rows.forEach((r, ri) => { h += `<tr class="${(b.rowClass || [])[ri] || ''}">` + r.map((c, i) => `<td class="${(b.align || [])[i] === 'r' ? 'r' : ''}">${esc(c).replace(/\n/g, '<br>')}</td>`).join('') + '</tr>'; });
       h += '</tbody></table>';
