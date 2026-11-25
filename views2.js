@@ -244,19 +244,31 @@ function mengenSummen(mp) {
       ['Engpässe', z.engpass.length ? z.engpass.join(', ') : 'keine', z.knapp.length ? 'knapp: ' + z.knapp.join(', ') : ''],
       ['Innereien / Ochsenschwanz', z.innereien.length ? z.innereien.join(' · ') : '–', z.innereien.length ? 'nicht in der Prüfung' : '']] }];
 }
+// Stückzahl ca. aus kg über die Einzelgewichte (Einstellungen → Ausbeute & Kisten), seit 3.5.2 (Wunsch Nutzer): „Ausbeute / frei“
+function stkCa(r) {
+  const g = einzelGewicht(S, r.art), a = art(S, r.art); if (!(g > 0)) return '';
+  const eh = num(a && a.beutelG) > 0 ? ' Btl' : '';
+  const n = kg => Math.floor(kg * 1000 / g + 1e-9);
+  const frei = r.frei >= 0 ? n(r.frei) : -Math.ceil(-r.frei * 1000 / g - 1e-9);
+  return `${n(r.ausbeuteStd)} / ${frei < 0 ? '−' + (-frei) : frei}${eh}`;
+}
 function docMenge(mp) {
   const t = mp.tier, i = mp.info;
   return { title: `Mengenprüfung – ${t.name}`, sub: [`${t.typ} · ${fmtNum(i.sg)} kg SG · ${abholTxt(t)}`, `Pakete bestellt ${fmtNum(i.pakete)} / frei ${fmtNum(i.frei)} · ${i.anzahl} Bestellungen · reicht nicht: ${i.reichtNicht}`],
-    blocks: [{ type: 'table', head: ['Teilstück', 'Ausbeute ca.', 'einzeln', 'in Paketen', 'gesamt', 'noch frei', 'Auslastung', 'Status'], align: ['', 'r', 'r', 'r', 'r', 'r', 'r', ''], widths: [3, 2, 2, 2, 2, 2, 2, 2.4],
-      rows: mp.rows.map(r => [r.art, r.ausbeute > r.ausbeuteStd + 0.05 ? `${fmtNum(r.ausbeuteStd, 1)} (bis ${fmtNum(r.ausbeute, 1)})` : fmtNum(r.ausbeute, 1), fmtNum(r.einzel, 1), fmtNum(r.ausPak, 1), fmtNum(r.gesamt, 1), fmtNum(r.frei, 1), r.auslastung === null ? '' : fmtNum(r.auslastung * 100, 0) + ' %', r.status]),
+    blocks: [{ type: 'table', head: ['Teilstück', 'Ausbeute ca.', 'einzeln', 'in Paketen', 'gesamt', 'noch frei', 'Stk ca. (Ausbeute / frei)', 'Auslastung', 'Status'], align: ['', 'r', 'r', 'r', 'r', 'r', 'r', 'r', ''], widths: [3, 2, 2, 2, 2, 2, 2.4, 2, 2.4],
+      rows: mp.rows.map(r => [r.art, r.ausbeute > r.ausbeuteStd + 0.05 ? `${fmtNum(r.ausbeuteStd, 1)} (bis ${fmtNum(r.ausbeute, 1)})` : fmtNum(r.ausbeute, 1), fmtNum(r.einzel, 1), fmtNum(r.ausPak, 1), fmtNum(r.gesamt, 1), fmtNum(r.frei, 1), stkCa(r), r.auslastung === null ? '' : fmtNum(r.auslastung * 100, 0) + ' %', r.status]),
       rowClass: mp.rows.map(r => r.status === 'reicht nicht' ? 'rot' : '') },
       ...mengenSummen(mp),
-      { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel in der Reihenfolge, in der die Bestellungen dem Tier zugeordnet wurden. Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Innereien werden nicht geprüft.' }]
-      .concat(mp.rows.some(r => r.ausbeute > r.ausbeuteStd + 0.05) ? [{ type: 'text', text: 'Hackfleisch „bis“: normale Hack-Ausbeute; wenn nötig zusätzlich nicht bestelltes Gulasch, der Bug und zuletzt höchstens ${fmtNum(siedHackAnteil(S) * 100, 0)} % des nicht bestellten Siedfleischs (wird dann im Metzgerauftrag aufgelöst).' }] : []), footer: fussZeile() };
+      { type: 'text', text: 'Genusspakete haben Vorrang, danach Einzelartikel in der Reihenfolge, in der die Bestellungen dem Tier zugeordnet wurden. Ausbeute = Richtwerte, „knapp“ = über 90 % vergeben. Innereien werden nicht geprüft. Stk ca. = kg ÷ Einzelgewicht aus den Einstellungen (abgerundet).' }]
+      .concat(mp.rows.some(r => r.ausbeute > r.ausbeuteStd + 0.05) ? [{ type: 'text', text: `Hackfleisch „bis“: normale Hack-Ausbeute; wenn nötig zusätzlich nicht bestelltes Gulasch, der Bug und zuletzt höchstens ${fmtNum(siedHackAnteil(S) * 100, 0)} % des nicht bestellten Siedfleischs (wird dann im Metzgerauftrag aufgelöst).` }] : []), footer: fussZeile() };
 }
 function docMetzger(ma) {
   const t = ma.tier;
-  const bl = [{ type: 'h', text: 'Gesamtmengen' },
+  // feste Hinweise oben (seit 3.5.2, Wunsch Nutzer 25.11.)
+  const bl = [{ type: 'text', bold: true, text: 'Oberschale komplett in Rouladen.' },
+    { type: 'text', bold: true, text: 'Bratenstücke parieren, aber nicht küchenfertig schneiden (außer Sonderwünsche unten).' },
+    { type: 'text', bold: true, text: `Reicht das Hackfleisch nicht für die ${fmtNum(ma.hack.vorgabe)} kg: übriges Gulasch${ma.gulasch.bestelltKiste > 0.05 ? ` (über die bestellten ${fmtNum(ma.gulasch.bestelltKiste, 1)} kg hinaus)` : ''} zu Hackfleisch machen.` },
+    { type: 'h', text: 'Gesamtmengen' },
     { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, [ma.hack.kistenText ? `(${ma.hack.kistenText})` : '', `davon bestellt ${fmtNum(ma.hack.bestelltKiste, 1)} kg (ohne Sonderwünsche)`].filter(Boolean).join(' – ')], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', ma.gulasch.vorgabe > 0 ? `(erwartet) – davon bestellt ${fmtNum(ma.gulasch.bestelltKiste, 1)} kg${ma.gulasch.mitSonder ? ' (ohne Sonderwünsche)' : ''}` : '']]
       .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Nr. siehe unten']] : [])
       .concat(ma.ochs.ganz > 0 ? [['Ochsenschwanz', `${fmtNum(ma.ochs.ganz)} Stück ganz lassen`, `kommt zu den Beinscheiben in die Kiste – ${ma.ochs.ganzListe.map(x => 'Nr. ' + (x.nrT || x.nr)).join(', ')}`]] : [])
