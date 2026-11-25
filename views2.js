@@ -102,7 +102,7 @@ function docKisten(tn, calc, tG) {
   const vor = c => mehr ? c.tier + ': ' : '';
   return { title: `Kisten – ${tn}`, sub: [t ? abholTxt(t) : ''],
     blocks: [{ type: 'table', head: ['Kiste', 'Inhalt', 'kg', 'Stellplatz', 'Bedarf ges.', 'verplant', 'Rest', 'Teilstücke'], widths: [1, 2.6, 1.1, 2.4, 1.4, 1.3, 1.1, 4], align: ['r', '', 'r', '', 'r', 'r', 'r', ''],
-      rows: calc.map(c => c.k.art === OCHS ? [c.k.nr, vor(c) + c.k.art, fmtNum(c.k.kg, 0) + ' Stk' + (has(c.k.gew) ? ' · ' + fmtNum(c.k.gew, 2) + ' kg' : ''), c.k.platz || '', fmtNum(c.bedarf, 0) + ' Stk', fmtNum(c.verplant, 0) + ' Stk', fmtNum(c.rest, 0) + ' Stk', c.k.info ? c.k.info + ' (am Stück bestellt)' : 'wird geschnitten'] : [c.k.nr, vor(c) + c.k.art, fmtNum(c.k.kg, 1), c.k.platz || '', fmtNum(c.bedarf, 1), fmtNum(c.verplant, 1), fmtNum(c.rest, 1), c.teile || '']) }], footer: fussZeile() };
+      rows: calc.map(c => c.k.art === OCHS ? [c.k.nr, vor(c) + c.k.art, fmtNum(c.k.kg, 0) + ' Stk' + (has(c.k.gew) ? ' · ' + fmtNum(c.k.gew, 2) + ' kg' : ''), c.k.platz || '', fmtNum(c.bedarf, 0) + ' Stk', fmtNum(c.verplant, 0) + ' Stk', fmtNum(c.rest, 0) + ' Stk', c.k.info ? c.k.info + ' (am Stück bestellt)' : 'wird geschnitten'] : [c.k.nr, vor(c) + c.k.art, fmtNum(c.k.kg, 1), c.k.platz || '', ...(c.k.art === SONDERKISTE ? ['–', '–', '–'] : [fmtNum(c.bedarf, 1), fmtNum(c.verplant, 1), fmtNum(c.rest, 1)]), c.teile || '']) }], footer: fussZeile() };
 }
 function docHack(hz) {
   return { title: `Hackfleisch-Zettel – ${hz.tier.name}`, sub: [abholTxt(hz.tier), `Summe einzeln ${fmtNum(hz.sumEinzeln, 2)} kg · aus Paketen ${fmtNum(hz.sumPak, 1)} kg`],
@@ -390,13 +390,13 @@ function tabKisten(tn, ziel) {
             <td class="r klein">${has(c.k.plan) ? (c.k.art === OCHS ? fmtNum(c.k.plan, 0) + ' Stk' : fmtNum(c.k.plan, 1)) : ''}</td>
             <td style="width:96px">${c.k.art === OCHS ? `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="gew" value="${has(c.k.gew) ? fmtIn(c.k.gew, 2) : ''}" placeholder="kg" title="Ochsenschwanz gewogen (kg)"><div class="klein">Stück: <input class="feld zahl klein" style="width:52px;padding:2px 6px;min-height:40px;margin-top:4px" inputmode="numeric" data-ch="kf" data-f="kg" value="${fmtIn(c.k.kg, 0)}" title="Anzahl Ochsenschwänze"></div>` : `<input class="feld zahl" inputmode="decimal" data-ch="kf" data-f="kg" value="${gw ? fmtIn(c.k.kg, 2) : ''}" placeholder="${has(c.k.plan) ? fmtNum(c.k.plan, 1) : ''}">`}</td>
             <td style="width:172px"><select class="feld klein" style="min-width:168px;padding-left:6px;padding-right:2px" data-ch="kf" data-f="platz">${stellplatzOptionen(c.k.platz)}</select></td>
-            <td class="r fett">${c.k.art === OCHS ? fmtNum(c.rest, 0) + ' Stk' : fmtNum(c.rest, 1)}</td>
+            <td class="r fett">${c.k.art === SONDERKISTE ? '–' : c.k.art === OCHS ? fmtNum(c.rest, 0) + ' Stk' : fmtNum(c.rest, 1)}</td>
             <td style="width:44px"><button class="btn klein rot" data-act="kweg" data-id="${c.k.id}">✕</button></td></tr>`; }).join('')}
           </tbody></table></div>
           <div class="knopfleiste" style="padding:10px 12px"><button class="btn klein" data-act="kneu">+ Kistenzeile${zeigTier ? ' (' + esc(tn) + ')' : ''}</button><span class="platz"></span><button class="btn braun klein" data-act="abschluss">${topf ? esc(ctx.key) : isG ? esc(tn) : 'Tier'} abgeschlossen → Reste an Hofladen</button></div>
         </div>
       </div>
-      <p class="klein">Grün = gewogen. Leeres Feld bei „gewogen“ = es wird mit dem Planwert gerechnet. „Rest“ = was nach allen Bestellungen in der Kiste übrig bleibt.</p>`;
+      <p class="klein">Grün = gewogen. Leeres Feld bei „gewogen“ = es wird mit dem Planwert gerechnet. „Rest“ = was nach allen Bestellungen in der Kiste übrig bleibt (geht an den Hofladen; Sonderfälle-Kisten gehören ganz den Kunden: –).</p>`;
   }
   ui.acts.planen = async () => {
     if (gesperrt) return meldung('Kistenplan gesperrt – Kommissionieren läuft.', true);

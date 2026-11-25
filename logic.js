@@ -1839,10 +1839,12 @@ function kistenCalc(S, tierName) {
     startMap[k.art] = start + num(k.kg);
     const anteil = t ? anteilJePaket(S, t, k.art, true) : 0;
     const bedarf = ords.reduce((s, o) => s + qty(S, o, k.art) - specSum(S, o, k.art), 0) + pak * anteil;
-    const verplant = Math.max(0, Math.min(start + num(k.kg), bedarf) - start);
+    // Sonderfälle-Kisten gehören ganz den Kunden (beschriftet) – kein Rest (seit 3.4.2; vorher stand das volle Gewicht als „Rest“)
+    const sk = k.art === SONDERKISTE;
+    const verplant = sk ? num(k.kg) : Math.max(0, Math.min(start + num(k.kg), bedarf) - start);
     const a = art(S, k.art);
     const sonderInhalt = k.art === SONDERKISTE ? ords.flatMap(o => sonderOf(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art) && (!k.sonder || k.sonder.includes(o.nr + '|' + s.art))).map(s => `Nr. ${o.nr}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
-    return { k, start, anteil, bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: sonderInhalt || (k.info ? k.info : a && k.art !== HACK ? a.teile : '') };
+    return { k, start, anteil, bedarf: sk ? num(k.kg) : bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: sonderInhalt || (k.info ? k.info : a && k.art !== HACK ? a.teile : '') };
   });
 }
 // Tier abgeschlossen: Reste an Hofladen, Kisten leeren
