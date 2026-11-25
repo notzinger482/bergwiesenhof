@@ -1260,6 +1260,11 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   // Ochsenschwanz: nur „am Stück“ bestellte bleiben ganz (Zeile im Metzgerauftrag), alle anderen schneidet der Metzger wie gewohnt
   const ochsGanzListe = ords.filter(o => qty(S, o, OCHS) > 0 && ochsGanz(S, o)).map(o => ({ nr: o.nr, name: o.name, stk: qty(S, o, OCHS) }));
   const ochs = { bestellt: ochsB, vorhanden: (has(S.settings.ochsStk) ? num(S.settings.ochsStk) : 1) * topfN(t), ganz: ochsGanzListe.reduce((s, x) => s + x.stk, 0), ganzListe: ochsGanzListe };
+  // „davon bestellt“ (seit 3.3.2): was aus den Hack-/Gulasch-Kisten an die Bestellungen geht – einzeln + aus Paketen,
+  // OHNE Sonderwünsche (die bereitet der Metzger separat vor, sie stecken auch nicht in der Vorgabe oben)
+  const ausKiste = name => ords.reduce((s, o) => s + Math.max(0, qty(S, o, name) - specSum(S, o, name)), 0) + pak * paketKgArt(S, name);
+  hack.bestelltKiste = ausKiste(HACK); gul.bestelltKiste = ausKiste(GULASCH);
+  gul.mitSonder = ords.some(o => specSum(S, o, GULASCH) > 0.001);
   return { tier: t, anzahl: ords.length, pakete: pak, hack, gulasch: gul, separat, mitPlan, waden, ochs, bugMager: num(braten.bugMager), fettSied: num(hack.fettSied) };
 }
 
