@@ -169,25 +169,58 @@ function erfassungSumme(t, S) {
   for (const [n, w] of Object.entries(um)) if (art[n] && !art[n].kisten && w > 0.05) { art[n].kg += w; art[n].umleitung = w; kg += w; }
   return { art, teil, kg, teile };
 }
-// zählt für die Statistik: archiviert, nicht ausgeblendet, echtes Schlachtgewicht, etwas gewogen
-const zaehltStatistik = t => !!(t && t.archiv) && !t.ohneStatistik && num(t.sg) > 0 && ((t.erfassung || []).length > 0 || Object.keys(kistenAusbeute(t)).length > 0);
+// Artikel, die bei einem archivierten Tier nicht vollständig gewogen wurden (seit 3.3) – zählen nicht für die Statistik.
+// Festgehalten beim „Tier abgeschlossen“ (t.abschluss.unvollstaendig); ältere Abschlüsse ohne Angabe gelten als vollständig.
+const unvollstaendig = t => (t && t.abschluss && Array.isArray(t.abschluss.unvollstaendig)) ? t.abschluss.unvollstaendig : [];
+// Topf aus Rind UND Bulle (seit 3.3): gemeinsame Kisten lassen sich nicht nach Tiertyp trennen → zählt nicht für die Statistik
+const topfPartner = (S, t) => Array.isArray(t.topfMit) ? t.topfMit.map(n => ((S && S.tiere) || []).find(x => x.name === n)).filter(Boolean) : [t];
+const topfGemischt = (S, t) => !!(t && Array.isArray(t.topfMit)) && new Set(topfPartner(S, t).concat([t]).map(x => x.typ === 'Bulle' ? 'Bulle' : 'Rind')).size > 1;
+// zählt für die Statistik: archiviert, nicht ausgeblendet, echtes Schlachtgewicht, etwas gewogen, nicht nur unvollständig, kein gemischter Topf
+function zaehltStatistik(t, S) {
+  if (!(t && t.archiv) || t.ohneStatistik || !(num(t.sg) > 0)) return false;
+  if (S && topfGemischt(S, t)) return false;
+  if (t.ohneAbschluss) return false;
+  if (!((t.erfassung || []).length > 0 || Object.keys(kistenAusbeute(t)).length > 0)) return false;
+  return true;
+}
+// Grund, warum ein archiviertes Tier nicht (oder nur teilweise) zählt – für die Anzeige
+function statistikGrund(S, t, au) {
+  if (!t.archiv) return 'zählt erst nach dem Archivieren';
+  if (t.ohneStatistik) return 'aus der Statistik ausgeblendet';
+  if (!(num(t.sg) > 0)) return 'zählt nicht – echtes Schlachtgewicht fehlt';
+  if (topfGemischt(S, t)) return 'zählt nicht – Rind und Bulle gemeinsam abgeholt (nicht trennbar)';
+  if (t.ohneAbschluss) return 'zählt nicht – ohne „Tier abgeschlossen“ ins Archiv (Reste nicht gewogen)';
+  if (au && !au.anzahl) return 'zählt nicht – nichts gewogen';
+  const u = unvollstaendig(t);
+  return 'zählt für die Ausbeute-Statistik' + (u.length ? ` – außer ${u.join(', ')} (nicht vollständig gewogen)` : '');
+}
+// Fingerabdruck für den Statistik-Zwischenspeicher (seit 3.3 ohne Nachrechnen – vorher wurde bei JEDEM Zugriff über alle
+// Archiv-Tiere gerechnet, mit vollem Archiv mehrere Sekunden je Seite). Archivierte Tiere ändern sich nur noch über
+// Abschließen/Zurückholen, Schlachtgewicht, „ohne Statistik“ oder Löschen gewogener Teile – das erfasst der Abdruck.
+function statSig(S) {
+  let s = '';
+  for (const t of S.tiere || []) if (t && t.archiv) s += t.name + '|' + t.typ + '|' + t.sg + '|' + (t.ohneStatistik ? 1 : 0) + '|' + (t.erfassung || []).length + '|' + (t.abschluss ? (t.abschluss.kisten || []).length + '/' + unvollstaendig(t).length : '-') + (t.ohneAbschluss ? '|oA' : '') + '|' + (t.topfMit || []).join('+') + ';';
+  return s + '#' + (S.settings.bratenTeile || []).map(x => x && x.name + ':' + x.stueck + ':' + x.kg + ':' + x.kgBulle).join(',');
+}
 function ausbeuteStatistik(S) {
-  const tiere = (S.tiere || []).filter(zaehltStatistik);
-  const sig = tiere.map(t => [t.name, t.typ, t.sg, (t.erfassung || []).length, erfassungSumme(t, S).kg].join('|')).join(';') + '#' + (S.settings.bratenTeile || []).map(x => x && x.name + ':' + x.stueck).join(',');
+  const sig = statSig(S);
   const c = statCache && statCache.get(S);
   if (c && c.sig === sig) return c.stat;
+  const tiere = (S.tiere || []).filter(t => zaehltStatistik(t, S));
   const roh = { Rind: { art: {}, teil: {} }, Bulle: { art: {}, teil: {} } };
   for (const t of tiere) {
     const typ = t.typ === 'Bulle' ? 'Bulle' : 'Rind';
     // Topf (gemeinsame Kisten): beim Kommissionieren lässt sich nicht trennen, was von welchem Tier kam –
-    // jedes Tier des Topfs zählt mit dem gemeinsamen Wert (Summe gewogen ÷ Summe Schlachtgewicht)
-    const partner = Array.isArray(t.topfMit) ? t.topfMit.map(n => (S.tiere || []).find(x => x.name === n)).filter(x => x && x.archiv && num(x.sg) > 0) : [t];
+    // jedes Tier des Topfs zählt mit dem gemeinsamen Wert (Summe gewogen ÷ Summe Schlachtgewicht); gemischte Töpfe zählen nicht (s. o.)
+    const partner = Array.isArray(t.topfMit) ? topfPartner(S, t).filter(x => x.archiv && num(x.sg) > 0) : [t];
     const gl = partner.length ? partner : [t];
     const sg = gl.reduce((s, x) => s + num(x.sg), 0), nT = gl.length;
+    // nicht vollständig gewogene Artikel (bei einem Tier des Topfs) fallen für dieses Tier weg
+    const ohne = new Set(gl.flatMap(unvollstaendig));
     const su = { art: {}, teil: {} };
     for (const x of gl) { const e = erfassungSumme(x, S); for (const k of ['art', 'teil']) for (const [n, v] of Object.entries(e[k])) { const z = su[k][n] = su[k][n] || { kg: 0 }; z.kg += v.kg; } }
-    for (const [n, v] of Object.entries(su.art)) (roh[typ].art[n] = roh[typ].art[n] || []).push({ tier: t.name, wert: v.kg / sg });
-    for (const x of bratenTeile(S)) { const v = su.teil[x.name]; if (v) (roh[typ].teil[x.name] = roh[typ].teil[x.name] || []).push({ tier: t.name, wert: v.kg / (num(x.stueck) * nT) }); }
+    for (const [n, v] of Object.entries(su.art)) if (!ohne.has(n)) (roh[typ].art[n] = roh[typ].art[n] || []).push({ tier: t.name, wert: v.kg / sg });
+    if (!ohne.has(BRATEN)) for (const x of bratenTeile(S)) { const v = su.teil[x.name]; if (v) (roh[typ].teil[x.name] = roh[typ].teil[x.name] || []).push({ tier: t.name, wert: v.kg / (num(x.stueck) * nT) }); }
   }
   const stat = { Rind: { art: {}, teil: {} }, Bulle: { art: {}, teil: {} } };
   for (const typ of ['Rind', 'Bulle']) for (const k of ['art', 'teil']) for (const [n, l] of Object.entries(roh[typ][k]))
@@ -213,7 +246,7 @@ function ausbeuteTier(S, t) {
   const su = erfassungSumme(t, S), sg = num(t.sg);
   const rows = ausbeuteArtikel(S).map(a => {
     const v = su.art[a.name];
-    return { art: a.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, kisten: !!(v && v.kisten), abzug: v && v.abzug ? v.abzug : 0, anteil: v && sg > 0 ? v.kg / sg : null, ref: anteilRef(S, a, t.typ), plan: t.archiv && t.archivStand && t.archivStand.plan && has(t.archivStand.plan[a.name]) ? num(t.archivStand.plan[a.name]) : yieldArt(S, t, a.name) };
+    return { art: a.name, unvoll: unvollstaendig(t).includes(a.name), kg: v ? v.kg : 0, teile: v ? v.teile : 0, kisten: !!(v && v.kisten), abzug: v && v.abzug ? v.abzug : 0, anteil: v && sg > 0 ? v.kg / sg : null, ref: anteilRef(S, a, t.typ), plan: t.archiv && t.archivStand && t.archivStand.plan && has(t.archivStand.plan[a.name]) ? num(t.archivStand.plan[a.name]) : yieldArt(S, t, a.name) };
   }).concat(Object.keys(su.art).filter(n => !ausbeuteArtikel(S).some(a => a.name === n)).map(n => ({ art: n, kg: su.art[n].kg, teile: su.art[n].teile, anteil: sg > 0 ? su.art[n].kg / sg : null, ref: null, plan: null })));
   const teile = bratenTeile(S).map(x => { const v = su.teil[x.name]; return { teil: x.name, kg: v ? v.kg : 0, teile: v ? v.teile : 0, jeStueck: v ? v.kg / num(x.stueck) : null, stueck: num(x.stueck), ref: teilKgRef(x, t.typ) }; });
   return { rows, teile, kg: su.kg, anzahl: su.teile, sg };
@@ -557,9 +590,11 @@ function teilZeilen(S, o) {
 }
 // Fehlmenge je Artikel, die bei dieser Bestellung nicht mehr aus dem Tier kommt (in Eingabeeinheit der Zeile)
 function teilFehlmengen(S, o) {
-  const t = tier(S, o.tier);
-  if (!t) return {};
-  const bil = fleischBilanz(S, t, ordersOfTier(S, t.name));
+  const t0 = tier(S, o.tier);
+  if (!t0) return {};
+  // seit 3.3: gemeinsame Abholung = ein Topf – Fehlmenge wie im Mengencheck über alle Tiere des Topfs
+  const t = t0.archiv ? t0 : (topfTier(S, t0.name) || t0);
+  const bil = fleischBilanz(S, t, ordersOfTopf(S, t));
   return Object.assign({}, bil.fehlt[o.nr] || {}); // kg je Artikel, die bei dieser Bestellung fehlen
 }
 // in Eingabeeinheit umrechnen und sinnvoll runden
@@ -875,10 +910,21 @@ function tierVorschlag(S, wunschISO, pakete, ohneNr, best0) {
 // ---------- Offene Bestellungen neu verteilen ----------
 // Wenn Tiere dazukommen (oder sich Termine ändern): alle offenen Bestellungen, deren Tier noch keine Kisten hat
 // (dazu die Warteliste), in Eingangsreihenfolge neu auf die Tiere ohne Kisten verteilen – jeweils das erste Tier
-// (bzw. mit Wunschtermin das letzte davor), bei dem die ganze Bestellung reicht und keine andere kippt.
+// (bzw. mit Bezugstermin das letzte davor), bei dem die ganze Bestellung reicht und keine andere kippt.
+// Bezugstermin (seit 3.3, Regel Nutzer: Abholung höchstens … Tage vor dem Termin, nie danach): der Wunschtermin – ohne
+// Wunschtermin der Abholtermin des bisherigen Tiers. So landet eine Januar-Bestellung nie auf einem Tier im November.
+// Nur Warteliste-Bestellungen ohne Wunschtermin gehen „so früh wie möglich“. Bestellungen auf einem Tier ohne Abholtermin bleiben.
+// Gemeinsame Abholung (Topf) ist EIN Ziel – innerhalb des Topfs wird nichts verschoben.
 // Fest bleiben: gepackte/abgeholte Bestellungen, Tiere mit Kistenplan, bewusst überbelegte Bestellungen.
 // Passt eine Bestellung nirgends, bleibt sie, wo sie war. Ergebnis nur als Vorschlag (S bleibt unverändert).
 const tageZwischen = (von, bis) => Math.round((new Date(bis + 'T12:00:00') - new Date(von + 'T12:00:00')) / 864e5);
+// Bezugstermin einer Bestellung fürs Verteilen: { datum, quelle: 'wunsch' | 'tier' | '' }
+function bezugstermin(S, o, tierName) {
+  if (o.wunsch) return { datum: o.wunsch, quelle: 'wunsch' };
+  const t = tierName && tierName !== 'Warteliste' ? tier(S, tierName) : null;
+  if (t && t.abhol) return { datum: t.abhol, quelle: 'tier' };
+  return { datum: '', quelle: t ? 'ohneTermin' : '' };
+}
 function neuVerteilenPlan(S, fest) {
   const heute = todayISO();
   const maxTage = has(S.settings.verteilenMaxTage) && num(S.settings.verteilenMaxTage) >= 0 ? num(S.settings.verteilenMaxTage) : 5;
@@ -892,30 +938,37 @@ function neuVerteilenPlan(S, fest) {
     (o.tier === 'Warteliste' || !o.tier || freiesTier(tier(T, o.tier)));
   const bew = T.bestellungen.filter(beweglich)
     .sort((a, b) => String(a.eingang || '').localeCompare(String(b.eingang || '')) || a.nr - b.nr);
-  const vorher = new Map(bew.map(o => [o.nr, { tier: o.tier || 'Warteliste', check: o.tier && o.tier !== 'Warteliste' ? mengencheck(S, S.bestellungen.find(x => x.nr === o.nr)) : '' }]));
+  const vorher = new Map(bew.map(o => [o.nr, { tier: o.tier || 'Warteliste', check: o.tier && o.tier !== 'Warteliste' ? mengencheck(S, S.bestellungen.find(x => x.nr === o.nr)) : '', bezug: bezugstermin(S, o, o.tier) }]));
   const ziele = T.tiere.filter(t => freiesTier(t) && t.abhol && t.abhol >= heute);
   bew.forEach(o => { o.tier = '\u0000neu'; });
   for (const o of bew) {
-    const pk = num(o.pakete);
-    const kand = ziele.filter(t => {
-      if (o.wunsch && t.abhol > o.wunsch) return false;
-      if (o.wunsch && tageZwischen(t.abhol, o.wunsch) > maxTage) return false; // höchstens … Tage vor dem Wunschtermin
+    const pk = num(o.pakete), v = vorher.get(o.nr), ref = v.bezug.datum;
+    if (v.bezug.quelle === 'ohneTermin') { o.tier = v.tier; continue; } // Tier ohne Abholtermin: bleibt
+    // je Abholtag (Topf) nur ein Ziel – das bisherige Tier, wenn es dazugehört
+    const gruppen = new Map();
+    for (const t of ziele) {
+      if (ref && t.abhol > ref) continue;
+      if (ref && tageZwischen(t.abhol, ref) > maxTage) continue; // höchstens … Tage vor dem Bezugstermin
+      const g = gruppen.get(t.abhol);
+      if (!g || sameText(t.name, v.tier)) gruppen.set(t.abhol, t);
+    }
+    const kand = [...gruppen.values()].filter(t => {
       if (pk > 0) {
         const TT = topfTier(T, t.name) || t, gl = TT.glieder || [t.name];
         const bestellt = T.bestellungen.filter(x => gl.includes(x.tier) && x.name).reduce((s, x) => s + num(x.pakete), 0);
         if (maxPakete(T, TT) - bestellt < pk) return false;
       }
       return true;
-    }).sort((a, b) => o.wunsch ? b.abhol.localeCompare(a.abhol) : a.abhol.localeCompare(b.abhol));
+    }).sort((a, b) => ref ? b.abhol.localeCompare(a.abhol) : a.abhol.localeCompare(b.abhol));
     let ziel = null;
     for (const t of kand) {
       const vor = mengencheckTier(T, t.name);
-      o.tier = t.name; o.rang = nextRang(T);
+      o.tier = t.name; o.rang = sameText(t.name, v.tier) ? (S.bestellungen.find(x => x.nr === o.nr) || {}).rang || nextRang(T) : nextRang(T);
       const nach = mengencheckTier(T, t.name);
       if (nach[o.nr] === 'ok' && !Object.keys(nach).some(nr => +nr !== o.nr && vor[nr] === 'ok' && nach[nr] !== 'ok')) { ziel = t.name; break; }
     }
     // kein Tier im Zeitfenster vor dem Wunschtermin → Warteliste; sonst (passt nirgends ganz) bleibt sie, wo sie war
-    if (!ziel) { o.tier = o.wunsch && !kand.length ? 'Warteliste' : vorher.get(o.nr).tier; o.rang = nextRang(T); }
+    if (!ziel) { o.tier = v.bezug.quelle === 'wunsch' && !kand.length ? 'Warteliste' : v.tier; o.rang = sameText(o.tier, v.tier) ? (S.bestellungen.find(x => x.nr === o.nr) || {}).rang || nextRang(T) : nextRang(T); }
   }
   const zeilen = bew.map(o => {
     const v = vorher.get(o.nr);
@@ -1814,10 +1867,33 @@ function kistenCalc(S, tierName) {
 // Tier abgeschlossen: Reste an Hofladen, Kisten leeren
 // Topf (gemeinsame Kisten): alle Tiere des Topfs werden zusammen abgeschlossen
 const abschlussNamen = (S, tierName) => { const c = kistenKontext(S, tierName); return c.topf ? c.t.glieder.slice() : [tierName]; };
+// Vollständig gewogen? (seit 3.3) – je Ausbeute-Artikel: Hack/SK/FK alle Kisten gewogen; sonst alle Pick-Zeilen der Bestellungen
+// mit Gewicht und alle Hofladen-Reste als „fertig“ verpackt. Was fehlt, zählt bei diesem Tier nicht für die Ausbeute-Statistik
+// (sonst würde z. B. Braten mit 8 % statt 19 % gemessen, und ab 3 solchen Tieren ersetzt das die Einstellungen).
+function erfassungLuecken(S, tierName) {
+  const ctx = kistenKontext(S, tierName), rows = ctx.rows, luecken = [];
+  const dazu = (art, grund) => { if (!luecken.some(l => l.art === art && l.grund === grund)) luecken.push({ art, grund }); };
+  let picks = [];
+  for (const o of ctx.ords) { const k = kommissionierung(S, o.nr); if (k) picks = picks.concat(k.picks); }
+  const hof = hofListe(S, tierName);
+  for (const a of ausbeuteArtikel(S)) {
+    const ks = rows.filter(k => k.art === a.name);
+    if (KISTEN_AUSBEUTE.includes(a.name)) {
+      if (!ks.length) dazu(a.name, 'keine Kiste');
+      else if (ks.some(k => !kisteGewogen(k))) dazu(a.name, 'Kiste nicht gewogen');
+      continue;
+    }
+    if (!ks.length && !picks.some(p => p.art === a.name)) { dazu(a.name, 'keine Kiste'); continue; }
+    if (picks.some(p => p.art === a.name && p.wiegen && !(p.ist && num(p.ist.kg) > 0))) dazu(a.name, 'nicht alle Bestellungen gewogen');
+    if (hof.some(h => h.art === a.name && !h.fertig)) dazu(a.name, 'Hofladen-Reste nicht fertig verpackt');
+  }
+  return luecken;
+}
 function tierAbschliessen(S, tierName) {
   const ctx = kistenKontext(S, tierName);
   const namen = ctx.topf ? ctx.t.glieder : [tierName];
   const calc = kistenCalc(S, tierName);
+  const luecken = [...new Set(erfassungLuecken(S, tierName).map(l => l.art))]; // vor dem Leeren der Kisten
   let n = 0;
   const heute = todayISO();
   // seit 3.1: gewogene Hofladen-Päckchen (mit Kühlhaus-Kiste) statt rechnerischem Rest, wo es sie gibt
@@ -1840,7 +1916,8 @@ function tierAbschliessen(S, tierName) {
   tiere.forEach(t => archivStandFesthalten(S, t));
   for (const t of tiere) {
     const anteil = ctx.topf && sgSum > 0 ? sgRechnung(S, t) / sgSum : 1;
-    t.abschluss = { datum: heute, hackAbzug: r2(hackGes * anteil), kisten };
+    t.abschluss = { datum: heute, hackAbzug: r2(hackGes * anteil), kisten, unvollstaendig: luecken.slice() };
+    delete t.ohneAbschluss;
     if (Object.keys(umlAlle[t.name] || {}).length) t.abschluss.umleitung = umlAlle[t.name];
     if (ctx.topf) { t.abschluss.anteil = r3(anteil); t.abschluss.topf = namen.slice(); t.topfMit = namen.slice(); }
   }
@@ -2162,7 +2239,7 @@ function standPruefen(x) {
 
 if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
-  art, einheitForm, istOrgan, innPickAbgleich, innOkUmschalten, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
+  art, einheitForm, istOrgan, bezugstermin, erfassungLuecken, statistikGrund, unvollstaendig, topfGemischt, innPickAbgleich, innOkUmschalten, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, topfTier, topfAus, topfN, ordersOfTopf, tierAnzeige, kistenKontext, abschlussNamen, mengencheckT, TOPF_SEP, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,
