@@ -75,7 +75,7 @@ function docMenge(mp) {
 function docMetzger(ma) {
   const t = ma.tier;
   const bl = [{ type: 'h', text: 'Gesamtmengen' },
-    { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.kistenText ? `(${ma.hack.kistenText})` : ''], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', '']]
+    { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, ma.hack.kistenText ? `(${ma.hack.kistenText})` : ''], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', ma.gulasch.vorgabe > 0 ? `(erwartet) – bestellt ${fmtNum(ma.gulasch.bestellt, 1)} kg` : '']]
       .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Nr. siehe unten']] : [])
       .concat(ma.ochs.ganz > 0 ? [['Ochsenschwanz', `${fmtNum(ma.ochs.ganz)} Stück ganz lassen`, `kommt zu den Beinscheiben in die Kiste – ${ma.ochs.ganzListe.map(x => 'Nr. ' + x.nr).join(', ')}`]] : [])
       .concat(ma.ochs.bestellt > ma.ochs.vorhanden ? [['Ochsenschwanz', `ACHTUNG: ${fmtNum(ma.ochs.bestellt)} Stück bestellt`, `aber nur ca. ${fmtNum(ma.ochs.vorhanden)}${t.glieder ? ' bei ' + t.name : ' je Tier'}`]] : []) }];
