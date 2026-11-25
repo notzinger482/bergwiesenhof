@@ -263,18 +263,21 @@ function sonderOf(S, o) {
 // Braten-Teilstück / ganzes Stück beim Sonderwunsch (seit 3.2, Wunsch Nutzer): Braten aus einem bestimmten Teilstück (kg oder
 // ganzes Stück), dazu ganze Stücke bei Artikeln mit „ganzeStuecke“ (Filet, Tafelspitz). Gewicht eines ganzen Stücks geschätzt.
 const ganzArt = (S, name) => { const a = art(S, name); return !!a && (name === BRATEN ? bratenTeile(S).length > 0 : num(a.ganzeStuecke) > 0); };
+// Mindestgewicht eines ganzen Stücks fürs Prüfen der Bestellmenge (seit 3.2.3): Einstellungs-Minimum, wenn es deutlich unter
+// dem Schätzwert liegt, sonst 80 % des Schätzwerts – Stücke streuen, ein kleineres Tier darf nicht schon an der Schätzung scheitern
+const mindestStueck = (min, kg) => min > 0 && min < kg * 0.8 ? min : kg * 0.8;
 function ganzStueckKg(S, tierName, artName, teil) {
   const t0 = tierName && tierName !== 'Warteliste' ? tier(S, tierName) : null, typ = t0 && t0.typ ? t0.typ : 'Rind';
   if (artName === BRATEN) {
     const x = bratenTeile(S).find(x => x.name === teil); if (!x) return null;
     const g = bratenTeileKg(S, typ), f = t0 && g > 0 ? yieldArt(S, t0, BRATEN) / g : 1;
     const kg = teilKg(x, typ, S) * (f > 0 ? f : 1);
-    return { kg, min: num(x.kgMin) > 0 ? Math.min(num(x.kgMin), kg) : kg * 0.75 };
+    return { kg, min: mindestStueck(num(x.kgMin), kg) };
   }
   const a = art(S, artName); if (!a || !(num(a.ganzeStuecke) > 0)) return null;
   let kg = t0 ? yieldArt(S, t0, artName) / num(a.ganzeStuecke) : 0;
   if (!(kg > 0)) kg = num(a.stkMin) > 0 && num(a.stkMax) > 0 ? (num(a.stkMin) + num(a.stkMax)) / 2 : 1;
-  return { kg, min: num(a.stkMin) > 0 ? Math.min(num(a.stkMin), kg) : kg * 0.75 };
+  return { kg, min: mindestStueck(num(a.stkMin), kg) };
 }
 // Teilstück-/Ganz-Wünsche gegen das, was das Tier (der Topf) hergibt – der Reihe nach: {nr: [Text]}
 function ganzWunschFehlt(S, t, ords) {
@@ -493,7 +496,7 @@ function formFehler(S, o) {
     // eingetragene Sonderwünsche + „am Stück“; ganze Stücke zählen mit ihrem Mindestgewicht
     const L = sonderOf(S, o).filter(x => x.art === s.art), mitGanz = L.some(x => x.ganz);
     const sum = L.reduce((t, x) => t + (x.ganz ? x.ganz * ((ganzStueckKg(S, o.tier, x.art, x.teil) || {}).min || 0) : num(x.menge)), 0);
-    if (sum > q + 0.001) {
+    if (sum > q + (mitGanz ? 0.05 : 0.001)) {
       const amSt = o.pos && o.pos[s.art] && o.pos[s.art].amStueck && a.amStueck;
       f.push(`Sonderwunsch ${s.art}: ${fmtNum(sum, mitGanz ? 1 : 3)} ${eh} als Sonderfall${mitGanz ? ' (ganze Stücke mit Mindestgewicht)' : ''}, bestellt sind aber nur ${fmtNum(q, 3)} ${eh}` +
         (amSt ? ' („am Stück“ zählt schon die ganze Menge als Sonderfall)' : '') + (mitGanz ? ` – bitte rechts bei „${s.art}“ mindestens ${fmtNum(Math.ceil(sum * 10) / 10, 1)} kg eintragen` : ''));
