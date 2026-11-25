@@ -247,10 +247,10 @@ async function hofDialog(tn, r) {
 function docPick(ko) {
   const o = ko.o;
   return { title: `Kommissionierung Nr. ${o.nr} – ${o.name}`, sub: [`Tier: ${o.tier}`, `Genusspakete: ${fmtNum(o.pakete)}${num(o.pakVak) ? ` (davon ${fmtNum(o.pakVak)} vakuumieren)` : ''}${ko.nichtVak.length ? ' · nicht vakuumieren: ' + ko.nichtVak.join(', ') : ''}`],
-    blocks: [{ type: 'kv', rows: [['Lagerplatz', lagerText(o) || lagerVorschlag(S, o).ort, lagerText(o) ? '' : '(' + lagerVorschlag(S, o).grund + ')'], ['Sonderfälle (Metzger)', ko.sonder.join('; ') || '–'], ['Innereien (separat)', ko.innereien.join(', ') || '–']] },
+    blocks: [{ type: 'kv', rows: [['Lagerplatz', lagerText(o) || lagerVorschlag(S, o).ort, lagerText(o) ? '' : '(' + lagerVorschlag(S, o).grund + ')'], ['Sonderfälle (Metzger)', ko.sonder.join('; ') || '–']] },
       ...(o.packNotiz ? [{ type: 'text', bold: true, text: 'Notiz: ' + o.packNotiz }] : []),
       { type: 'table', head: ['✓', 'Kiste', 'Soll', 'Ist', 'Inhalt', 'verpacken', 'Stellplatz'], widths: [0.5, 0.9, 1.1, 1.3, 2.2, 3.8, 2.2], align: ['', 'r', 'r', 'r', '', '', ''],
-        rows: ko.picks.map(p => [p.ist ? '✓' : '☐', p.hackTisch ? 'Hack-Tisch' : p.kiste === null ? '–' : p.kiste, `${fmtNum(p.menge, 2)} ${p.einheit}`, p.ist ? istText(p.ist, p) : '', p.art, p.verpacken + (p.ist && p.ist.vermerk ? '\nVermerk: ' + p.ist.vermerk : ''), p.platz]),
+        rows: ko.picks.map(p => [p.ist ? '✓' : '☐', p.hackTisch ? 'Hack-Tisch' : p.innTisch ? 'Innereien' : p.kiste === null ? '–' : p.kiste, `${fmtNum(p.menge, 2)} ${p.einheit}`, p.ist ? istText(p.ist, p) : '', p.art, p.verpacken + (p.ist && p.ist.vermerk ? '\nVermerk: ' + p.ist.vermerk : ''), p.platz]),
         rowClass: ko.picks.map(p => p.ist && p.ist.vermerk ? 'rot' : p.ist ? 'erledigt' : ''), leer: 'keine Kisten eingetragen' },
       ...ko.rows.filter(r => r.fehlt > 0).map(r => ({ type: 'text', warn: true, text: `Fehlt: ${fmtNum(r.fehlt, 2)} ${r.einheit} ${r.art}` }))], footer: fussZeile() };
 }
@@ -286,7 +286,7 @@ function viewSchlachttag(tab, q) {
     const art = el.dataset.abh, key = el.dataset.key;
     if (art === 'innrest') innRestUmschalten(S, tn, key);
     else if (art === 'hack' && key === 'hof') hackHofUmschalten(S, tn);
-    else { const o = S.bestellungen.find(x => x.nr === +key); if (!o) return; const f = art === 'hack' ? 'hackOk' : 'innOk'; if (o[f]) delete o[f]; else o[f] = true; }
+    else { const o = S.bestellungen.find(x => x.nr === +key); if (!o) return; if (art === 'hack') { if (o.hackOk) delete o.hackOk; else o.hackOk = true; } else innOkUmschalten(S, o); }
     speichern(); render();
   };
 }
@@ -554,7 +554,6 @@ function viewKommissionierung(q) {
       <table class="doc-kv"><tr><td>Genusspakete</td><td class="fett">${fmtNum(ko.o.pakete) || '–'}${num(ko.o.pakVak) ? ` (davon ${fmtNum(ko.o.pakVak)} vakuumieren)` : ''}</td></tr>
       <tr><td>Sonderfälle (Metzger)</td><td class="fett">${esc(ko.sonder.join('; ') || '–')}</td></tr>
       <tr><td>Nicht vakuumieren</td><td class="fett">${esc(ko.nichtVak.join(', ') || '–')}</td></tr>
-      <tr><td>Innereien (separat)</td><td class="fett">${esc(ko.innereien.join(', ') || '–')}</td></tr>
       ${ko.o.notiz ? `<tr><td>Notiz</td><td class="fett">${esc(ko.o.notiz)}</td></tr>` : ''}
       ${verm.length ? `<tr><td>Vermerke Kommission</td><td class="fett warn">${esc(verm.join(' · '))}</td></tr>` : ''}</table>
       <div class="knopfleiste" style="margin-top:14px"><button class="btn haupt" data-act="gepackt">Gepackt ✓ und weiter</button><button class="btn" data-act="teilen">Als Bild teilen</button><button class="btn" data-act="drucken">Drucken</button></div>
@@ -562,7 +561,7 @@ function viewKommissionierung(q) {
       ${ko.rows.filter(r => r.bedarf > 0.0001).map(r => `<tr class="${r.fehlt > 0 ? 'rot' : ''}"><td>${esc(r.art)}${istOrgan(r.art) ? ' <span class="klein">(separat)</span>' : ''}</td><td class="r">${fmtNum(r.einzeln, 2)}</td><td class="r">${fmtNum(r.ausPak, 2)}</td><td class="r">${fmtNum(r.bedarf, 2)}</td><td class="r">${fmtNum(r.ausKisten, 2)}</td><td class="r">${r.fehlt > 0 ? fmtNum(r.fehlt, 2) : ''}</td></tr>`).join('')}
       </tbody></table></div>
     <div class="karte" style="padding:0"><h3 style="margin:14px 16px 4px">Pickliste – antippen, wiegen, bestätigen <span class="klein">${offenZeilen ? offenZeilen + ' offen' : 'alles erledigt ✓'}</span></h3>
-      ${ko.picks.map((p, i) => `<div class="pick ${p.ist ? 'erledigt' : ''}" data-act="pick" data-i="${i}"><div class="kiste${p.hackTisch ? ' hack' : ''}${p.sonderfall ? ' sonder' : ''}">${p.hackTisch ? 'Hack' : p.kiste === null ? '–' : p.kiste}</div><div class="menge">${fmtNum(p.menge, 2)} ${p.einheit}${p.stkSoll && p.einheit !== 'Stk' ? `<div class="klein">ca. ${fmtNum(p.stkSoll)} Stk</div>` : ''}</div><div><b>${esc(p.art)}</b>${p.verpacken ? `<div class="klein">${esc(p.verpacken)}</div>` : ''}${p.ist && p.ist.vermerk ? `<div class="klein warn">Vermerk: ${esc(p.ist.vermerk)}</div>` : ''}</div><div class="klein r">${p.ist ? `<span class="ist">✓ ${istText(p.ist, p)}</span><br>` : p.wiegen ? '<span class="klein">wiegen</span><br>' : ''}${esc(p.platz)}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts aus den Kisten zu holen.</div>'}
+      ${ko.picks.map((p, i) => `<div class="pick ${p.ist ? 'erledigt' : ''}" data-act="pick" data-i="${i}"><div class="kiste${p.hackTisch ? ' hack' : ''}${p.innTisch ? ' inn' : ''}${p.sonderfall ? ' sonder' : ''}">${p.hackTisch ? 'Hack' : p.innTisch ? 'Inn.' : p.kiste === null ? '–' : p.kiste}</div><div class="menge">${fmtNum(p.menge, 2)} ${p.einheit}${p.stkSoll && p.einheit !== 'Stk' ? `<div class="klein">ca. ${fmtNum(p.stkSoll)} Stk</div>` : ''}</div><div><b>${esc(p.art)}</b>${p.verpacken ? `<div class="klein">${esc(p.verpacken)}</div>` : ''}${p.ist && p.ist.vermerk ? `<div class="klein warn">Vermerk: ${esc(p.ist.vermerk)}</div>` : ''}</div><div class="klein r">${p.ist ? `<span class="ist">✓ ${istText(p.ist, p)}</span><br>` : p.wiegen ? '<span class="klein">wiegen</span><br>' : ''}${esc(p.platz)}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts aus den Kisten zu holen.</div>'}
     </div></div>`;
   inhalt().innerHTML = h;
   ui.acts.pick = async el => { const p = ko.picks[+el.dataset.i]; const o = S.bestellungen.find(x => x.nr === nr); if (!p || !o) return; if (await pickDialog(o, p)) render(); };

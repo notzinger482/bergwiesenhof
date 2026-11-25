@@ -327,4 +327,5 @@ details.karte summary { cursor: pointer; }
 .packnotiz .klein { font-weight: 400; display: block; }
 .packnotiz-k { background: #fff4c2; border-radius: 6px; padding: 2px 6px; margin-top: 4px; font-weight: 600; color: #6b4e00; }
 .pick .kiste.sonder { background: #7a5a2b; color: #fff; }
+.pick .kiste.inn { background: #7b2d4f; font-size: 18px; padding: 10px 0; }
 .fehlerfeld { border-color: var(--rot) !important; background: #fdecec !important; }

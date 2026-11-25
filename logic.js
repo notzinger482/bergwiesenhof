@@ -1260,6 +1260,7 @@ function kommSetzen(S, o, p, ist) {
   if (ist.vermerk) e.vermerk = String(ist.vermerk).trim();
   if (ist.ok) e.ok = true;
   o.komm[p.key] = e;
+  if (p.innTisch) innPickAbgleich(S, o);
   // Statistik: als Erfassung beim Tier der Bestellung (ersetzt die Karte „Ausbeute wiegen“)
   const t = tier(S, o.tier);
   if (t) {
@@ -1269,8 +1270,21 @@ function kommSetzen(S, o, p, ist) {
   }
 }
 function kommLoeschen(S, o, p) {
+  // Innereien: war alles über den Innereien-Zettel abgehakt, bleiben die anderen Zeilen abgehakt
+  if (p.innTisch && o.innOk) { o.komm = o.komm || {}; for (const n of ORGANE) if (qty(S, o, n) > 0 && !o.komm['I|' + n]) o.komm['I|' + n] = { kg: null, stk: null, ok: true, art: n, kiste: null, zeit: new Date().toISOString() }; }
   if (o.komm) delete o.komm[p.key];
+  if (p.innTisch) innPickAbgleich(S, o);
   const t = tier(S, o.tier); if (t && t.erfassung) t.erfassung = t.erfassung.filter(x => x.key !== 'K' + o.nr + '|' + p.key);
+}
+// Innereien-Häkchen abgleichen (seit 3.2.7): alle Innereien-Zeilen der Pickliste abgehakt = Innereien-Zettel abgehakt
+function innPickAbgleich(S, o) {
+  const iz = ORGANE.filter(n => qty(S, o, n) > 0);
+  if (iz.length && iz.every(n => (o.komm || {})['I|' + n])) o.innOk = true; else delete o.innOk;
+}
+// Häkchen auf dem Innereien-Zettel umschalten – nimmt die Häkchen auf der Pickliste mit
+function innOkUmschalten(S, o) {
+  if (o.innOk) { delete o.innOk; if (o.komm) for (const k of Object.keys(o.komm)) if (k.startsWith('I|')) delete o.komm[k]; }
+  else o.innOk = true;
 }
 const kommVermerke = o => Object.values(o.komm || {}).filter(e => e.vermerk).map(e => `${e.art}: ${e.vermerk}`);
 
@@ -1887,6 +1901,17 @@ function kommissionierung(S, nr) {
       for (const p of hp) picks.splice(picks.indexOf(p), 1);
       picks.push({ kiste: null, hackTisch: true, menge: summe, roh, einheit: 'kg', art: HACK, verpacken: 'vom Hack-Tisch, fertig verpackt: ' + teile.join(' + '), platz: '' });
     }
+    // Innereien auf der Pickliste direkt unter dem Hack (seit 3.2.7, Wunsch Nutzer): je Innerei eine Zeile, nur abhaken –
+    // gekoppelt mit dem Häkchen auf dem Innereien-Zettel (o.innOk)
+    const iz = ORGANE.filter(n => qty(S, o, n) > 0);
+    if (iz.length) {
+      const inn = innereienZettel(S, t0.name), ir = inn ? inn.rows.find(x => x.nr === o.nr) : null, vk = vakArtikel(S, o);
+      for (const n of iz) {
+        const a = art(S, n), po = n === 'Leber' ? portionOf(S, o, n) : null, f = ir && ir.fehlt[n];
+        picks.push({ kiste: null, innTisch: true, key: 'I|' + n, menge: r3(qty(S, o, n)), roh: 0, einheit: a ? a.einheit : 'kg', art: n,
+          verpacken: 'Innereien, separat' + (po ? ' – ' + po.text : '') + (vk.includes(n) ? ' · vakuumiert' : ' · nicht vakuumiert') + (f ? ` · FEHLT ${fmtNum(f, 3)} ${a ? a.einheit : ''} (nach dem Zuschnitt)` : ''), platz: '' });
+      }
+    }
     // Sonderfälle vom Metzger (beschriftet mit der Bestell-Nr.) liegen in der Sonderfälle-Kiste
     const skAlle = ctx.rows.filter(k => k.art === SONDERKISTE);
     let si = 0;
@@ -1907,7 +1932,7 @@ function kommissionierung(S, nr) {
   for (const p of picks) {
     if (!p.key) p.key = (p.hackTisch ? 'H' : p.kiste === null ? '-' : p.kiste) + '|' + p.art;
     p.wiegen = !ohneWiegen(p.art);
-    p.ist = (o.komm || {})[p.key] || null;
+    p.ist = (o.komm || {})[p.key] || (p.innTisch && o.innOk ? { ok: true, art: p.art, einheit: p.einheit } : null);
     p.stkSoll = stkSoll(S, p);
   }
   return { o, tier: t, rows, picks, innereien, sonder, nichtVak: nichtVak(S, o) };
@@ -1998,7 +2023,8 @@ function innIstSetzen(S, tierName, art, wert) {
   const T = topfTier(S, tierName); if (!T) return;
   for (const n of T.glieder || [T.name]) { const x = tier(S, n); if (!x) continue; x.innIst = x.innIst || {}; if (wert === null) delete x.innIst[art]; else x.innIst[art] = wert; if (!Object.keys(x.innIst).length) delete x.innIst; }
 }
-function innereien(S, tierName) {
+function innereien(S, tierName) { return innereienZettel(S, tierName); }
+function innereienZettel(S, tierName) {
   const t = topfTier(S, tierName);
   if (!t) return null;
   const st = S.settings;
@@ -2136,7 +2162,7 @@ function standPruefen(x) {
 
 if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
-  art, einheitForm, istOrgan, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
+  art, einheitForm, istOrgan, innPickAbgleich, innOkUmschalten, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
   tuetenAuto, tueten, nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, topfTier, topfAus, topfN, ordersOfTopf, tierAnzeige, kistenKontext, abschlussNamen, mengencheckT, TOPF_SEP, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,
