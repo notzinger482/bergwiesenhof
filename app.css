@@ -330,7 +330,7 @@ details.karte summary { cursor: pointer; }
 .pick .kiste.sonder { background: #7a5a2b; color: #fff; }
 .pick .nvak { display: inline-block; margin-left: 8px; padding: 3px 10px; border-radius: 8px; background: #c62828; color: #fff; font-size: 15px; font-weight: 800; letter-spacing: .3px; vertical-align: 2px; }
 .pick.erledigt .nvak { background: #8d6e63; }
-.pick .kiste.inn { background: #7b2d4f; font-size: 18px; padding: 10px 0; }
+.pick .kiste.inn { background: #7b2d4f; font-size: 14px; line-height: 1.15; padding: 13px 2px; hyphens: manual; }
 .fehlerfeld { border-color: var(--rot) !important; background: #fdecec !important; }
 
 /* seit 3.4: Knöpfe auch unter der Pickliste */

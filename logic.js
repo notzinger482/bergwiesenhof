@@ -1296,7 +1296,6 @@ function kommSetzen(S, o, p, ist) {
   if (ist.vermerk) e.vermerk = String(ist.vermerk).trim();
   if (ist.ok) e.ok = true;
   o.komm[p.key] = e;
-  if (p.innTisch) innPickAbgleich(S, o);
   // Statistik: als Erfassung beim Tier der Bestellung (ersetzt die Karte „Ausbeute wiegen“)
   const t = tier(S, o.tier);
   if (t) {
@@ -1306,22 +1305,13 @@ function kommSetzen(S, o, p, ist) {
   }
 }
 function kommLoeschen(S, o, p) {
-  // Innereien: war alles über den Innereien-Zettel abgehakt, bleiben die anderen Zeilen abgehakt
-  if (p.innTisch && o.innOk) { o.komm = o.komm || {}; for (const n of ORGANE) if (qty(S, o, n) > 0 && !o.komm['I|' + n]) o.komm['I|' + n] = { kg: null, stk: null, ok: true, art: n, kiste: null, zeit: new Date().toISOString() }; }
   if (o.komm) delete o.komm[p.key];
-  if (p.innTisch) innPickAbgleich(S, o);
   const t = tier(S, o.tier); if (t && t.erfassung) t.erfassung = t.erfassung.filter(x => x.key !== 'K' + o.nr + '|' + p.key);
 }
-// Innereien-Häkchen abgleichen (seit 3.2.7): alle Innereien-Zeilen der Pickliste abgehakt = Innereien-Zettel abgehakt
-function innPickAbgleich(S, o) {
-  const iz = ORGANE.filter(n => qty(S, o, n) > 0);
-  if (iz.length && iz.every(n => (o.komm || {})['I|' + n])) o.innOk = true; else delete o.innOk;
-}
-// Häkchen auf dem Innereien-Zettel umschalten – nimmt die Häkchen auf der Pickliste mit
-function innOkUmschalten(S, o) {
-  if (o.innOk) { delete o.innOk; if (o.komm) for (const k of Object.keys(o.komm)) if (k.startsWith('I|')) delete o.komm[k]; }
-  else o.innOk = true;
-}
+// Innereien wie Hack (seit 3.4.4, Wunsch Nutzer): Häkchen auf dem Innereien-Zettel = dort verpackt, liegt am Lagerplatz Innereien;
+// die Pick-Zeile wird beim Kommissionieren eigenständig abgehakt (vorher waren beide gekoppelt → Zeile stand schon auf erledigt)
+function innPickAbgleich() { /* seit 3.4.4 ohne Wirkung (keine Kopplung mehr) */ }
+function innOkUmschalten(S, o) { if (o.innOk) delete o.innOk; else o.innOk = true; }
 const kommVermerke = o => Object.values(o.komm || {}).filter(e => e.vermerk).map(e => `${e.art}: ${e.vermerk}`);
 
 // ---------- Hofladen-Päckchen beim Kommissionieren (seit 3.1) ----------
@@ -1966,14 +1956,14 @@ function kommissionierung(S, nr) {
     const nvL = nichtVak(S, o);
     for (const p of picks) if (nvL.includes(p.art)) { const r = rows.find(x => x.art === p.art); p.nichtVak = r && r.ausPak > 0 ? 'einzeln' : 'ja'; } // „(einzeln)“ nur, wenn dieser Artikel auch aus dem Paket kommt
     // Innereien auf der Pickliste direkt unter dem Hack (seit 3.2.7, Wunsch Nutzer): je Innerei eine Zeile, nur abhaken –
-    // gekoppelt mit dem Häkchen auf dem Innereien-Zettel (o.innOk)
+    // seit 3.4.4 wie Hack: vom Lagerplatz Innereien holen, unabhängig vom Häkchen auf dem Innereien-Zettel
     const iz = ORGANE.filter(n => qty(S, o, n) > 0);
     if (iz.length) {
       const inn = innereienZettel(S, t0.name), ir = inn ? inn.rows.find(x => x.nr === o.nr) : null, vk = vakArtikel(S, o);
       for (const n of iz) {
         const a = art(S, n), po = n === 'Leber' ? portionOf(S, o, n) : null, f = ir && ir.fehlt[n];
         picks.push({ kiste: null, innTisch: true, key: 'I|' + n, menge: r3(qty(S, o, n)), roh: 0, einheit: a ? a.einheit : 'kg', art: n,
-          verpacken: 'Innereien, separat' + (po ? ' – ' + po.text : '') + (vk.includes(n) ? ' · vakuumiert' : ' · nicht vakuumiert') + (f ? ` · FEHLT ${fmtNum(f, 3)} ${a ? a.einheit : ''} (nach dem Zuschnitt)` : ''), platz: '' });
+          verpacken: 'vom Lagerplatz Innereien, fertig verpackt' + (po ? ' – ' + po.text : '') + (vk.includes(n) ? ' · vakuumiert' : ' · nicht vakuumiert') + (f ? ` · FEHLT ${fmtNum(f, 3)} ${a ? a.einheit : ''} (nach dem Zuschnitt)` : ''), platz: '' });
       }
     }
     // Sonderfälle vom Metzger (beschriftet mit der Bestell-Nr.) liegen in der Sonderfälle-Kiste
@@ -1996,7 +1986,7 @@ function kommissionierung(S, nr) {
   for (const p of picks) {
     if (!p.key) p.key = (p.hackTisch ? 'H' : p.kiste === null ? '-' : p.kiste) + '|' + p.art;
     p.wiegen = !ohneWiegen(p.art);
-    p.ist = (o.komm || {})[p.key] || (p.innTisch && o.innOk ? { ok: true, art: p.art, einheit: p.einheit } : null);
+    p.ist = (o.komm || {})[p.key] || null;
     p.stkSoll = stkSoll(S, p);
   }
   return { o, tier: t, rows, picks, innereien, sonder, nichtVak: nichtVak(S, o) };
