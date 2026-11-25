@@ -193,7 +193,21 @@ function statistikGrund(S, t, au) {
 // Fingerabdruck für den Statistik-Zwischenspeicher (seit 3.3 ohne Nachrechnen – vorher wurde bei JEDEM Zugriff über alle
 // Archiv-Tiere gerechnet, mit vollem Archiv mehrere Sekunden je Seite). Archivierte Tiere ändern sich nur noch über
 // Abschließen/Zurückholen, Schlachtgewicht, „ohne Statistik“ oder Löschen gewogener Teile – das erfasst der Abdruck.
+// seit 3.6: Fingerabdruck je Datenstand nur einmal pro Arbeitsschritt bauen – vorher bei JEDER Ausbeute-Rechnung (yieldArt,
+// anteilVon …) über alle Archiv-Tiere; mit 3 Jahren Archiv kostete das am Tablet Sekunden (Termin-Seite 4 s, Tippen 3 s Stillstand).
+// Gelöscht wird er nach jedem Speichern (statSigNeu in speichern()) und spätestens im nächsten Arbeitsschritt (setTimeout 0).
+const statSigMemo = new Map();
+let statSigTimer = null;
+function statSigNeu() { statSigMemo.clear(); }
 function statSig(S) {
+  const m = statSigMemo.get(S);
+  if (m !== undefined) return m;
+  const sig = statSigRoh(S);
+  statSigMemo.set(S, sig);
+  if (!statSigTimer && typeof setTimeout === 'function') statSigTimer = setTimeout(() => { statSigTimer = null; statSigMemo.clear(); }, 0);
+  return sig;
+}
+function statSigRoh(S) {
   let s = '';
   for (const t of S.tiere || []) if (t && t.archiv) s += t.name + '|' + t.typ + '|' + t.sg + '|' + (t.ohneStatistik ? 1 : 0) + '|' + (t.erfassung || []).length + '|' + (t.abschluss ? (t.abschluss.kisten || []).length + '/' + unvollstaendig(t).length : '-') + (t.ohneAbschluss ? '|oA' : '') + '|' + (t.topfMit || []).join('+') + ';';
   return s + '#' + (S.settings.bratenTeile || []).map(x => x && x.name + ':' + x.stueck + ':' + x.kg + ':' + x.kgBulle).join(',');
@@ -334,6 +348,8 @@ const bugWunsch = (S, o) => sonderOf(S, o).filter(s => s.art === BRATEN && s.tei
 // Sonderwünsche, die der Metzger vorbereitet (seit 3.5.1, Wunsch Nutzer: Häkchen „auf die Metzgerliste“; „am Stück“ immer).
 // Ohne Haken macht der Hof es selbst: die Menge kommt aus der normalen Kiste, beim Kommissionieren steht der Wunsch als Hinweis.
 const sonderMetzger = (S, o) => sonderOf(S, o).filter(s => s.metzger);
+// ganzes Stück schwerer als rechts bestellt: geht trotzdem ganz weg (seit 3.6 in der Mengenprüfung mitgezählt)
+const ganzMehr = (S, o, name) => name === HACK ? 0 : Math.max(0, sonderMetzger(S, o).filter(s => s.art === name && s.ganz).reduce((t, s) => t + num(s.menge), 0) - qty(S, o, name));
 const specSum = (S, o, name) => sonderMetzger(S, o).filter(s => s.art === name).reduce((t, s) => t + num(s.soll != null ? s.soll : s.menge), 0);
 // Hack-Sorte beim Sonderwunsch (seit 3.0.5, Regel Nutzer): „fettig“ = Siedfleisch-Anteil (Standard 50 %) + Rest Hack-Material,
 // „mager“ = reines Bugstück (aus dem Bug des Bratens). Die Menge bleibt Hackfleisch in der Bestellung (Preis, Sonderfall),
@@ -532,9 +548,36 @@ function formFehler(S, o) {
     }
   }
   if (num(o.pakVak) > num(o.pakete)) f.push('Mehr vakuumierte Pakete als Genusspakete');
+  // seit 3.6: keine leeren Bestellungen (z. B. nach „Auf verfügbare Menge kürzen“, wenn nichts mehr da ist)
+  if (!(num(o.pakete) > 0) && !S.artikel.some(a => qty(S, o, a.name) > 0 || (o.pos && o.pos[a.name] && o.pos[a.name].amStueck))) f.push('Die Bestellung ist leer – bitte etwas eintragen, auf einen anderen Termin legen oder die Bestellung löschen');
   return f;
 }
 
+// Nach „Auf verfügbare Menge kürzen“ (seit 3.6): Sonderwünsche der gekürzten Artikel an die neue Menge anpassen – sonst
+// lehnte das Formular die gekürzte Bestellung ab („ganzes Filet … mindestens 1,8 kg“). Ganze Stücke, die nicht mehr
+// hineinpassen, fallen weg; Wünsche in kg werden auf die neue Menge begrenzt. Liefert Texte für die Meldung.
+function sonderAnpassen(S, o, arts) {
+  const txt = [];
+  for (const art of arts) {
+    const q = qty(S, o, art);
+    const L = (o.sonder || []).filter(s => s && s.art === art);
+    if (!L.length) continue;
+    let rest = q;
+    for (const s of L.filter(s => num(s.ganz) > 0)) {
+      const g = ganzStueckKg(S, o.tier, s.art, s.art === BRATEN ? s.teil : '');
+      const min = g ? num(s.ganz) * g.min : 0;
+      if (rest + 0.05 >= min && min > 0) { rest -= min; continue; }
+      o.sonder.splice(o.sonder.indexOf(s), 1); txt.push(`Sonderwunsch ${num(s.ganz) > 1 ? s.ganz + ' ganze Stücke' : 'ganzes Stück'} ${s.art === BRATEN && s.teil ? s.teil : s.art} entfernt (reicht nicht mehr)`);
+    }
+    for (const s of L.filter(s => !(num(s.ganz) > 0) && o.sonder.includes(s))) {
+      const m = num(s.menge);
+      if (m <= rest + 0.001) { rest -= m; continue; }
+      if (rest > 0.05) { s.menge = r3(rest); txt.push(`Sonderwunsch ${s.art} auf ${fmtNum(rest, 2)} kg verkleinert`); rest = 0; }
+      else { o.sonder.splice(o.sonder.indexOf(s), 1); txt.push(`Sonderwunsch ${s.art} entfernt`); }
+    }
+  }
+  return txt;
+}
 // ---------- Bestellungen allgemein ----------
 const sortNr = list => list.slice().sort((a, b) => a.nr - b.nr);
 // Reihenfolge innerhalb eines Tiers: „rang“ = Zeitpunkt, zu dem die Bestellung diesem Tier zugeordnet wurde
@@ -601,8 +644,17 @@ function teilVorschlag(S, o, prozent) {
   } else for (const r of z) v[r.key] = teilRunden(r, r.bestellt * prozent / 100);
   return v;
 }
+// Bleibt nach dem Teilen noch etwas in der Bestellung? (seit 3.6 – sonst blieb eine leere Bestellung am vollen Termin)
+function teilBleibtEtwas(S, o, mengen) {
+  if (num(o.pakete) > 0) return true;
+  if (Object.entries(o.pos || {}).some(([k, p]) => p && p.amStueck && !(qty(S, o, k) > 0))) return true;
+  for (const r of teilZeilen(S, o)) if (r.bestellt - teilRunden(r, (mengen || {})[r.key]) > 1e-9) return true;
+  return false;
+}
 // führt die Teilung aus: verschiebt die angegebenen Mengen in eine neue Bestellung für „ziel“
+// Bliebe nichts übrig, wird nicht geteilt (null) – dann die ganze Bestellung verschieben
 function bestellungTeilen(S, o, mengen, ziel) {
+  if (!teilBleibtEtwas(S, o, mengen)) return null;
   const z = teilZeilen(S, o);
   const wurzel = o.teilVon || o.nr; // Rest bekommt die Nummer mit Zusatz: 112-2, 112-3 … (seit 3.5, Wunsch Nutzer)
   const neu = { nr: nextNr(S), teilVon: wurzel, teilNr: naechsteTeilNr(S, wurzel), rang: nextRang(S), eingang: o.eingang, tier: ziel, name: o.name, frueher: !!o.frueher, wunsch: '', tel: o.tel, mail: o.mail, weg: o.weg, notiz: `Teil von Nr. ${nrText(o)}`, packNotiz: o.packNotiz || '', pakete: 0, pakVak: 0, tuetenManuell: null, pos: {}, sonder: [], endbetrag: null, status: 'offen' };
@@ -728,6 +780,23 @@ function fleischBilanz(S, t, ords) {
     for (const o of ords) { c += num(o.pakete) * pk; if (num(o.pakete) > 0 && c > y + 0.001) (pakFehlt[o.nr] = pakFehlt[o.nr] || []).push(a.name); }
   }
   for (const k of Object.keys(topf)) topf[k] = Math.max(0, topf[k]);
+  // Sonderwünsche, die der Metzger separat vorbereitet (ganze Stücke, kg aus einem Teilstück, am Stück …), liegen zuerst
+  // beim Sonderfall – genau wie im Kistenplan (seit 3.6, vorher fehlte die Ware dann einer „ok“-Bestellung, wenn eine überbelegte
+  // Bestellung mit ganzem Filet weiter hinten stand). Ganze Stücke zählen mit dem ganzen (geschätzten) Stück.
+  // Hack hat eigene Regeln (fettig/mager), Braten aus dem Bug läuft wie bisher über den Bug.
+  const resv = {};
+  const nTp = topfN(t), gBr = bratenTeileKg(S, t.typ) * nTp, fBr = gBr > 0 ? yieldArt(S, t, BRATEN) / gBr : 1;
+  // ganzes Stück: Gewicht wie im Kistenplan (Durchschnitt über alle Tiere des Topfs), sonst die Schätzung der Bestellung
+  const stueckKg = s => { if (s.art === BRATEN) { const x = bratenTeile(S).find(x => x.name === s.teil); return x ? teilKg(x, t.typ, S) * fBr : 0; } const a = art(S, s.art), n = a ? num(a.ganzeStuecke) * nTp : 0; return n > 0 ? yieldArt(S, t, s.art) / n : 0; };
+  for (const o of ords) for (const s of sonderMetzger(S, o)) {
+    const name = s.art, want = s.ganz && stueckKg(s) > 0 ? s.ganz * stueckKg(s) : num(s.menge);
+    if (name === HACK || topf[name] === undefined || !(want > 0)) continue;
+    if (name === BRATEN && s.teil && (bratenTeile(S).find(x => x.name === s.teil) || {}).bug) continue;
+    let got;
+    if (name === BRATEN) { const a = Math.min(want, Math.max(0, keule)); keule -= a; const b = Math.min(want - a, Math.max(0, bug)); bug -= b; bugFuerBraten += b; got = a + b; }
+    else { got = Math.min(want, Math.max(0, topf[name])); topf[name] -= got; }
+    const r = resv[o.nr + '|' + name] = resv[o.nr + '|' + name] || { want: 0, got: 0 }; r.want += want; r.got += got;
+  }
   let pakCum = 0;
   const nen = (num(S.settings.nenner) > 0 ? num(S.settings.nenner) : 16) * topfN(t);
   for (const o of ords) {
@@ -745,6 +814,8 @@ function fleischBilanz(S, t, ords) {
     for (const name of Object.keys(topf)) {
       let q = qty(S, o, name) + (name === HACK ? -(hs.sied + hs.mager) : name === SIED ? hs.sied : 0);
       if (!(q > 0)) continue;
+      const rv = resv[o.nr + '|' + name];
+      if (rv) { const teil = Math.min(q, rv.want), fe = Math.max(0, Math.min(teil, rv.want - rv.got)); if (fe > 0.001) f[name] = (f[name] || 0) + fe; q -= teil; if (!(q > 0.001)) continue; }
       if (name === HACK) {
         const a = Math.min(q, Math.max(0, hackTopf)); hackTopf -= a; q -= a;
         const b = Math.min(q, Math.max(0, bug)); bug -= b; bugInsHack += b; q -= b;
@@ -1426,7 +1497,7 @@ function wartelistePruefung(S) {
     const ziel = x => x.auslastung * 100 >= schwelle;
     // Bulle nötig für alle, aber erst ein Rind lohnt sich: Rind schlachten, Rest bleibt auf der Warteliste
     if (wahl === B && !ziel(B) && ziel(R) && R.ok > 0) {
-      emp.push(`Empfehlung: schlachten – Rind. Damit sind ca. ${pz(R)} verkauft (${fmtNum(R.verkauft, 0)} von ${fmtNum(R.ausbeute, 0)} kg); ${R.nicht.length} Bestellung${R.nicht.length === 1 ? '' : 'en'} (Nr. ${R.nicht.join(', ')}) bleiben auf der Warteliste fürs nächste Tier. Ein Bulle wäre nur zu ${pz(B)} verkauft.`);
+      emp.push(`Empfehlung: schlachten – Rind. Damit sind ca. ${pz(R)} verkauft (${fmtNum(R.verkauft, 0)} von ${fmtNum(R.ausbeute, 0)} kg); ${R.nicht.length} Bestellung${R.nicht.length === 1 ? '' : 'en'} (Nr. ${R.nicht.map(nr => nrText(ords.find(o => o.nr === nr) || { nr })).join(', ')}) bleiben auf der Warteliste fürs nächste Tier. Ein Bulle wäre nur zu ${pz(B)} verkauft.`);
       wahl = R;
     } else if (ziel(wahl)) emp.push(`Empfehlung: schlachten – ${wahl.typ}. Ca. ${fmtNum(wahl.verkauft, 0)} kg von ${fmtNum(wahl.ausbeute, 0)} kg sind verkauft, ca. ${fmtNum(wahl.rest, 0)} kg gehen in den Hofladen.`);
     else {
@@ -1484,7 +1555,8 @@ function kundenVorschlaege(S, q, max = 8) {
     if (!ok && ziffern.length >= 3 && /^[\d\s\/+\-()]+$/.test(roh) && String(k.tel || '').replace(/\D/g, '').includes(ziffern)) ok = true;
     if (!ok) continue;
     const os = (S.bestellungen || []).filter(o => sameText(o.name, k.name));
-    treffer.push({ k, start, anzahl: os.length, letzteNr: os.reduce((m, o) => Math.max(m, num(o.nr)), 0) || null });
+    const lo = os.reduce((m, o) => (!m || num(o.nr) > num(m.nr) ? o : m), null);
+    treffer.push({ k, start, anzahl: os.length, letzteNr: lo ? lo.nr : null, letzteNrT: lo ? nrText(lo) : null });
   }
   return treffer.sort((a, b) => (b.start - a.start) || (b.anzahl - a.anzahl) || a.k.name.localeCompare(b.k.name, 'de')).slice(0, max);
 }
@@ -1541,7 +1613,7 @@ function mengenpruefung(S, tierName) {
   const bil = fleischBilanz(S, t, ords);
   const rows = ausbeuteArtikel(S).map(a => {
     const y = kapazitaet(S, t, bil, a.name);
-    const einzel = ords.reduce((s, o) => s + qty(S, o, a.name) + sortenAdj(S, o, a.name), 0) + (a.name === BRATEN ? num(bil.braten.bugMager) : 0);
+    const einzel = ords.reduce((s, o) => s + qty(S, o, a.name) + sortenAdj(S, o, a.name) + ganzMehr(S, o, a.name), 0) + (a.name === BRATEN ? num(bil.braten.bugMager) : 0);
     const ausPak = pak * paketKgArt(S, a.name);
     const ges = einzel + ausPak;
     return { art: a.name, ausbeute: y, ausbeuteStd: a.name === HACK ? yieldArt(S, t, HACK) : y, einzel, ausPak, gesamt: ges, frei: y - ges, auslastung: y > 0 ? ges / y : null,
@@ -1751,7 +1823,7 @@ function sonderTeile(S, ords) {
   const T = [];
   ords.forEach((o, k) => {
     const L = sonderMetzger(S, o).filter(s => { const a = art(S, s.art); return a && a.einheit === 'kg' && num(s.menge) > 0 && !istOrgan(s.art); })
-      .map(s => ({ key: o.nr + '|' + s.art, nr: o.nr, kg: num(s.menge) }));
+      .map(s => ({ key: o.nr + '|' + s.art, nr: o.nr, nrT: nrText(o), kg: num(s.menge) }));
     if (!L.length) return;
     const sum = L.reduce((x, s) => x + s.kg, 0);
     const gruppen = sum <= SONDER_MAX + 0.001 ? [L] : [];
@@ -1760,7 +1832,7 @@ function sonderTeile(S, ords) {
       if (!g) { g = []; gruppen.push(g); }
       g.push(s);
     }
-    for (const g of gruppen) T.push({ need: k + 1, nr: o.nr, kg: g.reduce((x, y) => x + y.kg, 0), keys: g.map(s => s.key) });
+    for (const g of gruppen) T.push({ need: k + 1, nr: o.nr, nrT: nrText(o), kg: g.reduce((x, y) => x + y.kg, 0), keys: g.map(s => s.key) });
   });
   return T;
 }
@@ -1783,11 +1855,11 @@ function sonderVerteilen(S, ords, C, maxKg, warn) {
     if (!best) best = C.find(c => c.nurSonder && c.w + p.kg <= SONDER_MAX + 0.001) || null;
     if (!best) { best = { items: [], w: 0, need: p.need, nurSonder: true }; C.push(best); eigene++; }
     const it = sonderItem(best);
-    it.kg = r1(it.kg + p.kg); it.sonder.push(...p.keys); if (!it.nrn.includes(p.nr)) it.nrn.push(p.nr);
+    it.kg = r1(it.kg + p.kg); it.sonder.push(...p.keys); if (!it.nrn.includes(p.nrT || p.nr)) it.nrn.push(p.nrT || p.nr);
     it.info = 'Nr. ' + it.nrn.join(', ');
     best.w += p.kg;
     if (p.need < best.need) best.need = p.need;
-    if (p.kg > SONDER_MAX + 0.001) warn.push(`Sonderfall Nr. ${p.nr}: ein Stück mit ca. ${fmtNum(p.kg, 1)} kg – Kiste über ${SONDER_MAX} kg.`);
+    if (p.kg > SONDER_MAX + 0.001) warn.push(`Sonderfall Nr. ${p.nrT || p.nr}: ein Stück mit ca. ${fmtNum(p.kg, 1)} kg – Kiste über ${SONDER_MAX} kg.`);
   }
   return eigene;
 }
@@ -1849,8 +1921,8 @@ function packplanKisten(S, tierName, f = 1) {
   const mcTier = mengencheckTier(S, tierName);
   const nichtOk = ords.filter(o => (mcTier[o.nr] || '').startsWith('reicht') && !o.ueberbelegt);
   const ueb = ords.filter(o => (mcTier[o.nr] || '').startsWith('reicht') && o.ueberbelegt);
-  if (ueb.length) warnVorab.push(`Bewusst überbelegt: Nr. ${ueb.map(o => o.nr).join(', ')} – dort fehlt beim Kommissionieren Ware.`);
-  if (nichtOk.length) warnVorab.push(`${nichtOk.length} Bestellung${nichtOk.length === 1 ? ' reicht' : 'en reichen'} nicht (Nr. ${nichtOk.map(o => o.nr).join(', ')}). Der Plan stimmt erst, wenn alle Bestellungen „ok“ sind – Sonderwünsche und „am Stück“ werden zuerst zurückgelegt, dann kann anderen Bestellungen etwas fehlen. Bitte erst umstellen (Mengenprüfung) und den Plan neu berechnen.`);
+  if (ueb.length) warnVorab.push(`Bewusst überbelegt: Nr. ${ueb.map(nrText).join(', ')} – dort fehlt beim Kommissionieren Ware.`);
+  if (nichtOk.length) warnVorab.push(`${nichtOk.length} Bestellung${nichtOk.length === 1 ? ' reicht' : 'en reichen'} nicht (Nr. ${nichtOk.map(nrText).join(', ')}). Der Plan stimmt erst, wenn alle Bestellungen „ok“ sind – Sonderwünsche und „am Stück“ werden zuerst zurückgelegt, dann kann anderen Bestellungen etwas fehlen. Bitte erst umstellen (Mengenprüfung) und den Plan neu berechnen.`);
   A.forEach((a, i) => {
     if (a.isOrg || !(a.kg > 0.05)) return;
     const artDef = art(S, a.art);
@@ -1945,7 +2017,7 @@ function packplanKisten(S, tierName, f = 1) {
     if (k === -1) { C.push({ items: [], w: 0, need: p.need }); k = C.length - 1; }
     C[k].w += p.w;
     if (p.need < C[k].need) C[k].need = p.need;
-    C[k].items.push({ art: p.art, kg: r1(p.w), info: p.info || '' });
+    C[k].items.push({ art: p.art, kg: Math.ceil(p.w * 10 - 1e-6) / 10, info: p.info || '' }); // seit 3.6 aufrunden: Summe der Kisten nie unter dem Bedarf
   }
   // Ochsenschwanz (ganz, nach Stück) kommt mit in die Beinscheiben-/Waden-Kiste
   const ochsN = Math.max(ma.ochs.vorhanden, ma.ochs.bestellt);
@@ -1963,7 +2035,7 @@ function packplanKisten(S, tierName, f = 1) {
   // Sonderfälle vom Metzger (je Bestellung beschriftet): auf die normalen Kisten verteilen, die zu dieser Bestellung
   // schon gebraucht werden und noch Platz haben; nur der Rest kommt in eigene Sonderfälle-Kisten (höchstens 30 kg je Kiste)
   if (specTier > 0) sonderVerteilen(S, ords, C, maxKg, warnVorab);
-  C.forEach(c => { c.tier = t.name; c.ab = c.need === 0 ? 'von Anfang an' : c.need >= BIG ? 'Rest / Hofladen' : `ab Nr. ${ords[c.need - 1].nr}`; });
+  C.forEach(c => { c.tier = t.name; c.ab = c.need === 0 ? 'von Anfang an' : c.need >= BIG ? 'Rest / Hofladen' : `ab Nr. ${nrText(ords[c.need - 1])}`; });
   return { t, C, warnVorab, ords, maxKg, hackKg };
 }
 // Teil 2: Kisten einer Abholgruppe (ein oder mehrere Tiere) gemeinsam ins Auto stellen und durchnummerieren.
@@ -2030,7 +2102,7 @@ function packplanGruppe(S, namen) {
     const c = C[aMax];
     let neu;
     if (c.items.length >= 2) neu = { items: [c.items.pop()], need: c.need };
-    else { const h = r1(c.items[0].kg / 2); c.items = [{ art: c.items[0].art, kg: h }]; neu = { items: [{ art: c.items[0].art, kg: h }], need: c.need }; }
+    else { const h = Math.ceil(c.items[0].kg * 5 - 1e-6) / 10; c.items = [{ art: c.items[0].art, kg: h }]; neu = { items: [{ art: c.items[0].art, kg: h }], need: c.need }; }
     c.w = c.items.reduce((s, i) => s + i.kg, 0);
     neu.w = neu.items.reduce((s, i) => s + i.kg, 0);
     C.push(neu);
@@ -2190,7 +2262,7 @@ function kistenCalc(S, tierName) {
     const sk = k.art === SONDERKISTE;
     const verplant = sk ? num(k.kg) : Math.max(0, Math.min(start + num(k.kg), bedarf) - start);
     const a = art(S, k.art);
-    const sonderInhalt = k.art === SONDERKISTE ? ords.flatMap(o => sonderMetzger(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art) && (!k.sonder || k.sonder.includes(o.nr + '|' + s.art))).map(s => `Nr. ${o.nr}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
+    const sonderInhalt = k.art === SONDERKISTE ? ords.flatMap(o => sonderMetzger(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art) && (!k.sonder || k.sonder.includes(o.nr + '|' + s.art))).map(s => `Nr. ${nrText(o)}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
     return { k, start, anteil, bedarf: sk ? num(k.kg) : bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: sonderInhalt || (k.info ? k.info : a && k.art !== HACK ? a.teile : '') };
   });
 }
@@ -2338,7 +2410,7 @@ function kommissionierung(S, nr) {
       const a = art(S, s.art);
       const sk = skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null;
       picks.push({ kiste: sk ? sk.nr : null, sonderfall: true, key: 'S' + si + '|' + s.art, menge: r2(num(s.soll != null ? s.soll : s.menge)), roh: 0, einheit: a ? a.einheit : 'kg', art: s.art,
-        verpacken: `Sonderfall${s.wunsch ? ' „' + s.wunsch + '“' : ''} – beim Metzger mit Nr. ${o.nr} beschriftet${sk ? '' : ' (keine Kiste dafür im Plan)'}`, platz: sk ? sk.platz || '' : '' });
+        verpacken: `Sonderfall${s.wunsch ? ' „' + s.wunsch + '“' : ''} – beim Metzger mit Nr. ${nrText(o)} beschriftet${sk ? '' : ' (keine Kiste dafür im Plan)'}`, platz: sk ? sk.platz || '' : '' });
     }
     picks.sort((a, b) => (a.kiste === null ? -1 : a.kiste) - (b.kiste === null ? -1 : b.kiste));
   }
@@ -2552,8 +2624,9 @@ function standPruefen(x) {
   for (const k of Object.keys(base)) if (x[k] === undefined) x[k] = base[k];
   x.settings = Object.assign({}, base.settings, x.settings);
   // letzte Bestellung und Anlagedatum je Kunde (für die Löschfrist; bleibt auch erhalten, wenn Bestellungen gelöscht werden)
+  const kIdx = bestellIndex(x); // seit 3.6: Index statt Kunden × Bestellungen (App-Start mit 3 Jahren Daten ~2 s schneller)
   (x.kunden || []).forEach(k => {
-    k.letzte = (x.bestellungen || []).filter(o => sameText(o.name, k.name)).reduce((m, o) => (o.eingang || '') > m ? o.eingang : m, k.letzte || '');
+    k.letzte = (kIdx.get(nameKey(k.name)) || []).reduce((m, o) => (o.eingang || '') > m ? o.eingang : m, k.letzte || '');
     if (!k.angelegt) k.angelegt = k.letzte || todayISO();
   });
   // Version 1.9.6: Sicherungen vor 1.9.0 werden nicht mehr umgebaut (alte Umbauschritte entfernt)
@@ -2568,6 +2641,7 @@ function standPruefen(x) {
   // Version 3.5 (Schema 10): Abholtermine – je Abholdatum der aktiven Tiere ein Termin (Bestellungen bleiben bei ihren Tieren)
   if (!(altSchema >= 10)) x.schema = 10;
   termineAbgleichen(x);
+  terminBinden(x); // seit 3.6: Bestellungen, die über die Termin-Seite an einem Termin MIT Tier hängen geblieben sind, aufs Tier legen
   // Version 1.9.5: Preislisten mit „gültig ab“ – bisherige Preise werden die erste Preisliste
   if (!hattePreislisten) {
     const ab = parseDate(x.settings.preiseAb) || '2000-01-01';
@@ -2582,7 +2656,7 @@ function standPruefen(x) {
 
 if (typeof module !== 'undefined') module.exports = {
   num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
-  art, einheitForm, istOrgan, bezugstermin, erfassungLuecken, statistikGrund, unvollstaendig, topfGemischt, innPickAbgleich, innOkUmschalten, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
+  art, einheitForm, istOrgan, statSigNeu, teilBleibtEtwas, sonderAnpassen, ganzMehr, nameKey, bezugstermin, erfassungLuecken, statistikGrund, unvollstaendig, topfGemischt, innPickAbgleich, innOkUmschalten, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
   nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, topfTier, topfAus, topfN, ordersOfTopf, tierAnzeige, kistenKontext, abschlussNamen, mengencheckT, TOPF_SEP, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,

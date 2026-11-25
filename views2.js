@@ -759,7 +759,7 @@ function viewKommissionierung(q) {
   h += `
     ${ohneKisten ? '<div class="hinweis">Für dieses Tier sind noch keine Kisten eingetragen (Schlachttag → Kisten & Ladeplan → „Plan erstellen“).</div>' : ''}
     <div class="spalten2"><div class="karte">
-      <h2 style="margin-top:0">Nr. ${ko.o.nr} – ${esc(ko.o.name)} ${statusMarke(ko.o.status)}${zahlMarke(ko.o)}</h2>
+      <h2 style="margin-top:0">Nr. ${esc(nrText(ko.o))} – ${esc(ko.o.name)} ${statusMarke(ko.o.status)}${zahlMarke(ko.o)}</h2>
       ${ko.o.packNotiz ? `<div class="packnotiz"><span class="klein">Notiz zur Bestellung</span><div>${esc(ko.o.packNotiz).replace(/\n/g, '<br>')}</div></div>` : ''}
       ${(() => { const lv = lagerVorschlag(S, ko.o); const ort = ko.o.lagerOrt || lv.ort;
         return `<div class="lagerbox ${ort === 'Kühlschrank' ? 'ks' : 'kr'}"><div class="klein">${ko.o.lagerOrt ? 'verräumt' : 'Lagerplatz nach dem Packen'}</div><div class="lagerort">${ort === 'Kühlschrank' ? '❄ Kühlschrank' : '▣ Kühlraum – Metzgerkiste'}${ko.o.lagerPlatz ? ' · ' + esc(lagerPlatzText(ko.o)) : ''}</div><div class="klein">${esc(lv.grund)}</div></div>`; })()}
@@ -786,7 +786,7 @@ function viewKommissionierung(q) {
     if (offenZeilen && !(await frage('Noch nicht alles gewogen', `${offenZeilen} ${offenZeilen === 1 ? 'Zeile ist' : 'Zeilen sind'} noch nicht gewogen bzw. abgehakt. Trotzdem als gepackt melden?`, 'Trotzdem gepackt', 'Zurück'))) return;
     if (!(await lagerDialog(o))) return;
     const naechste = ords.slice(idx + 1).find(x => (x.status || 'offen') === 'offen') || ords[idx + 1];
-    meldung(`Nr. ${nr} gepackt → ${lagerText(o)}.`);
+    meldung(`Nr. ${nrText(o)} gepackt → ${lagerText(o)}.`);
     if (naechste) gehe('#/kommissionierung?nr=' + naechste.nr); else if (!ohneKisten) gehe('#/kommissionierung?nr=hof'); else render();
   };
   ui.acts.teilen = async () => { const d = docPick(ko); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };

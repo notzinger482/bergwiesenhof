@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.5.5';
+const APP_VERSION = '3.6';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '', archiv: false }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -11,6 +11,7 @@ const inhalt = () => $('#inhalt');
 // ---------- Speichern ----------
 let speicherTimer = null, speicherFehler = false;
 function speichern() {
+  statSigNeu(); // Statistik-Fingerabdruck nach jeder Änderung neu (seit 3.6)
   clearTimeout(speicherTimer);
   kopfStatus('speichert …');
   speicherTimer = setTimeout(async () => {
@@ -149,7 +150,7 @@ async function neuVerteilenDialog(nurWennWechsel, fest = new Set(), hinweis = ''
   const reicht = c => !c ? '' : c === 'ok' ? '<span class="ok">ok</span>' : `<span class="warn">${esc(c)}</span>`;
   const bleibtNicht = plan.zeilen.filter(z => sameText(z.von, z.nach) && z.check && z.check !== 'ok');
   const abgew = [...fest].map(nr => S.bestellungen.find(o => o.nr === nr)).filter(Boolean);
-  const zeile = (nr, an, name, eingang, von, nach, check) => `<tr><td class="c"><label class="check"><input type="checkbox" id="vt_${nr}"${an ? ' checked' : ''}></label></td><td class="r fett">${nr}</td><td>${esc(name)}</td><td>${fmtDate(eingang)}</td><td>${esc(von)}</td><td>→</td><td class="fett">${esc(nach)}</td><td>${check}</td></tr>`;
+  const zeile = (nr, an, name, eingang, von, nach, check) => `<tr><td class="c"><label class="check"><input type="checkbox" id="vt_${nr}"${an ? ' checked' : ''}></label></td><td class="r fett">${esc(nrText(S.bestellungen.find(o => o.nr === nr) || { nr }))}</td><td>${esc(name)}</td><td>${fmtDate(eingang)}</td><td>${esc(von)}</td><td>→</td><td class="fett">${esc(nach)}</td><td>${check}</td></tr>`;
   const html = `${hinweis ? `<div class="hinweis">${esc(hinweis)}</div>` : ''}<p>Geprüft: <b>${plan.zeilen.length}</b> offene Bestellungen der Warteliste (ohne Abholtermin), in Reihenfolge des Eingangs. <span class="klein">Bestellungen auf einem Abholtermin bleiben dort – verschoben wird nur nach Rücksprache (Kandidaten zum Vorziehen auf der Termin-Seite).</span> <span class="klein">Zeitfenster: höchstens die eingestellten Tage <b>vor</b> dem Wunschtermin – ohne Wunschtermin vor dem Abholtermin des bisherigen Tiers (nie später). Nur Warteliste ohne Wunschtermin: so früh wie möglich. Gemeinsame Abholung zählt als ein Tier.</span>
       ${plan.festTiere.length ? `<br><span class="klein">Fest (Kistenplan fertig – nur noch von Hand): ${plan.festTiere.map(esc).join(', ')} · gepackte und bewusst überbelegte Bestellungen bleiben, wo sie sind.</span>` : ''}</p>
     ${plan.wechsel.length || abgew.length ? `<p><b>${plan.wechsel.length} Bestellung${plan.wechsel.length === 1 ? '' : 'en'} wechseln das Tier</b> <span class="klein">– Häkchen raus = bleibt, wo sie ist (z. B. auf der Warteliste)</span></p>
@@ -157,7 +158,7 @@ async function neuVerteilenDialog(nurWennWechsel, fest = new Set(), hinweis = ''
     ${plan.wechsel.map(z => zeile(z.nr, true, z.name, z.eingang, z.von, z.nach, reicht(z.check))).join('')}
     ${abgew.map(o => zeile(o.nr, false, o.name, o.eingang, o.tier || 'Warteliste', o.tier || 'Warteliste', '<span class="klein">abgewählt – bleibt</span>')).join('')}
     </tbody></table></div>` : '<p class="ok"><b>Alles passt – keine Bestellung muss das Tier wechseln.</b></p>'}
-    ${bleibtNicht.length ? `<p class="warn">Weiter „reicht nicht“ (kein Tier passt, bleibt wo sie war): ${bleibtNicht.map(z => 'Nr. ' + z.nr + ' ' + esc(z.name)).join(', ')}</p>` : ''}`;
+    ${bleibtNicht.length ? `<p class="warn">Weiter „reicht nicht“ (kein Tier passt, bleibt wo sie war): ${bleibtNicht.map(z => 'Nr. ' + esc(nrText(S.bestellungen.find(o => o.nr === z.nr) || { nr: z.nr })) + ' ' + esc(z.name)).join(', ')}</p>` : ''}`;
   const planHtml = plan.planNeu.length ? `<p class="klein">Kistenplan wird danach automatisch neu berechnet: <b>${plan.planNeu.map(esc).join(', ')}</b> (noch nichts gewogen).</p>` : '';
   const tageHtml = `<div class="zeile" style="gap:8px;align-items:center;margin:4px 0 8px"><span class="klein">Höchstens</span><input id="vtTage" class="feld zahl" inputmode="numeric" style="width:70px" value="${plan.maxTage}"><span class="klein">Tage vor dem Wunschtermin (ohne: vor dem bisherigen Abholtermin)</span></div>`;
   const kn = [{ k: 'x', t: plan.wechsel.length ? 'Abbrechen' : 'Schließen' }, { k: 'tage', t: 'Neu prüfen' }];
@@ -271,7 +272,7 @@ function viewStart() {
   // Zusagen fehlen bei Terminen in den nächsten 21 Tagen
   const ohneZusage = termine(S).filter(x => x.datum >= heute && x.datum <= isoOf(new Date(Date.now() + 21 * 864e5)) && !terminAbgeschlossen(S, x) && (!x.zusageSchlachter || !x.zusageMetzger) && (terminTiere(S, x).length || ordersOfTermin(S, x).length));
   if (ohneZusage.length) h += `<div class="hinweis"><b>Zusagen fehlen:</b> ${ohneZusage.map(x => `<a href="#/termin/${esc(x.id)}">${fmtDate(x.datum)}</a> – ${[!x.zusageSchlachter ? 'Schlachter' : '', !x.zusageMetzger ? 'Metzger' : ''].filter(Boolean).join(' und ')}`).join(' · ')}</div>`;
-  if (ui.letzteNr) h += `<p class="klein">Zuletzt gespeichert: <a href="#/bestellung/${ui.letzteNr}">Bestellung Nr. ${ui.letzteNr}</a></p>`;
+  if (ui.letzteNr) h += `<p class="klein">Zuletzt gespeichert: <a href="#/bestellung/${ui.letzteNr}">Bestellung Nr. ${esc(nrText(S.bestellungen.find(x => x.nr === ui.letzteNr) || { nr: ui.letzteNr }))}</a></p>`;
   if (offeneTermine.length) {
     h += `<h2>Abholtermine ohne Tier</h2><div class="raster">` + offeneTermine.map(x => { const os = ordersOfTermin(S, x); return `<div class="karte tierkarte" data-act="termin" data-id="${esc(x.id)}">
       <div class="kopfz"><span class="name">${fmtDate(x.datum)}</span><span class="klein">noch kein Tier</span></div>${x.notiz ? `<div class="klein">${esc(x.notiz)}</div>` : ''}
@@ -338,7 +339,7 @@ async function terminVollDialog(o, gespeichert) {
     const fd = passtAufZiel(S, o, ziel);
     if (!fd || fd.ok) return 'ok';
     const next = naechsterTermin(S, ziel), xN = next ? zielTermin(S, next) : null, x = zielTermin(S, ziel);
-    const rest = restMengen(fd), mitRest = Object.values(rest).some(v => v > 0);
+    const rest = restMengen(fd), mitRest = Object.values(rest).some(v => v > 0) && teilBleibtEtwas(S, o, rest); // seit 3.6: nicht, wenn nichts übrig bliebe
     const wurzel = o.teilVon || o.nr || nextNr(S), teilNr = wurzel ? `${wurzel}-${S.bestellungen.filter(y => y.teilVon === wurzel).reduce((m, y) => Math.max(m, num(y.teilNr) || 2), 1) + 1}` : '…-2';
     const spaet = (z, xx) => xx && o.wunsch && xx.datum > o.wunsch ? ` <span class="warn">(nach dem Wunschtermin ${fmtDate(o.wunsch)})</span>` : '';
     const html = `<p><b>${esc(zielText(S, ziel))}</b> ist für ${gespeichert ? `den Rest Nr. ${esc(nrText(o))}` : 'diese Bestellung'} zu voll – ${fd.zeilen.length ? 'nur eine Teilbestellung möglich' : 'passt nicht mehr'}.</p>
@@ -364,13 +365,14 @@ function viewBestellung(nr, q, vorlage) {
   if (vorlage) o = vorlage;
   else if (nr) {
     const vorh = S.bestellungen.find(x => x.nr === nr);
-    if (!vorh) { inhalt().innerHTML = `<div class="fehlerbox">Bestellung Nr. ${nrText(o)} gibt es nicht.</div>`; return; }
+    if (!vorh) { inhalt().innerHTML = `<div class="fehlerbox">Bestellung Nr. ${nr} gibt es nicht.</div>`; return; }
     o = JSON.parse(JSON.stringify(vorh));
   } else {
     o = leereBestellung();
     if (q && q.get('kunde')) { const k = S.kunden.find(x => x.nr === +q.get('kunde')); if (k) { o.name = k.name; o.tel = k.tel; o.mail = k.mail; } }
     if (q && q.get('tier')) o.tier = q.get('tier');
-    if (q && q.get('termin') && terminById(S, q.get('termin'))) { o.tier = 'Warteliste'; o.termin = q.get('termin'); }
+    // Termin hat schon ein Tier → Bestellung gleich auf das Tier (seit 3.6; vorher landete sie als „Termin ohne Tier“ und fehlte beim Tier)
+    if (q && q.get('termin') && terminById(S, q.get('termin'))) { const gl = terminTiere(S, terminById(S, q.get('termin'))); if (gl.length) o.tier = gl[0].name; else { o.tier = 'Warteliste'; o.termin = q.get('termin'); } }
   }
   ui.o = o; ui.formDirty = false; ui.formVors = null; clearTimeout(ui.formTimer);
   titel(nr ? `Bestellung Nr. ${nrText(o)}` : 'Neue Bestellung');
@@ -396,7 +398,7 @@ function viewBestellung(nr, q, vorlage) {
   <div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">${nr ? `Bestellung Nr. ${nrText(o)}` : 'Neue Bestellung'}</h1>
     ${nr ? `${o.lagerOrt ? `<span class="marke blau" style="font-size:15px;padding:6px 12px">${esc(lagerText(o))}</span>` : ''}<button class="btn" data-act="lager">Lagerplatz …</button><select class="feld" style="width:auto" data-in="kopf" data-f="status">${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, (o.status || 'offen') === s)).join('')}</select><label class="check zahlcheck" id="zahlbox" style="${(o.status || 'offen') === 'abgeholt' ? '' : 'display:none'}"><input type="checkbox" id="zahloffen"${o.zahlungOffen ? ' checked' : ''}> Bezahlung offen</label>
     <button class="btn" data-act="teilen">Teilen …</button><button class="btn rot" data-act="loeschen">Löschen</button>` : ''}
-    ${ui.letzteNr && !nr ? `<a class="btn klein" href="#/bestellung/${ui.letzteNr}">Zuletzt: Nr. ${ui.letzteNr} öffnen</a>` : ''}</div>
+    ${ui.letzteNr && !nr ? `<a class="btn klein" href="#/bestellung/${ui.letzteNr}">Zuletzt: Nr. ${esc(nrText(S.bestellungen.find(x => x.nr === ui.letzteNr) || { nr: ui.letzteNr }))} öffnen</a>` : ''}</div>
   <div id="fehler"></div>
   <div id="mcheck"></div>
   <div class="spalten2">
@@ -470,7 +472,7 @@ function viewBestellung(nr, q, vorlage) {
     // Kunde
     const k = S.kunden.find(x => sameText(x.name, o.name));
     const lb = !o.nr && o.name ? letzteBestellungVon(o.name) : null;
-    $('#kdinfo').innerHTML = !o.name ? '' : k ? `Kd-Nr. ${k.nr}${k.notiz ? ' – ' + esc(k.notiz) : ''}${lb ? ` · <a href="#" data-act="uebernehmen">letzte Bestellung (Nr. ${lb.nr}) übernehmen</a>` : ''}` : '<span class="ok">neuer Kunde – wird beim Speichern angelegt</span>';
+    $('#kdinfo').innerHTML = !o.name ? '' : k ? `Kd-Nr. ${k.nr}${k.notiz ? ' – ' + esc(k.notiz) : ''}${lb ? ` · <a href="#" data-act="uebernehmen">letzte Bestellung (Nr. ${nrText(lb)}) übernehmen</a>` : ''}` : '<span class="ok">neuer Kunde – wird beim Speichern angelegt</span>';
     // Summe
     const ek = einzelKg(S, o);
     $('#summe').innerHTML = `Einzelartikel ca. <b>${fmtNum(ek, 2)} kg</b>${num(o.pakete) ? ` + ${fmtNum(o.pakete)} Genusspaket${num(o.pakete) > 1 ? 'e' : ''}` : ''} · Schätzpreis <b>${fmtEur(schaetzpreis(S, o))}</b>`;
@@ -525,7 +527,7 @@ function viewBestellung(nr, q, vorlage) {
     kdTreffer = kundenVorschlaege(S, q); kdAktiv = -1;
     const b = kdBox(); if (!b) return;
     if (!kdTreffer.length) return kdZu();
-    b.innerHTML = kdTreffer.map((t, i) => `<div class="kdv" data-i="${i}"><div class="fett">${esc(t.k.name)}</div><div class="klein">${[t.k.tel, t.anzahl ? `${t.anzahl} Bestellung${t.anzahl > 1 ? 'en' : ''}${t.letzteNr ? ', zuletzt Nr. ' + t.letzteNr : ''}` : 'noch keine Bestellung'].filter(Boolean).map(esc).join(' · ')}</div></div>`).join('');
+    b.innerHTML = kdTreffer.map((t, i) => `<div class="kdv" data-i="${i}"><div class="fett">${esc(t.k.name)}</div><div class="klein">${[t.k.tel, t.anzahl ? `${t.anzahl} Bestellung${t.anzahl > 1 ? 'en' : ''}${t.letzteNr ? ', zuletzt Nr. ' + (t.letzteNrT || t.letzteNr) : ''}` : 'noch keine Bestellung'].filter(Boolean).map(esc).join(' · ')}</div></div>`).join('');
     b.classList.add('auf');
   }
   function kdWaehlen(i) {
@@ -620,13 +622,15 @@ function viewBestellung(nr, q, vorlage) {
       if (tr) { const pp = o.pos[z.art] || {}; for (const f of ['anzahl', 'menge']) { const el = $(`[data-f=${f}]`, tr); if (el) el.value = has(pp[f]) && num(pp[f]) > 0 ? fmtIn(pp[f], 3) : ''; } }
       txt.push(`${z.art} ${z.neu > 0 ? 'auf ' + fmtNum(z.neu, 1) + (z.feld === 'anzahl' ? ' Stück' : z.btlBestellt !== undefined ? ' Btl' : ' kg') : 'entfernt'}`);
     }
+    const sw = sonderAnpassen(S, o, fd.zeilen.map(z => z.art)); // seit 3.6: Sonderwünsche passend zur gekürzten Menge
+    if (sw.length) $('#sonderliste').innerHTML = o.sonder.map(sonderZeile).join('');
     ui.formDirty = true; aktualisieren();
-    meldung('Gekürzt: ' + txt.join(', ') + ' – bitte speichern.');
+    meldung('Gekürzt: ' + txt.concat(sw).join(', ') + ' – bitte speichern.');
   };
   ui.acts.lager = async () => {
     if (ui.formDirty) return meldung('Bitte die Änderungen zuerst speichern.', true);
     const echt = S.bestellungen.find(x => x.nr === nr);
-    if (await lagerDialog(echt)) { meldung(`Nr. ${nr}: ${lagerText(echt)}`); render(); }
+    if (await lagerDialog(echt)) { meldung(`Nr. ${nrText(echt)}: ${lagerText(echt)}`); render(); }
   };
   ui.acts.teilen = () => { if (ui.formDirty) return meldung('Bitte die Änderungen zuerst speichern, dann teilen.', true); teilenDialog(nr); };
   aktualisieren(); clearTimeout(ui.formTimer); tierUndCheck(); // beim Öffnen sofort vollständig
@@ -696,6 +700,8 @@ async function bestellungSpeichern(o) {
   let auto = false;
   if (!o.tier) { zielSetzen(o, terminAuto(S, o.wunsch)); auto = true; }
   if (o.tier !== 'Warteliste') delete o.termin;
+  // Termin hat inzwischen ein Tier (seit 3.6): Bestellung auf das Tier legen
+  if (istTerminWarte(o)) { const xT = terminById(S, o.termin), gl = xT ? terminTiere(S, xT) : []; if (gl.length) zielSetzen(o, gl[0].name); }
   // Termin voll? (seit 3.5) – Meldung mit Wahl statt stillem Verschieben; nur offene, nicht bewusst überbelegte Bestellungen
   let teilung = null;
   if ((o.status || 'offen') === 'offen' && !o.ueberbelegt && (o.tier !== 'Warteliste' || istTerminWarte(o))) {
@@ -725,6 +731,7 @@ async function bestellungSpeichern(o) {
   // Schätzpreis abgeholter/archivierter Bestellungen festhalten (bei Änderung neu berechnet), sonst mit der Preisliste am Abholtermin
   if (preisBleibtFest(S, o)) preisFestsetzen(S, o); else delete o.preisFest;
   const kundeNeu = kundePflegen(S, o.name, o.tel, o.mail, o.eingang);
+  terminBinden(S); // Sicherheitsnetz (seit 3.6): keine Bestellung bleibt ohne Tier an einem Termin mit Tier
   // Teilbestellung: Rest als eigene Bestellung „Nr-2“ auf den späteren Termin, dort gleich prüfen
   let restO = null;
   if (teilung) {
@@ -995,7 +1002,7 @@ function tierAusbeuteHtml(t) {
     ${au.teile.map(r => `<tr><td>${esc(r.teil)}</td><td class="r">${r.teile || ''}</td><td class="r">${r.kg ? fmtNum(r.kg, 2) : '–'}</td><td class="r">${r.jeStueck !== null ? `${fmtNum(r.jeStueck, 2)} <span class="klein">(÷ ${r.stueck})</span>` : ''}</td><td class="r klein">${fmtNum(r.ref, 2)}</td></tr>`).join('') || '<tr><td colspan="5" class="klein">keine Braten-Teilstücke in den Einstellungen</td></tr>'}
     </tbody></table></div></div>
     ${er.length ? `<details style="margin-top:10px"><summary class="fett">Alle gewogenen Teile (${er.length})</summary><div class="tabwrap" style="margin-top:8px"><table class="tab"><thead><tr><th>Artikel</th><th class="r">g</th><th>für</th><th></th></tr></thead><tbody>
-      ${er.map(({ e, i }) => `<tr><td>${esc(e.teil ? e.art + ': ' + e.teil : e.art)}</td><td class="r">${fmtNum(num(e.kg) * 1000, 0)}</td><td>${num(e.nr) ? 'Nr. ' + e.nr + ' ' + esc((S.bestellungen.find(o => o.nr === num(e.nr)) || {}).name || '') : 'Rest (Hofladen)'}</td><td style="width:44px"><button class="btn klein rot" data-act="erfWeg" data-i="${i}">✕</button></td></tr>`).join('')}
+      ${er.map(({ e, i }) => `<tr><td>${esc(e.teil ? e.art + ': ' + e.teil : e.art)}</td><td class="r">${fmtNum(num(e.kg) * 1000, 0)}</td><td>${num(e.nr) ? 'Nr. ' + esc(nrText(S.bestellungen.find(o => o.nr === num(e.nr)) || { nr: e.nr })) + ' ' + esc((S.bestellungen.find(o => o.nr === num(e.nr)) || {}).name || '') : 'Rest (Hofladen)'}</td><td style="width:44px"><button class="btn klein rot" data-act="erfWeg" data-i="${i}">✕</button></td></tr>`).join('')}
     </tbody></table></div></details>` : ''}</div>`;
   if (t.abschluss && t.abschluss.kisten && t.abschluss.kisten.length) {
     const ks = t.abschluss.kisten, stk = k => k.einheit === 'Stk';
@@ -1052,6 +1059,11 @@ async function teilenDialog(nr) {
   const k = await p;
   d.removeEventListener('click', presets, true); d.removeEventListener('click', merk, true); d.removeEventListener('input', inp);
   if (k !== 'ok' || !werte) return;
+  if (!teilBleibtEtwas(S, o, werte)) { // seit 3.6: keine leere Bestellung zurücklassen
+    if (!(await frage('Ganze Bestellung verschieben', `Es bliebe nichts in Nr. ${esc(nrText(o))}. Die <b>ganze Bestellung</b> auf <b>${esc(zielText(S, ziel))}</b> verschieben (Nummer bleibt)?`, 'Ganz verschieben', 'Abbrechen'))) return;
+    zielSetzen(o, ziel); o.rang = nextRang(S); delete o.ueberbelegt; if (!preisBleibtFest(S, o)) delete o.preisFest; terminBinden(S); speichern();
+    meldung(`Nr. ${nrText(o)} ist jetzt bei ${zielText(S, zielVon(o))}.`); ui.formDirty = false; render(); return;
+  }
   const neu = bestellungTeilen(S, o, werte, ziel);
   if (!neu) return meldung('Nichts zum Verschieben eingetragen.', true);
   speichern();
