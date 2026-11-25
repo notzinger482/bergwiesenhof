@@ -1188,7 +1188,8 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   for (const o of ords) for (const s of sonderOf(S, o)) {
     const a = art(S, s.art);
     const sk = num(s.menge) > 0 && !istOrgan(s.art) ? skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null : null;
-    separat.push({ nr: o.nr, name: o.name, art: s.art, kiste: sk ? sk.nr : null, menge: has(s.menge) ? (s.ca ? 'ca. ' + fmtNum(s.menge, 1) : fmtNum(s.menge, 3)) + ' ' + (a ? a.einheit : '') : '', hinweis: s.wunsch });
+    separat.push({ nr: o.nr, name: o.name, art: s.art, kiste: sk ? sk.nr : null, // ganze Stücke ohne Gewicht (seit 3.2.4, Wunsch Nutzer): der Metzger gibt das ganze Stück, das Gewicht ist nur eine Schätzung
+      menge: s.ganz ? s.ganz + ' Stück' : has(s.menge) ? (s.ca ? 'ca. ' + fmtNum(s.menge, 1) : fmtNum(s.menge, 3)) + ' ' + (a ? a.einheit : '') : '', hinweis: s.wunsch });
   }
   const waden = ords.reduce((s, o) => { const p = o.pos && o.pos[BEIN]; return s + (istWade(art(S, BEIN), p) ? num(p.anzahl) : 0); }, 0);
   const ochsB = ords.reduce((s, o) => s + qty(S, o, OCHS), 0);
