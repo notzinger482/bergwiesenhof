@@ -252,10 +252,20 @@ function sonderOf(S, o) {
   for (const s of (o.sonder || [])) if (s && s.art) {
     const teil = s.art === BRATEN && s.teil && bratenTeile(S).some(x => x.name === s.teil) ? s.teil : '';
     const nG = num(s.ganz) > 0 && ganzArt(S, s.art) && (s.art !== BRATEN || teil) ? Math.round(num(s.ganz)) : 0;
-    let menge = has(s.menge) ? num(s.menge) : null, ca = false;
-    if (nG) { const g = ganzStueckKg(S, o.tier, s.art, teil); if (g) { menge = r3(nG * g.kg); ca = true; } }
+    let menge = has(s.menge) ? num(s.menge) : null, ca = false, soll = null;
+    if (nG) {
+      const g = ganzStueckKg(S, o.tier, s.art, teil);
+      if (g) {
+        menge = r3(nG * g.kg); ca = true;
+        // Filet/Tafelspitz ganz (seit 3.2.5, Wunsch Nutzer): ist das der einzige Sonderwunsch dieses Artikels, ist die rechts
+        // bestellte Menge (z. B. 2000 g für „1 ganzes Filet“) das Soll beim Kommissionieren. Kistenplan/Mengencheck ziehen weiter
+        // das geschätzte Stück ab (es geht ja genau ein ganzes Stück weg)
+        const q = qty(S, o, s.art);
+        if (s.art !== BRATEN && (o.sonder || []).filter(x => x && x.art === s.art).length === 1 && q >= nG * g.min - 0.05) soll = r3(q);
+      }
+    }
     const teilTxt = nG ? (s.art === BRATEN ? `${nG === 1 ? '1 ganzes Stück' : nG + '× ganzes Stück'} ${teil}` : `${nG === 1 ? '1 ganzes' : nG + '× ganzes'} ${s.art}`) : teil ? 'aus ' + teil : '';
-    out.push({ art: s.art, menge, ca, teil, ganz: nG, sorte: s.art === HACK && HACK_SORTEN[s.sorte] ? s.sorte : '',
+    out.push({ art: s.art, menge, ca, soll, teil, ganz: nG, sorte: s.art === HACK && HACK_SORTEN[s.sorte] ? s.sorte : '',
       wunsch: [s.art === HACK && HACK_SORTEN[s.sorte] ? HACK_SORTEN[s.sorte] : '', teilTxt, s.wunsch || ''].filter(Boolean).join(' – ') });
   }
   return out;
@@ -301,7 +311,8 @@ function ganzWunschFehlt(S, t, ords) {
 }
 // kg Braten, die eine Bestellung ausdrücklich aus dem Bug (Bug-Teilstück) wünscht
 const bugWunsch = (S, o) => sonderOf(S, o).filter(s => s.art === BRATEN && s.teil && (bratenTeile(S).find(x => x.name === s.teil) || {}).bug).reduce((t, s) => t + num(s.menge), 0);
-const specSum = (S, o, name) => sonderOf(S, o).filter(s => s.art === name).reduce((t, s) => t + num(s.menge), 0);
+// je Bestellung: was davon als Sonderfall kommt (seit 3.2.5 bei ganzem Filet/Tafelspitz die rechts bestellte Menge – s.soll)
+const specSum = (S, o, name) => sonderOf(S, o).filter(s => s.art === name).reduce((t, s) => t + num(s.soll != null ? s.soll : s.menge), 0);
 // Hack-Sorte beim Sonderwunsch (seit 3.0.5, Regel Nutzer): „fettig“ = Siedfleisch-Anteil (Standard 50 %) + Rest Hack-Material,
 // „mager“ = reines Bugstück (aus dem Bug des Bratens). Die Menge bleibt Hackfleisch in der Bestellung (Preis, Sonderfall),
 // gerechnet wird sie aber gegen das Material, aus dem sie wirklich gemacht wird.
@@ -1401,7 +1412,7 @@ function packplanKisten(S, tierName, f = 1) {
   const specO = {};
   for (const o of ords) for (const s of sonderOf(S, o)) {
     specT[s.art] = (specT[s.art] || 0) + num(s.menge);
-    specO[o.nr + '|' + s.art] = (specO[o.nr + '|' + s.art] || 0) + num(s.menge);
+    specO[o.nr + '|' + s.art] = (specO[o.nr + '|' + s.art] || 0) + num(s.soll != null ? s.soll : s.menge);
     const a = art(S, s.art);
     if (a && a.einheit === 'kg') specTier += num(s.menge);
   }
@@ -1884,7 +1895,7 @@ function kommissionierung(S, nr) {
       if (!(num(s.menge) > 0) || istOrgan(s.art)) continue;
       const a = art(S, s.art);
       const sk = skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null;
-      picks.push({ kiste: sk ? sk.nr : null, sonderfall: true, key: 'S' + si + '|' + s.art, menge: r2(num(s.menge)), roh: 0, einheit: a ? a.einheit : 'kg', art: s.art,
+      picks.push({ kiste: sk ? sk.nr : null, sonderfall: true, key: 'S' + si + '|' + s.art, menge: r2(num(s.soll != null ? s.soll : s.menge)), roh: 0, einheit: a ? a.einheit : 'kg', art: s.art,
         verpacken: `Sonderfall${s.wunsch ? ' „' + s.wunsch + '“' : ''} – beim Metzger mit Nr. ${o.nr} beschriftet${sk ? '' : ' (keine Kiste dafür im Plan)'}`, platz: sk ? sk.platz || '' : '' });
     }
     picks.sort((a, b) => (a.kiste === null ? -1 : a.kiste) - (b.kiste === null ? -1 : b.kiste));
