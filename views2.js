@@ -124,9 +124,9 @@ async function termineMehrereDialog() {
 function docTermin(x, gv, ml) {
   const gl = terminTiere(S, x);
   const mg = v => v.mindest ? `${v.n > 1 ? v.n + ' × ' : ''}${fmtNum(v.mindest)} kg` : 'reicht nicht';
-  const bl = [{ type: 'h', text: 'Vorschlag Schlachtgewicht' }];
-  gv.hinweis.forEach((t, i) => bl.push({ type: 'text', text: t, bold: i === 0 }));
-  if (gv.anzahl) {
+  const bl = gv ? [{ type: 'h', text: 'Vorschlag Schlachtgewicht' }] : [];
+  if (gv) gv.hinweis.forEach((t, i) => bl.push({ type: 'text', text: t, bold: i === 0 }));
+  if (gv && gv.anzahl) {
     const R = gv.rind, B = gv.bulle;
     const arts = [...new Set(R.artikel.concat(B.artikel).map(a => a.art))];
     const z = (v, a) => { const r = v.artikel.find(y => y.art === a); return !r ? '' : r.minSG === null ? 'zu viel' : fmtNum(r.minSG) + ' kg'; };
@@ -142,6 +142,7 @@ function docTermin(x, gv, ml) {
     bl.push({ type: 'h', text: `Mengenliste – ${ml.n > 1 ? ml.n + ' × ' : ''}${ml.typ} mit ${fmtNum(ml.sgJe)} kg Schlachtgewicht` });
     bl.push({ type: 'table', head: ['Artikel', 'aus dem Tier ca.', 'bestellt', 'frei', 'fehlt', 'reicht ab'], align: ['', 'r', 'r', 'r', 'r', 'r'],
       rows: ml.rows.map(r => [r.art, fmtNum(r.ausbeute, 1) + ' kg', r.gesamt > 0 ? fmtNum(r.gesamt, 1) + ' kg' : '', fmtNum(Math.max(0, r.frei), 1) + ' kg', r.fehlt > 0.001 ? '−' + fmtKgFehl(r.fehlt) : '', r.minSG ? fmtNum(r.minSG) + ' kg SG' : r.gesamt > 0 && r.minSG === null ? 'zu viel' : '']),
+      ...(ml.mindest ? {} : { head: ['Artikel', 'aus dem Tier ca.', 'bestellt', 'frei', 'fehlt', ''] }),
       rowClass: ml.rows.map(r => r.fehlt > 0.001 ? 'rot' : '') });
     const rs = ml.reserven, teile = [];
     if (rs.gulasch > 0.05) teile.push(`${fmtNum(rs.gulasch, 1)} kg Gulasch (Kamm/Hals)`);
@@ -156,7 +157,8 @@ function docTermin(x, gv, ml) {
   bl.push({ type: 'table', head: ['Nr.', 'Name', 'Wunsch', 'Pakete', 'Bestellung'].concat(ml ? ['Probe'] : []), align: ['r', '', '', 'r', ''],
     rows: os.map(o => [nrText(o), o.name, o.wunsch ? fmtDate(o.wunsch) : '', num(o.pakete) || '', bestellText(S, o)].concat(ml ? [ml.checks[o.nr] || ''] : [])),
     rowClass: os.map(o => ml && (ml.checks[o.nr] || '').startsWith('reicht') ? 'rot' : '') });
-  return { title: `${terminTxt(x)}${gl.length ? ' – ' + gl.map(t => t.name).join(' + ') : ' – Tier gesucht'}`, sub: [`Stand ${fmtDate(todayISO())} · ${gv.anzahl} Bestellung${gv.anzahl === 1 ? '' : 'en'} · ${fmtNum(gv.pakete)} Genusspakete${x.notiz ? ' · ' + x.notiz : ''}`], blocks: bl, footer: fussZeile() };
+  const anz = os.length, pak = os.reduce((s, o) => s + num(o.pakete), 0);
+  return { title: `${terminTxt(x)}${gl.length ? ' – ' + gl.map(t => t.name).join(' + ') : ' – Tier gesucht'}`, sub: [`Stand ${fmtDate(todayISO())} · ${anz} Bestellung${anz === 1 ? '' : 'en'} · ${fmtNum(pak)} Genusspakete${x.notiz ? ' · ' + x.notiz : ''}`], blocks: bl, footer: fussZeile() };
 }
 const ords0 = x => ordersOfTermin(S, x);
 const fmtKgFehl = kg => fehlKgText(kg);
@@ -180,21 +182,35 @@ function viewTermin(id) {
   // Rechnen kann auf dem Tablet etwas dauern – Seite erst zeigen
   setTimeout(() => { if (location.hash.startsWith('#/termin/') && $('#tinhalt')) terminInhalt(x, gl, ords); }, 30);
 }
-function terminInhalt(x, gl, ords) {
+// Gewichtsvorschlag merken, solange sich Bestellungen/Einstellungen nicht ändern (seit 3.5.4 – auf dem Tablet sonst Sekunden je Klick)
+function gvGemerkt(x, gl, ords) {
+  const sig = JSON.stringify([ords.map(o => [o.nr, rangVon(o), o.pos, o.sonder, o.pakete]), gl.map(t => [t.name, t.typ, t.sg]), S.settings, S.artikel.map(a => [a.anteil, a.anteilRind, a.stueckG, a.beutelG]), statSig(S)]);
+  ui.gvCache = ui.gvCache || {};
+  const c = ui.gvCache[x.id];
+  if (c && c.sig === sig) return c.gv;
   const gv = gewichtsvorschlag(S, ords, gl.length || 1);
+  ui.gvCache[x.id] = { sig, gv };
+  return gv;
+}
+function terminInhalt(x, gl, ords) {
+  // Termin mit Tier: Gewichtsvorschlag nur auf Knopfdruck (das Tier steht ja schon fest) – Seite öffnet sofort
+  ui.gvZeigen = ui.gvZeigen || {};
+  const mitGv = !gl.length || ui.gvZeigen[x.id];
+  const gv = mitGv ? gvGemerkt(x, gl, ords) : null;
   // Probe: Vorgabe = Tiere des Termins, sonst der Vorschlag (Rind, wenn ein übliches Rind reicht, sonst Bulle)
   let p = ui.terminProbe[x.id];
+  if (!p && !gv) p = { typ: gl[0].typ === 'Bulle' ? 'Bulle' : 'Rind', sg: Math.round(gl.reduce((s, t) => s + sgRechnung(S, t), 0) / gl.length), n: gl.length };
   if (!p) {
     const R = gv.rind, B = gv.bulle;
     const v = R.mindest && R.n === 1 && R.mindest <= R.std * 1.15 ? R : B.mindest ? B : R;
     p = gl.length ? { typ: gl[0].typ === 'Bulle' ? 'Bulle' : 'Rind', sg: Math.round(gl.reduce((s, t) => s + sgRechnung(S, t), 0) / gl.length), n: gl.length }
       : { typ: v.typ, sg: Math.max(v.mindest ? Math.ceil(v.mindest / 5) * 5 : 0, v.typ === 'Bulle' ? num(S.settings.sgBulle) : num(S.settings.sgRind)), n: v.n || 1 }; // übliches Tier, schwerer nur wenn nötig
   }
-  const mgP = (p.typ === 'Bulle' ? gv.bulle : gv.rind);
+  const mgP = !gv ? false : (p.typ === 'Bulle' ? gv.bulle : gv.rind);
   const ml = ords.length ? terminMengenliste(S, ords, p.typ, p.sg, p.n, mgP) : null;
   const doc = docTermin(x, gv, ml);
   const freieTiere = tiereSortiert().filter(t => !gl.includes(t) && !kistenRows(S, t.name).length);
-  const vorschlagTyp = (gv.rind.mindest && gv.rind.n === 1 && gv.rind.mindest <= gv.rind.std * 1.15) ? 'Rind' : 'Bulle';
+  const vorschlagTyp = !gv ? '' : (gv.rind.mindest && gv.rind.n === 1 && gv.rind.mindest <= gv.rind.std * 1.15) ? 'Rind' : 'Bulle';
   $('#tinhalt').innerHTML = `<div class="spalten2"><div class="karte"><h3 style="margin-top:0">Termin</h3>
       <div class="zeile oben"><label class="f" style="width:200px">Datum<input class="feld" type="date" data-ch="tdatum" value="${esc(x.datum)}"></label><label class="f platz">Notiz<input class="feld" data-ch="tnotiz" value="${esc(x.notiz || '')}"></label></div>
       <div class="zeile oben" style="margin-top:10px;gap:18px">${[['zusageSchlachter', 'Zusage Schlachter'], ['zusageMetzger', 'Zusage Metzger']].map(([f, t]) => `<label class="zeile" style="gap:8px;align-items:center"><input type="checkbox" style="width:26px;height:26px;accent-color:var(--gruen-d)" data-ch="zusage" data-f="${f}"${x[f] ? ' checked' : ''}> <b>${t}</b> <span class="klein">${x[f] ? 'am ' + fmtDate(x[f]) : 'offen'}</span></label>`).join('')}</div>
@@ -207,7 +223,7 @@ function terminInhalt(x, gl, ords) {
       <label class="f" style="width:140px">Typ<select class="feld" data-ch="ptyp">${['Rind', 'Bulle'].map(v => opt(v, v, p.typ === v)).join('')}</select></label>
       <label class="f" style="width:200px">Schlachtgewicht je Tier (kg)<input class="feld zahl" inputmode="decimal" data-ch="psg" value="${fmtIn(p.sg)}"></label>
       <label class="f" style="width:140px">Anzahl Tiere<select class="feld" data-ch="pn">${[1, 2, 3, 4].map(v => opt(v, v, p.n === v)).join('')}</select></label>
-      <div style="margin-top:22px" class="knopfleiste"><button class="btn" data-act="pmin" data-t="Rind">Rind mit Mindestgewicht</button><button class="btn" data-act="pmin" data-t="Bulle">Bulle mit Mindestgewicht</button></div></div>
+      <div style="margin-top:22px" class="knopfleiste">${gv ? '<button class="btn" data-act="pmin" data-t="Rind">Rind mit Mindestgewicht</button><button class="btn" data-act="pmin" data-t="Bulle">Bulle mit Mindestgewicht</button>' : '<button class="btn" data-act="gvzeigen">Gewichtsvorschlag rechnen …</button>'}</div></div>
       ${ml ? `<p class="${ml.nicht.length || ml.stueck.length ? 'warn' : 'ok'}" style="margin:6px 0 0">${ml.nicht.length || ml.stueck.length ? `Reicht nicht für ${ml.nicht.length} Bestellung${ml.nicht.length === 1 ? '' : 'en'}${ml.nicht.length ? ': ' + ml.nicht.map(n => 'Nr. ' + (n.nrT || n.nr)).join(', ') : ''}` : 'Reicht für alle Bestellungen.'}</p>` : ''}</div>` : ''}
     ${kandidatenKarte(x)}${knopfTeilen()}${docHtml(doc)}`;
   kandidatenAktionen(x);
@@ -215,10 +231,12 @@ function terminInhalt(x, gl, ords) {
   ui.acts.ptyp = el => { p = Object.assign({}, p, { typ: el.value }); neuRechnen(); };
   ui.acts.psg = el => { const v = num(el.value); if (!(v > 0)) return meldung('Bitte ein Schlachtgewicht in kg eintragen.', true); p = Object.assign({}, p, { sg: v }); neuRechnen(); };
   ui.acts.pn = el => { p = Object.assign({}, p, { n: +el.value || 1 }); neuRechnen(); };
+  ui.acts.gvzeigen = () => { ui.gvZeigen[x.id] = true; $('#tinhalt').insertAdjacentHTML('afterbegin', '<div class="hinweis">Gewichtsvorschlag wird berechnet …</div>'); setTimeout(() => terminInhalt(x, gl, ords), 30); };
   ui.acts.pmin = el => { const v = el.dataset.t === 'Bulle' ? gv.bulle : gv.rind; if (!v.mindest) return meldung(`Mit bis zu 4 ${el.dataset.t === 'Bulle' ? 'Bullen' : 'Rindern'} reicht es nicht.`, true); p = { typ: v.typ, sg: v.mindest, n: v.n }; neuRechnen(); };
   ui.acts.liste = () => { ui.filter.tier = 'termin:' + x.id; ui.filter.archiv = false; gehe('#/bestellungen'); };
   ui.acts.tnotiz = el => { x.notiz = el.value.trim(); speichern(); meldung('Notiz gespeichert.'); };
-  ui.acts.zusage = el => { zusageSetzen(S, x.id, el.dataset.f, el.checked); speichern(); meldung(el.checked ? 'Zusage eingetragen.' : 'Zusage entfernt.'); terminInhalt(x, gl, ords); };
+  // Zusage: nur speichern und den Text daneben ändern – nichts neu rechnen (seit 3.5.4; vorher Sekunden je Haken, zweiter Haken ging verloren)
+  ui.acts.zusage = el => { zusageSetzen(S, x.id, el.dataset.f, el.checked); speichern(); const k = el.parentElement.querySelector('.klein'); if (k) k.textContent = el.checked ? 'am ' + fmtDate(x[el.dataset.f]) : 'offen'; meldung(el.checked ? 'Zusage eingetragen.' : 'Zusage entfernt.'); };
   ui.acts.tdatum = async el => {
     const neu = el.value; if (!neu || neu === x.datum) return;
     if (!(await frage('Datum ändern', `Abholtermin von ${fmtDate(x.datum)} auf <b>${fmtDate(neu)}</b> verlegen?${gl.length ? ' Die Tiere des Termins gehen mit.' : ''} Alle Bestellungen bleiben auf dem Termin.`, 'Verlegen', 'Abbrechen'))) { el.value = x.datum; return; }

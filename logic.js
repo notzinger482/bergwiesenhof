@@ -1135,6 +1135,12 @@ function probeStand(S, ords, typ, n) {
   return { T, namen, tiere, best };
 }
 function probeRechnen(P, sg) {
+  // gleiche Gewichte werden nur einmal gerechnet (seit 3.5.4 – die Suchen je Artikel laufen über dieselben Zwischenwerte)
+  P.memo = P.memo || new Map();
+  if (P.memo.has(sg)) return P.memo.get(sg);
+  const r = probeRechnenRoh(P, sg); P.memo.set(sg, r); return r;
+}
+function probeRechnenRoh(P, sg) {
   P.tiere.forEach(t => { t.sg = sg; });
   const t = P.namen.length > 1 ? topfAus(P.T, P.namen) : P.tiere[0];
   const bil = fleischBilanz(P.T, t, P.best), gw = ganzWunschFehlt(P.T, t, P.best);
@@ -1156,9 +1162,10 @@ function probeStueckFehler(S, P, r) {
   return f;
 }
 // kleinstes Schlachtgewicht (ganze kg, je Tier), bei dem ok(r) gilt – null, wenn auch PROBE_MAX_SG nicht reicht
-function probeMinSG(P, ok) {
-  if (!ok(probeRechnen(P, PROBE_MAX_SG))) return null;
-  let lo = 0, hi = PROBE_MAX_SG;
+function probeMinSG(P, ok, obergrenze) {
+  let hi = obergrenze && ok(probeRechnen(P, obergrenze)) ? obergrenze : PROBE_MAX_SG;
+  if (hi === PROBE_MAX_SG && !ok(probeRechnen(P, PROBE_MAX_SG))) return null;
+  let lo = 0;
   while (hi - lo > 1) { const m = Math.floor((lo + hi) / 2); if (ok(probeRechnen(P, m))) hi = m; else lo = m; }
   return hi;
 }
@@ -1166,10 +1173,13 @@ function probeMinSG(P, ok) {
 function mindestGewicht(S, ords, typ, n = 1) {
   const P = probeStand(S, ords, typ, n);
   const artikel = [];
-  for (const a of ausbeuteArtikel(S)) {
+  // erst das Gesamt-Minimum (alle Artikel), dann je Artikel nur noch darunter suchen (seit 3.5.4, schneller)
+  const arts = ausbeuteArtikel(S).filter(a => P.best.reduce((s, o) => s + qty(S, o, a.name), 0) + P.best.reduce((s, o) => s + num(o.pakete), 0) * paketKgArt(S, a.name) > 0.0001);
+  const alleOk = r => arts.every(a => probeArtOk(r, a.name));
+  const gesamt = probeMinSG(P, alleOk);
+  for (const a of arts) {
     const best = P.best.reduce((s, o) => s + qty(S, o, a.name), 0) + P.best.reduce((s, o) => s + num(o.pakete), 0) * paketKgArt(S, a.name);
-    if (!(best > 0.0001)) continue;
-    artikel.push({ art: a.name, bestellt: best, minSG: probeMinSG(P, r => probeArtOk(r, a.name)) });
+    artikel.push({ art: a.name, bestellt: best, minSG: probeMinSG(P, r => probeArtOk(r, a.name), gesamt) });
   }
   // Fettiges Hack braucht Siedfleisch, mageres den Bug – zählen über Hack/Siedfleisch/Braten oben mit.
   // Teilstück-Wünsche in kg (z. B. 3 kg aus der Kugel) hängen am Gewicht:
@@ -1226,9 +1236,10 @@ function terminMengenliste(S, ords, typ, sg, n = 1, mg0) {
   const r = probeRechnen(P, num(sg) > 0 ? num(sg) : sgRechnung(S, { typ }));
   const fehltArt = {};
   for (const f of Object.values(r.bil.fehlt)) for (const [k, v] of Object.entries(f)) fehltArt[k] = (fehltArt[k] || 0) + v;
-  const mg = mg0 && mg0.typ === typ && mg0.n === n ? mg0 : mindestGewicht(S, ords, typ, n);
-  const minArt = Object.fromEntries(mg.artikel.map(x => [x.art, x.minSG]));
-  const rows = mp.rows.filter(x => x.gesamt > 0.0001 || x.ausbeute > 0).map(x => Object.assign({}, x, { fehlt: fehltArt[x.art] || 0, minSG: minArt[x.art] !== undefined ? minArt[x.art] : null }));
+  // mg0 === false: ohne „reicht ab“ (Termin mit Tier, Gewichtsvorschlag nicht angefordert – seit 3.5.4)
+  const mg = mg0 === false ? null : mg0 && mg0.typ === typ && mg0.n === n ? mg0 : mindestGewicht(S, ords, typ, n);
+  const minArt = mg ? Object.fromEntries(mg.artikel.map(x => [x.art, x.minSG])) : {};
+  const rows = mp.rows.filter(x => x.gesamt > 0.0001 || x.ausbeute > 0).map(x => Object.assign({}, x, { fehlt: fehltArt[x.art] || 0, minSG: !mg ? undefined : minArt[x.art] !== undefined ? minArt[x.art] : null }));
   const nicht = ords.filter(o => (checks[o.nr] || '').startsWith('reicht')).map(o => ({ nr: o.nr, nrT: nrText(o), name: o.name, text: checks[o.nr] }));
   const hk = r.bil.hack;
   return { typ, sg: n * (num(sg) > 0 ? num(sg) : sgRechnung(S, { typ })), sgJe: num(sg) > 0 ? num(sg) : sgRechnung(S, { typ }), n, rows, summen: mp.summen, nicht, checks, mindest: mg,
