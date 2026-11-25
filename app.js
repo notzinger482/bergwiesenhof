@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.5';
+const APP_VERSION = '3.5.1';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '', archiv: false }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -564,6 +564,7 @@ function viewBestellung(nr, q, vorlage) {
     if (f === 'art') { s.art = el.value; if (!ganzArt(S, s.art)) { if (s.ganz) s.eingabe = ''; s.ganz = 0; } if (s.art !== BRATEN) s.teil = ''; if (s.art !== HACK) s.sorte = ''; neuZeichnen = true; }
     else if (f === 'ganz') { s.ganz = el.checked ? Math.max(1, Math.round(num(s.ganz))) : 0; s.eingabe = s.ganz ? String(s.ganz) : ''; neuZeichnen = true; }
     else if (f === 'menge') { s.eingabe = el.value; if (s.ganz) s.ganz = Math.max(0, Math.round(num(el.value))); }
+    else if (f === 'metzger') { if (el.checked) delete s.metzger; else s.metzger = false; }
     else { s[f] = el.value; if (f === 'teil' && s.ganz) neuZeichnen = true; }
     s.menge = sonderMengeIntern(s);
     // ganzes Stück: steht rechts noch nichts, die geschätzte Menge dort eintragen
@@ -654,7 +655,8 @@ function sonderZeile(s, i) {
     ${num(s.ganz) > 0 ? `<div class="klein" style="margin:-2px 0 6px;color:#777">${(() => { const g = ganzStueckKg(S, (ui.o || {}).tier, s.art, s.teil); return g ? `ganzes Stück je ca. ${fmtNum(g.kg, 1)} kg (mind. ${fmtNum(g.min, 1)} kg) – rechts die Menge passend eintragen` : 'bitte das Teilstück wählen'; })()}</div>` : ''}` : ''}
     <div class="zeile" style="flex-wrap:nowrap">
     <select class="feld sonder-sorte" style="width:250px;${s.art === HACK ? '' : 'display:none'}" data-in="sonder" data-f="sorte" title="fettig: zählt zur Hälfte als Siedfleisch · mager: zählt als Bugstück">${opt('', 'Hack normal', !s.sorte)}${opt('fettig', 'besonders fettig (½ Siedfleisch)', s.sorte === 'fettig')}${opt('mager', 'besonders mager (Bugstück)', s.sorte === 'mager')}</select>
-    <input class="feld" style="flex:1" data-in="sonder" data-f="wunsch" value="${esc(s.wunsch || '')}" placeholder="Wunsch / Vorgabe"></div></div>`;
+    <input class="feld" style="flex:1" data-in="sonder" data-f="wunsch" value="${esc(s.wunsch || '')}" placeholder="Wunsch / Vorgabe"></div>
+    <label class="zeile" style="gap:8px;align-items:center;margin-top:6px"><input type="checkbox" style="width:26px;height:26px;accent-color:var(--gruen-d)" data-in="sonder" data-f="metzger"${s.metzger === false ? '' : ' checked'}> <b>auf die Metzgerliste</b> <span class="klein">– ohne Haken: mache ich selbst (kommt aus der normalen Kiste, Hinweis beim Kommissionieren)</span></label></div>`;
 }
 async function bestellungSpeichern(o) {
   o.name = String(o.name || '').trim();
@@ -666,7 +668,7 @@ async function bestellungSpeichern(o) {
   const alt0 = o.nr ? S.bestellungen.find(x => x.nr === o.nr) : null;
   if (alt0 && (alt0.status || 'offen') !== 'offen' && (o.status || 'offen') === 'offen' && !(await frage('Status zurücksetzen', `Nr. ${nrText(o)} war <b>${esc(alt0.status)}</b> und wird wieder <b>offen</b>.<br><span class="klein">Lagerplatz${alt0.status === 'abgeholt' ? ', Abholdatum und „Bezahlung offen“' : ''} werden dabei gelöscht.</span>`, 'Auf offen setzen', 'Abbrechen', 'rot'))) return;
   // aufräumen
-  o.sonder = (o.sonder || []).filter(s => s.art).map(s => ({ art: s.art, menge: has(s.menge) ? s.menge : null, wunsch: (s.wunsch || '').trim(), ...(s.art === HACK && (s.sorte === 'fettig' || s.sorte === 'mager') ? { sorte: s.sorte } : {}), ...(s.art === BRATEN && s.teil ? { teil: s.teil } : {}), ...(num(s.ganz) > 0 && ganzArt(S, s.art) ? { ganz: Math.round(num(s.ganz)) } : {}) }));
+  o.sonder = (o.sonder || []).filter(s => s.art).map(s => ({ art: s.art, menge: has(s.menge) ? s.menge : null, wunsch: (s.wunsch || '').trim(), ...(s.art === HACK && (s.sorte === 'fettig' || s.sorte === 'mager') ? { sorte: s.sorte } : {}), ...(s.art === BRATEN && s.teil ? { teil: s.teil } : {}), ...(num(s.ganz) > 0 && ganzArt(S, s.art) ? { ganz: Math.round(num(s.ganz)) } : {}), ...(s.metzger === false ? { metzger: false } : {}) }));
   for (const [k, p] of Object.entries(o.pos)) {
     const a = art(S, k);
     if (!a) { delete o.pos[k]; continue; }

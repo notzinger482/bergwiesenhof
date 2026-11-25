@@ -265,7 +265,7 @@ function sonderOf(S, o) {
       let w = istWade(a, p) ? 'Wade am Stück' : 'am Stück';
       if (istWade(a, p)) { if (num(p.anzahl) > 0) w = `${fmtNum(p.anzahl)} ${num(p.anzahl) > 1 ? 'Waden' : 'Wade'} am Stück`; }
       else if (num(p.anzahl) > 0) w += ` (${fmtNum(p.anzahl)} Stück${num(p.g) > 0 ? ' à ' + fmtNum(p.g) + ' g' : ''})`;
-      out.push({ art: a.name, menge: q > 0 ? q : null, wunsch: w, auto: true });
+      out.push({ art: a.name, menge: q > 0 ? q : null, wunsch: w, auto: true, metzger: true }); // „am Stück“ immer auf die Metzgerliste
     }
   }
   for (const s of (o.sonder || [])) if (s && s.art) {
@@ -284,7 +284,7 @@ function sonderOf(S, o) {
       }
     }
     const teilTxt = nG ? (s.art === BRATEN ? `${nG === 1 ? '1 ganzes Stück' : nG + '× ganzes Stück'} ${teil}` : `${nG === 1 ? '1 ganzes' : nG + '× ganzes'} ${s.art}`) : teil ? 'aus ' + teil : '';
-    out.push({ art: s.art, menge, ca, soll, teil, ganz: nG, sorte: s.art === HACK && HACK_SORTEN[s.sorte] ? s.sorte : '',
+    out.push({ art: s.art, menge, ca, soll, teil, ganz: nG, sorte: s.art === HACK && HACK_SORTEN[s.sorte] ? s.sorte : '', metzger: s.metzger !== false,
       wunsch: [s.art === HACK && HACK_SORTEN[s.sorte] ? HACK_SORTEN[s.sorte] : '', teilTxt, s.wunsch || ''].filter(Boolean).join(' – ') });
   }
   return out;
@@ -331,7 +331,10 @@ function ganzWunschFehlt(S, t, ords) {
 // kg Braten, die eine Bestellung ausdrücklich aus dem Bug (Bug-Teilstück) wünscht
 const bugWunsch = (S, o) => sonderOf(S, o).filter(s => s.art === BRATEN && s.teil && (bratenTeile(S).find(x => x.name === s.teil) || {}).bug).reduce((t, s) => t + num(s.menge), 0);
 // je Bestellung: was davon als Sonderfall kommt (seit 3.2.5 bei ganzem Filet/Tafelspitz die rechts bestellte Menge – s.soll)
-const specSum = (S, o, name) => sonderOf(S, o).filter(s => s.art === name).reduce((t, s) => t + num(s.soll != null ? s.soll : s.menge), 0);
+// Sonderwünsche, die der Metzger vorbereitet (seit 3.5.1, Wunsch Nutzer: Häkchen „auf die Metzgerliste“; „am Stück“ immer).
+// Ohne Haken macht der Hof es selbst: die Menge kommt aus der normalen Kiste, beim Kommissionieren steht der Wunsch als Hinweis.
+const sonderMetzger = (S, o) => sonderOf(S, o).filter(s => s.metzger);
+const specSum = (S, o, name) => sonderMetzger(S, o).filter(s => s.art === name).reduce((t, s) => t + num(s.soll != null ? s.soll : s.menge), 0);
 // Hack-Sorte beim Sonderwunsch (seit 3.0.5, Regel Nutzer): „fettig“ = Siedfleisch-Anteil (Standard 50 %) + Rest Hack-Material,
 // „mager“ = reines Bugstück (aus dem Bug des Bratens). Die Menge bleibt Hackfleisch in der Bestellung (Preis, Sonderfall),
 // gerechnet wird sie aber gegen das Material, aus dem sie wirklich gemacht wird.
@@ -1564,7 +1567,7 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   const separat = [];
   // Kistennummer je Sonderfall aus dem gespeicherten Kistenplan (seit 3.2.1, Wunsch Nutzer) – wie beim Kommissionieren
   const skAlle = kistenKontext(S, tierName).rows.filter(k => k.art === SONDERKISTE), mitPlan = skAlle.length > 0;
-  for (const o of ords) for (const s of sonderOf(S, o)) {
+  for (const o of ords) for (const s of sonderMetzger(S, o)) {
     const a = art(S, s.art);
     const sk = num(s.menge) > 0 && !istOrgan(s.art) ? skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null : null;
     separat.push({ nr: o.nr, nrT: nrText(o), name: o.name, art: s.art, kiste: sk ? sk.nr : null, // ganze Stücke ohne Gewicht (seit 3.2.4, Wunsch Nutzer): der Metzger gibt das ganze Stück, das Gewicht ist nur eine Schätzung
@@ -1730,7 +1733,7 @@ const SONDER_MAX = 30; // Kiste mit Sonderfällen: höchstens 30 kg
 function sonderTeile(S, ords) {
   const T = [];
   ords.forEach((o, k) => {
-    const L = sonderOf(S, o).filter(s => { const a = art(S, s.art); return a && a.einheit === 'kg' && num(s.menge) > 0 && !istOrgan(s.art); })
+    const L = sonderMetzger(S, o).filter(s => { const a = art(S, s.art); return a && a.einheit === 'kg' && num(s.menge) > 0 && !istOrgan(s.art); })
       .map(s => ({ key: o.nr + '|' + s.art, nr: o.nr, kg: num(s.menge) }));
     if (!L.length) return;
     const sum = L.reduce((x, s) => x + s.kg, 0);
@@ -1786,7 +1789,7 @@ function packplanKisten(S, tierName, f = 1) {
   // Sonderwünsche je Bestellung und gesamt
   const specT = {}; let specTier = 0;
   const specO = {};
-  for (const o of ords) for (const s of sonderOf(S, o)) {
+  for (const o of ords) for (const s of sonderMetzger(S, o)) {
     specT[s.art] = (specT[s.art] || 0) + num(s.menge);
     specO[o.nr + '|' + s.art] = (specO[o.nr + '|' + s.art] || 0) + num(s.soll != null ? s.soll : s.menge);
     const a = art(S, s.art);
@@ -1847,7 +1850,7 @@ function packplanKisten(S, tierName, f = 1) {
         for (let n = 0; n < gz; n++) stuecke.push({ name: a.art, kg: y / gz, bug: false });
       }
       // Sonderwünsche: ganze Stücke und kg aus einem Teilstück liegen beim Sonderfall – diese Stücke gehen hier ab
-      for (const o of ords) for (const s of sonderOf(S, o)) {
+      for (const o of ords) for (const s of sonderMetzger(S, o)) {
         if (s.art !== a.art) continue;
         const nm = a.art === BRATEN ? s.teil : a.art;
         if (!nm) continue;
@@ -2170,7 +2173,7 @@ function kistenCalc(S, tierName) {
     const sk = k.art === SONDERKISTE;
     const verplant = sk ? num(k.kg) : Math.max(0, Math.min(start + num(k.kg), bedarf) - start);
     const a = art(S, k.art);
-    const sonderInhalt = k.art === SONDERKISTE ? ords.flatMap(o => sonderOf(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art) && (!k.sonder || k.sonder.includes(o.nr + '|' + s.art))).map(s => `Nr. ${o.nr}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
+    const sonderInhalt = k.art === SONDERKISTE ? ords.flatMap(o => sonderMetzger(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art) && (!k.sonder || k.sonder.includes(o.nr + '|' + s.art))).map(s => `Nr. ${o.nr}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
     return { k, start, anteil, bedarf: sk ? num(k.kg) : bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: sonderInhalt || (k.info ? k.info : a && k.art !== HACK ? a.teile : '') };
   });
 }
@@ -2309,6 +2312,12 @@ function kommissionierung(S, nr) {
     for (const s of sonderOf(S, o)) {
       si++;
       if (!(num(s.menge) > 0) || istOrgan(s.art)) continue;
+      if (!s.metzger) { // mache ich selbst: aus der normalen Kiste, Hinweis an die Pick-Zeile dieses Artikels
+        const pz = picks.find(p => p.art === s.art && !p.sonderfall && !p.hackTisch && !p.innTisch) || picks.find(p => p.art === s.art && !p.sonderfall);
+        const txt = `SELBST: ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' „' + s.wunsch + '“' : ''} zuschneiden`;
+        if (pz) pz.verpacken = (pz.verpacken ? pz.verpacken + ' · ' : '') + txt;
+        continue;
+      }
       const a = art(S, s.art);
       const sk = skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null;
       picks.push({ kiste: sk ? sk.nr : null, sonderfall: true, key: 'S' + si + '|' + s.art, menge: r2(num(s.soll != null ? s.soll : s.menge)), roh: 0, einheit: a ? a.einheit : 'kg', art: s.art,
@@ -2318,7 +2327,7 @@ function kommissionierung(S, nr) {
   }
   rows.forEach(r => { r.ausKisten = picks.filter(p => p.art === r.art).reduce((s, p) => s + p.roh, 0); r.fehlt = istOrgan(r.art) ? 0 : (r.bedarf - r.ausKisten > 0.05 ? r.bedarf - r.ausKisten : 0); });
   const innereien = ORGANE.map(n => { const q = qty(S, o, n); const a = art(S, n); return q > 0 ? `${fmtNum(q, 3)} ${a ? a.einheit : ''} ${n}` : ''; }).filter(Boolean);
-  const sonder = sonderOf(S, o).map(s => sonderText(S, s));
+  const sonder = sonderOf(S, o).map(s => sonderText(S, s) + (s.metzger ? '' : ' (selbst)'));
   // Ist-Werte (seit 3.1): je Pick-Zeile gespeichert (o.komm[key]); Hack/Innereien nur abhaken
   for (const p of picks) {
     if (!p.key) p.key = (p.hackTisch ? 'H' : p.kiste === null ? '-' : p.kiste) + '|' + p.art;
@@ -2561,7 +2570,7 @@ if (typeof module !== 'undefined') module.exports = {
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
   mengenpruefung, metzgerauftrag, topfTier, topfAus, topfN, ordersOfTopf, tierAnzeige, kistenKontext, abschlussNamen, mengencheckT, TOPF_SEP, packplan, packplanUebernehmen, packplanGruppe, abholGruppe, kistenRows, kistenTiere, SONDERKISTE, bestellFingerabdruck, kistenplanVeraltet, kistenZuruecksetzen, kistenGewogenAnzahl, kistenCalc, tierAbschliessen,
   kommissionierung, hackZettel, innereien, packliste, hofladenSummen, leererStand, bewegungsdatenLeeren, standPruefen,
-  terminZiele, zielTermin, zielVon, zielText, zielSetzen, passtAufZiel, terminAuto, naechsterTermin, terminFehlmengen, nrText, vorziehKandidaten, vorziehen, terminObergrenze,
+  sonderMetzger, terminZiele, zielTermin, zielVon, zielText, zielSetzen, passtAufZiel, terminAuto, naechsterTermin, terminFehlmengen, nrText, vorziehKandidaten, vorziehen, terminObergrenze,
   tierText, termine, terminById, terminAm, istTerminWarte, terminTiere, terminArchivTiere, terminVon, ordersOfTermin, termineAbgleichen, terminBinden, terminAnlegen, terminDatumAendern, terminLoeschen, terminTierZuordnen, terminVorschlag,
   gewichtsvorschlag, mindestGewicht, terminMengenliste, siedHackAnteil, fleischBilanz, SIED, BRATEN,
   HACK, GULASCH, ORGANE, OCHS, ochsGanz, anteilRef, teilKgRef, ausbeuteStatistik, gemessen, gemessenRoh, ausbeuteTier, erfassungSumme, preislisten, preislisteAm, preisFestsetzen, preisBleibtFest, preisDatum, artPreis, paketPreisKg, vakPreisPaket, preiseAbgleichen, preislisteAus, kistenAusbeute, kisteGewogen, KISTEN_AUSBEUTE, archivStandFesthalten, zaehltStatistik, STAT_MIN_TIERE, setDefaults: d => { global.DEFAULTS = d; }
