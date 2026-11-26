@@ -568,13 +568,16 @@ function felderAusKisten(tn) {
     return { name: f.name, belegt: liste.length, hoehe: num(f.hoehe), kisten: liste.map((k, i) => ({ nr: k.nr, text: k.teile.join(' + '), oben: i === 0, gewogen: k.gewogen })) };
   });
 }
+// Lage eines Felds in der Draufsicht (Reihe 1 = vorne … 3 = hinten, Spalte 1 = links … 3 = rechts)
+function autoPos(name) {
+  const n = String(name).toLowerCase();
+  const reihe = n.includes('vorne') ? 1 : n.includes('mitte') && !n.startsWith('hinten') ? 2 : n.includes('hinten') ? 3 : 0;
+  const sp = n.includes('links') ? 1 : n.includes('rechts') ? 3 : 2;
+  return { reihe, sp };
+}
+const autoSpalte = p => p.reihe === 3 ? (p.sp === 1 ? '1 / span 3' : '4 / span 3') : (p.sp - 1) * 2 + 1 + ' / span 2';
 function autoDraufsicht(felderIn, kompakt) {
-  const pos = name => {
-    const n = name.toLowerCase();
-    const reihe = n.includes('vorne') ? 1 : n.includes('mitte') && !n.startsWith('hinten') ? 2 : n.includes('hinten') ? 3 : 0;
-    const sp = n.includes('links') ? 1 : n.includes('rechts') ? 3 : 2;
-    return { reihe, sp };
-  };
+  const pos = autoPos;
   const hp = S.settings.hackPlatz || 'vorne rechts';
   const felder = felderIn.map(f => ({ ...f, p: pos(f.name) }));
   const zelle = f => `<div class="auto-feld ${f.kisten.length ? '' : 'leer'}" style="grid-row:${f.p.reihe + 1};grid-column:${f.p.reihe === 3 ? (f.p.sp === 1 ? '1 / span 3' : '4 / span 3') : (f.p.sp - 1) * 2 + 1 + ' / span 2'}"><div class="fn">${esc(f.name)} <span class="klein">${f.belegt}/${f.hoehe}${sameText(f.name, hp) ? ' · Hack' : ''}</span></div>${f.kisten.map(k => `<div class="ak${k.gewogen ? ' gw' : ''}"><b>K${k.nr}</b> ${esc(k.text)}</div>`).join('')}</div>`;
@@ -764,13 +767,27 @@ function tabKistenHand(tn, ziel) {
           <p class="klein">Zeile mit Artikel „Sonderfälle (beschriftet)“ anlegen und dort „Sonderfälle wählen“.</p></div>` : ''}
         <div class="karte klein">So geht's: Kiste füllen, dann je Artikel eine Zeile – z. B. Kiste 1 · Filet · 2 Stk, „+“, Kiste 1 · Braten · Kugel · 2 Stk. Braten nach Teilstück, Steak/Rouladen/Rostbraten/Beinscheiben in Stück, Gulasch/Siedfleisch in ca. kg, Knochen in Beuteln. Menge leer = unbekannt. Gewicht ist freiwillig – gewogene Hack- und Knochenkisten zählen wieder für die Ausbeute-Statistik. Beim Kommissionieren zeigt die App, wer aus welcher Kiste nimmt; ist eine Kiste früher leer, dort „Kiste leer“ antippen.</div></div></div>`;
   } else {
-    h += `<div class="kistenlayout"><div>${autoDraufsicht(felderAusKisten(isG ? gruppe : tn), true)}</div>
-      <div class="karte" style="padding:0"><div class="tabwrap" style="border:none"><table class="tab ktab"><thead><tr><th class="r">Kiste</th><th>Inhalt</th><th>Platz im Auto</th></tr></thead><tbody>
-      ${nummern.map(n => { const ks = rows.filter(k => k.nr === n), p = ks[0].platz || '';
-        return `<tr data-nr="${n}"><td class="r fett" style="font-size:22px;width:60px">${n}</td><td>${esc(ks.map(k => handZeileText(S, k)).join(' + '))}</td>
-        <td style="width:200px"><select class="feld" style="min-width:190px" data-ch="hplatz">${stellplatzOptionen(p)}</select></td></tr>`; }).join('') || '<tr><td colspan="3" class="klein" style="padding:16px">Erst unter „1 · Kisten füllen“ Kisten eintragen.</td></tr>'}
-      </tbody></table></div>
-      <p class="klein" style="margin:8px 12px">Je Kiste den Platz wählen (Feld und Ebene, „oben“ = oberste Kiste). Die Draufsicht zeigt, was wo steht.</p></div></div>`;
+    // seit 3.7.1: Kisten aufs Feld ziehen (Maus oder Finger) – im Feld wird von unten nach oben gestapelt
+    const inhaltVon = n => rows.filter(k => k.nr === n).map(k => handZeileText(S, k)).join(' + ');
+    const sel = ui.kSel && nummern.includes(ui.kSel) ? ui.kSel : null;
+    const chip = (n, e) => `<div class="kchip${sel === n ? ' sel' : ''}" data-act="kwahl" data-knr="${n}"${e ? ` data-e="${e}"` : ''}><b>K${n}</b> <span>${esc(inhaltVon(n))}</span></div>`;
+    const imAuto = new Set();
+    const hp = S.settings.hackPlatz || 'vorne rechts';
+    const felder = S.auto.map(f => { const st = autoStapel(S, rows, f.name); st.forEach(n => imAuto.add(n)); return { f, st, h: Math.max(1, Math.round(num(f.hoehe)) || 4), p: autoPos(f.name) }; });
+    const draussen = nummern.filter(n => !imAuto.has(n));
+    const feldHtml = x => `<div class="auto-feld dz${x.st.length ? '' : ' leer'}${x.st.length >= x.h ? ' voll' : ''}" data-act="kfeld" data-feld="${esc(x.f.name)}" style="grid-row:${x.p.reihe + 1};grid-column:${autoSpalte(x.p)}">
+      <div class="fn">${esc(x.f.name)} <span class="klein">${x.st.length}/${x.h}${sameText(x.f.name, hp) ? ' · Hack' : ''}</span></div>
+      <div class="stapel">${x.st.map((n, i) => chip(n, i + 1)).join('')}${Array.from({ length: Math.max(0, x.h - x.st.length) }, () => '<div class="kfrei"></div>').join('')}</div></div>`;
+    const gridOk = felder.every(x => x.p.reihe);
+    h += `<div id="autoDnd" class="dndlayout">
+      <div class="karte dz kablagekarte" data-act="kaus" data-dz="aus"><h3 style="margin-top:0">Noch nicht im Auto <span class="klein">(${draussen.length} von ${nummern.length})</span></h3>
+        <div class="kablage">${draussen.map(n => chip(n)).join('') || `<span class="klein">${nummern.length ? 'Alle Kisten stehen im Auto. Zum Herausnehmen eine Kiste hierher ziehen.' : 'Erst unter „1 · Kisten füllen“ Kisten eintragen.'}</span>`}</div></div>
+      <div class="karte" style="margin:0"><h3 style="margin-top:0">Auto <span class="klein">(oben = vorne · im Feld unten = unterste Kiste)</span></h3>
+        ${gridOk ? `<div class="zeile oben" style="flex-wrap:nowrap"><div class="auto-grid dnd" style="grid-template-columns:repeat(6,1fr);flex:1;max-width:none">
+          <div class="auto-tuer" style="grid-row:1;grid-column:1 / -1">— Fahrerhaus / vorne —</div>${felder.map(feldHtml).join('')}
+          <div class="auto-tuer" style="grid-row:5;grid-column:1 / -1">— Tür hinten —</div></div><div class="klein" style="writing-mode:vertical-rl;align-self:center">rechte Tür ▸</div></div>`
+          : `<div class="auto-grid dnd">${felder.map(x => feldHtml(Object.assign({}, x, { p: { reihe: 0, sp: 1 } }))).join('').replace(/style="grid-row:1;grid-column:[^"]*"/g, '')}</div>`}
+        <p class="klein" style="margin:8px 0 0">Kiste mit dem Finger aufs Feld ziehen – sie kommt oben auf den Stapel, die erste Kiste steht unten. Auf eine Kiste ziehen = an ihre Stelle, die anderen rutschen hoch. Zurück in „Noch nicht im Auto“ ziehen = aus dem Auto. Geht auch mit Antippen: erst die Kiste, dann das Feld.</p></div></div>`;
   }
   ziel.innerHTML = h;
   const find = id => S.kisten.find(k => k.id === +id);
@@ -822,7 +839,58 @@ function tabKistenHand(tn, ziel) {
     for (const r of ctx.rows) if (r !== k && r.art === SONDERKISTE && r.sonder) r.sonder = r.sonder.filter(x => !neu.includes(x));
     k.sonder = neu; speichern(); render();
   };
-  ui.acts.hplatz = el => { const n = +el.closest('tr').dataset.nr; for (const k of rows) if (k.nr === n) k.platz = el.value; speichern(); render(); };
+  // Auto beladen: Ablegen (Ziehen oder Antippen)
+  const stellen = (nr, feldName, anNr) => {
+    if (anNr === nr) { render(); return; }
+    const f = kisteStellen(S, rows, nr, feldName, anNr);
+    if (f) { meldung(f, true); render(); return; }
+    ui.kSel = null; speichern(); render();
+  };
+  ui.acts.kwahl = el => {
+    if (Date.now() - (ui.kZiehZeit || 0) < 400) return; // Klick direkt nach dem Ziehen ignorieren
+    const n = +el.dataset.knr;
+    if (ui.kSel && ui.kSel !== n && el.closest('[data-feld]')) return stellen(ui.kSel, el.closest('[data-feld]').dataset.feld, n);
+    ui.kSel = ui.kSel === n ? null : n; render();
+  };
+  ui.acts.kfeld = el => { if (Date.now() - (ui.kZiehZeit || 0) < 400 || !ui.kSel) return; stellen(ui.kSel, el.dataset.feld); };
+  ui.acts.kaus = () => { if (Date.now() - (ui.kZiehZeit || 0) < 400 || !ui.kSel) return; stellen(ui.kSel, ''); };
+  const dnd = $('#autoDnd');
+  if (dnd) {
+    let z = null;
+    const zielUnter = (x, y) => { const el = document.elementFromPoint(x, y); if (!el) return null;
+      const c = el.closest('[data-feld] .kchip'), f = el.closest('[data-feld]'), a = el.closest('[data-dz="aus"]');
+      return f ? { feld: f.dataset.feld, an: c ? +c.dataset.knr : null, el: f } : a ? { feld: '', el: a } : null; };
+    const markieren = t => { dnd.querySelectorAll('.dz.ueber').forEach(e => e.classList.remove('ueber')); if (t) t.el.classList.add('ueber'); };
+    const ende = () => { if (z && z.geist) z.geist.remove(); if (z && z.el) z.el.classList.remove('zieht'); markieren(null); z = null; };
+    dnd.addEventListener('pointerdown', e => {
+      const c = e.target.closest('.kchip'); if (!c || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      z = { nr: +c.dataset.knr, el: c, x: e.clientX, y: e.clientY, id: e.pointerId, geist: null };
+    });
+    dnd.addEventListener('pointermove', e => {
+      if (!z || e.pointerId !== z.id) return;
+      if (!z.geist) {
+        if (Math.hypot(e.clientX - z.x, e.clientY - z.y) < 8) return;
+        const r = z.el.getBoundingClientRect();
+        z.geist = z.el.cloneNode(true); z.geist.classList.add('geist'); z.geist.style.width = Math.min(r.width, 260) + 'px';
+        document.body.appendChild(z.geist); z.el.classList.add('zieht');
+        try { z.el.setPointerCapture(e.pointerId); } catch (x) { }
+      }
+      e.preventDefault();
+      // am Bildschirmrand weiterrollen, damit auch Felder außerhalb erreichbar sind
+      const dy = e.clientY > innerHeight - 70 ? 18 : e.clientY < 120 ? -18 : 0;
+      if (dy) { let sc = dnd.parentElement; while (sc && sc !== document.body && !(sc.scrollHeight > sc.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(sc).overflowY))) sc = sc.parentElement;
+        (sc && sc !== document.body ? sc : document.scrollingElement).scrollBy(0, dy); }
+      z.geist.style.left = (e.clientX - 20) + 'px'; z.geist.style.top = (e.clientY - 20) + 'px';
+      markieren(zielUnter(e.clientX, e.clientY));
+    });
+    dnd.addEventListener('pointerup', e => {
+      if (!z || e.pointerId !== z.id) return;
+      if (!z.geist) { z = null; return; } // nur angetippt → Klick wählt aus
+      const t = zielUnter(e.clientX, e.clientY), nr = z.nr; ende(); ui.kZiehZeit = Date.now();
+      if (t) stellen(nr, t.feld, t.an); else render();
+    });
+    dnd.addEventListener('pointercancel', ende);
+  }
   const teilen = async d => { const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
   const kistenDoc = () => docKistenHand(tp && tp.glieder ? tp.name : tn, kistenCalc(S, tn), tp || t);
   ui.acts.teilenKisten = () => teilen(kistenDoc());

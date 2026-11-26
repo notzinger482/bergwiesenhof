@@ -353,3 +353,24 @@ td .btn.klein + .btn.klein { margin-left: 0; margin-top: 8px; }
 /* Sortieren per Spaltenkopf (3.5.3) */
 .tab th.sortierbar, .doc-tab th.sortierbar { cursor: pointer; user-select: none; white-space: nowrap; }
 .tab th.sortierbar:active, .doc-tab th.sortierbar:active { background: #eef3e4; }
+
+/* Auto beladen per Ziehen (seit 3.7.1) */
+.kchip { background: #fff; border: 2px solid var(--braun-h); border-radius: 8px; padding: 6px 8px; font-size: 13px; line-height: 1.25; cursor: grab; touch-action: none; user-select: none; -webkit-user-select: none; }
+.kchip b { font-size: 17px; color: var(--braun); margin-right: 4px; }
+.kchip.sel { border-color: var(--gruen-d); box-shadow: 0 0 0 3px rgba(60,120,40,.3); }
+.kchip.zieht { opacity: .35; }
+.kchip.geist { position: fixed; z-index: 1000; pointer-events: none; opacity: .92; box-shadow: 0 6px 18px rgba(0,0,0,.3); }
+.kablage { display: flex; flex-wrap: wrap; gap: 8px; min-height: 48px; }
+.kablage .kchip { max-width: 260px; }
+.dndlayout { display: grid; grid-template-columns: 250px 1fr; gap: 12px; align-items: start; }
+.kablagekarte { margin: 0; position: sticky; top: 66px; max-height: calc(100vh - 80px); overflow-y: auto; }
+.kablagekarte .kablage { flex-direction: column; flex-wrap: nowrap; }
+@media (max-width: 900px) { .dndlayout { grid-template-columns: 1fr; } .kablagekarte { position: static; max-height: none; } .kablagekarte .kablage { flex-direction: row; flex-wrap: wrap; } }
+.auto-grid.dnd { gap: 6px; }
+.auto-grid.dnd .auto-feld { min-height: 120px; padding: 6px; display: flex; flex-direction: column; }
+.auto-feld .stapel .kchip { padding: 3px 6px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.auto-feld .stapel .kchip b { font-size: 15px; }
+.auto-feld .stapel { display: flex; flex-direction: column-reverse; gap: 4px; flex: 1; }
+.auto-feld .kfrei { border: 1px dashed #d8cbb8; border-radius: 6px; min-height: 22px; }
+.auto-feld.voll .fn .klein { color: var(--rot, #b33); font-weight: 700; }
+.dz.ueber { outline: 3px solid var(--gruen-d); outline-offset: 2px; background: #eef7e8; }

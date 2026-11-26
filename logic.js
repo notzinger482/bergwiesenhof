@@ -2466,6 +2466,42 @@ function kistenCalcHand(S, tierName, rows, ords) {
       teile: sonderInhalt || (k.teil ? k.teil : k.info || '') };
   });
 }
+// Auto beladen per Ziehen (seit 3.7.1): Kisten stapeln sich im Feld von unten nach oben.
+// Platztext wie bisher: „Feld, 1. v. u.“ … oberste mögliche Ebene = „Feld, oben“.
+const platzFeld = p => String(p || '').split(',')[0].trim();
+const platzEbeneRoh = p => /oben/.test(p || '') ? 99 : num((/(\d+)\./.exec(p || '') || [])[1]);
+const platzText = (feld, ebene, hoehe) => ebene >= hoehe ? `${feld}, oben` : `${feld}, ${ebene}. v. u.`;
+// Kistennummern eines Felds von unten nach oben
+function autoStapel(S, rows, feldName) {
+  const m = new Map();
+  for (const k of rows) if (k.platz && sameText(platzFeld(k.platz), feldName)) { const e = platzEbeneRoh(k.platz); if (!m.has(k.nr) || e < m.get(k.nr)) m.set(k.nr, e); }
+  return [...m.entries()].sort((a, b) => a[1] - b[1] || a[0] - b[0]).map(x => x[0]);
+}
+function autoStapelSchreiben(S, rows, feldName, nrs) {
+  const f = S.auto.find(x => sameText(x.name, feldName)); const h = Math.max(1, Math.round(num(f && f.hoehe)) || 4);
+  nrs.forEach((nr, i) => { for (const k of rows) if (k.nr === nr) k.platz = platzText(f ? f.name : feldName, i + 1, h); });
+}
+// Kiste nr ins Feld stellen: ohne anNr oben drauf, mit anNr an deren Stelle (die Kiste anNr und alles darüber rutscht eins hoch).
+// feldName leer = aus dem Auto nehmen. Gibt einen Fehlertext zurück oder null.
+function kisteStellen(S, rows, nr, feldName, anNr) {
+  const alt = (rows.find(k => k.nr === nr && k.platz) || {}).platz || '';
+  const altFeld = alt ? (S.auto.find(x => sameText(x.name, platzFeld(alt))) || null) : null;
+  if (feldName) {
+    const f = S.auto.find(x => sameText(x.name, feldName)); if (!f) return 'Feld nicht gefunden.';
+    const h = Math.max(1, Math.round(num(f.hoehe)) || 4);
+    const st = autoStapel(S, rows, f.name).filter(n => n !== nr);
+    if (st.length >= h) return `${f.name} ist voll (${h} Kisten).`;
+    const j = anNr ? st.indexOf(anNr) : -1, i = j >= 0 ? j : st.length;
+    st.splice(i, 0, nr);
+    for (const k of rows) if (k.nr === nr) k.platz = '';
+    if (altFeld && altFeld !== f) autoStapelSchreiben(S, rows, altFeld.name, autoStapel(S, rows, altFeld.name));
+    autoStapelSchreiben(S, rows, f.name, st);
+  } else {
+    for (const k of rows) if (k.nr === nr) k.platz = '';
+    if (altFeld) autoStapelSchreiben(S, rows, altFeld.name, autoStapel(S, rows, altFeld.name));
+  }
+  return null;
+}
 // Tier abgeschlossen: Reste an Hofladen, Kisten leeren
 // Topf (gemeinsame Kisten): alle Tiere des Topfs werden zusammen abgeschlossen
 const abschlussNamen = (S, tierName) => { const c = kistenKontext(S, tierName); return c.topf ? c.t.glieder.slice() : [tierName]; };
@@ -2859,7 +2895,7 @@ function standPruefen(x) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
+  autoStapel, kisteStellen, platzText, num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, statSigNeu, teilBleibtEtwas, sonderAnpassen, ganzMehr, nameKey, bezugstermin, erfassungLuecken, statistikGrund, unvollstaendig, topfGemischt, innPickAbgleich, innOkUmschalten, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
   nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
