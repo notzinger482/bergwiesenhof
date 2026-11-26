@@ -1063,7 +1063,7 @@ function kistenplaeneAktualisieren(S, namen) {
   for (const n of liste) {
     if (erledigt.has(n)) continue;
     const g = abholGruppe(S, n);
-    if (kistenGewogenAnzahl(S, g) || kommissionierBegonnen(S, g)) { g.forEach(x => erledigt.add(x)); continue; }
+    if (kistenGewogenAnzahl(S, g) || kommissionierBegonnen(S, g) || g.some(x => kistenRows(S, x).some(istHandZeile))) { g.forEach(x => erledigt.add(x)); continue; } // Kisten von Hand nie automatisch ersetzen
     g.forEach(x => erledigt.add(x));
     kistenZuruecksetzen(S, g);
     if (!g.some(x => ordersOfTier(S, x).length)) { weg.push(g.join(' + ')); continue; }
@@ -1655,7 +1655,7 @@ function metzgerauftrag(S, tierName, hackKisteKg) {
   hack.kistenText = hackKistenText(hTeile);
   const separat = [];
   // Kistennummer je Sonderfall aus dem gespeicherten Kistenplan (seit 3.2.1, Wunsch Nutzer) – wie beim Kommissionieren
-  const skAlle = kistenKontext(S, tierName).rows.filter(k => k.art === SONDERKISTE), mitPlan = skAlle.length > 0;
+  const skAlle = kistenKontext(S, tierName).rows.filter(k => k.art === SONDERKISTE), mitPlan = skAlle.some(k => !k.hand || (k.sonder || []).length);
   for (const o of ords) for (const s of sonderMetzger(S, o)) {
     const a = art(S, s.art);
     const sk = num(s.menge) > 0 && !istOrgan(s.art) ? skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null : null;
@@ -1763,11 +1763,18 @@ function hofTraeger(S, tierName) { const c = kistenKontext(S, tierName); return 
 function hofListe(S, tierName) {
   const T = hofTraeger(S, tierName); if (!T) return [];
   const packs = T.hofPacks || [], fertig = T.hofFertig || {};
-  return kistenCalc(S, tierName).filter(c => c.rest > 0.05 && c.k.art !== HACK && c.k.art !== SONDERKISTE && !istOrgan(c.k.art)).map(c => {
+  // Kisten von Hand (seit 3.7): Rest geschätzt (ohne Menge: unbekannt → trotzdem anzeigen), Zeilen derselben Kiste + Artikel zusammen
+  const out = [];
+  for (const c of kistenCalc(S, tierName)) {
+    if (c.k.art === HACK || c.k.art === SONDERKISTE || istOrgan(c.k.art) || c.k.leer) continue;
+    if (!(c.rest > 0.05) && !(c.hand && c.ohneMenge) && !(c.restStk > 0)) continue;
     const key = c.k.nr + '|' + c.k.art, pk = packs.filter(x => x.key === key);
-    return { key, kiste: c.k.nr, art: c.k.art, rest: c.rest, einheit: c.einheit, platz: c.k.platz || '', regel: hofRegel(S, c.k.art), regelText: hofRegelText(S, c.k.art),
-      packs: pk, kg: pk.reduce((s, x) => s + num(x.kg), 0), fertig: !!fertig[key] };
-  });
+    const da = out.find(x => x.key === key);
+    if (da) { da.rest = da.rest === null || c.rest === null ? null : da.rest + c.rest; if (has(c.restStk)) da.restStk = num(da.restStk) + c.restStk; if (c.k.teil && !da.teile.includes(c.k.teil)) da.teile.push(c.k.teil); continue; }
+    out.push({ key, kiste: c.k.nr, art: c.k.art, rest: c.rest, restStk: has(c.restStk) ? c.restStk : null, teile: c.k.teil ? [c.k.teil] : [], einheit: c.einheit, platz: c.k.platz || '', regel: hofRegel(S, c.k.art), regelText: hofRegelText(S, c.k.art),
+      packs: pk, kg: pk.reduce((s, x) => s + num(x.kg), 0), fertig: !!fertig[key] });
+  }
+  return out;
 }
 function hofPackDazu(S, tierName, key, p) {
   const T = hofTraeger(S, tierName); if (!T) return null;
@@ -2214,6 +2221,7 @@ function bestellFingerabdruck(S, tierName) {
 function kistenplanVeraltet(S, tierName) {
   const rows = kistenRows(S, tierName);
   if (!rows.length) return null;
+  if (rows.some(istHandZeile)) return null; // Kisten von Hand (seit 3.7): kein Plan, der veralten kann
   if (kommissionierBegonnen(S, [tierName])) return null; // Plan gesperrt – Kisten sind schon im Haus
   const pp = S.packplaene && S.packplaene[tierName];
   const namen = pp && pp.tiere ? pp.tiere : [...new Set(rows.flatMap(keyNamen))];
@@ -2251,6 +2259,7 @@ function anteilJePaket(S, t, artName) { return paketKgArt(S, artName); }
 // Berechnung Kistenblatt: je Zeile Start, Bedarf, verplant, Rest
 function kistenCalc(S, tierName) {
   const { t, rows, ords } = kistenKontext(S, tierName);
+  if (handModus(rows)) return kistenCalcHand(S, tierName, rows, ords);
   const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
   const startMap = {};
   return rows.map(k => {
@@ -2264,6 +2273,190 @@ function kistenCalc(S, tierName) {
     const a = art(S, k.art);
     const sonderInhalt = k.art === SONDERKISTE ? ords.flatMap(o => sonderMetzger(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art) && (!k.sonder || k.sonder.includes(o.nr + '|' + s.art))).map(s => `Nr. ${nrText(o)}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
     return { k, start, anteil, bedarf: sk ? num(k.kg) : bedarf, verplant, rest: num(k.kg) - verplant, einheit: a ? a.einheit : '', teile: sonderInhalt || (k.info ? k.info : a && k.art !== HACK ? a.teile : '') };
+  });
+}
+// ---------- Kisten von Hand (seit 3.7, Wunsch Nutzer 26.11. nach dem ersten echten Abholtermin) ----------
+// Beim Metzger ist keine Zeit zum Wiegen, die automatische Verteilung passte nicht. Der Nutzer füllt die Kisten selbst
+// (Gleichartiges zusammen, Sonderfälle der Reihe nach), trägt Zeile für Zeile ein „Kiste 1 – 1 Filet“, „Kiste 1 – 2 Rolle“ …
+// und teilt danach jeder Kiste einen Platz im Auto zu. Kistenzeile: { hand: true, nr, art, menge, einh, teil (Braten), platz,
+// leer (beim Kommissionieren „Kiste leer“), sonder (Sonderfälle-Kiste: [„nr|Artikel“]) }. k.kg = geschätzte kg (für Hofladen-Rest,
+// Hack-Zettel, Archiv) – nicht gewogen.
+const istHandZeile = k => !!(k && k.hand);
+const handModus = rows => rows.length > 0 && rows.every(istHandZeile);
+// Zählweise je Artikel: Stück (Steak, Rouladen, Rostbraten, Beinscheiben, Filet/Tafelspitz ganz, Braten-Teilstücke, Ochsenschwanz),
+// Beutel (SK/FK), sonst kg (geschätzt)
+function handEinheit(S, name) {
+  if (name === SONDERKISTE) return '';
+  const a = art(S, name); if (!a) return 'kg';
+  if (num(a.beutelG) > 0) return 'Btl';
+  if (name === BRATEN || a.einheit === 'Stk' || num(a.ganzeStuecke) > 0 || num(a.stueckG) > 0) return 'Stk';
+  return 'kg';
+}
+// stückweise zuteilen (ganze Stücke werden nie zerrissen): Artikel mit Stückgewicht und Stk-Artikel
+const handStueckweise = (S, name) => name === OCHS || (handEinheit(S, name) === 'Stk' && name !== BRATEN && !(num((art(S, name) || {}).ganzeStuecke) > 0));
+// geschätzte kg einer Kistenzeile (Stk-Artikel wie Ochsenschwanz: in Stück, wie qty)
+function handKg(S, k, tierName) {
+  const n = num(k.menge); if (!(n > 0) || k.art === SONDERKISTE) return 0;
+  const a = art(S, k.art); if (!a) return n;
+  const e = k.einh || handEinheit(S, k.art);
+  if (a.einheit === 'Stk') return n;
+  if (e === 'kg') return n;
+  if (e === 'Btl') return n * num(a.beutelG) / 1000;
+  if (k.art === BRATEN) { const g = k.teil ? ganzStueckKg(S, tierName, BRATEN, k.teil) : null; return n * (g ? g.kg : 1.5); }
+  if (num(a.ganzeStuecke) > 0 && !(num(a.stueckG) > 0 && handStueckweise(S, k.art))) { const g = ganzStueckKg(S, tierName, k.art); return n * (g ? g.kg : 1); }
+  return n * num(a.stueckG) / 1000;
+}
+function handZeileText(S, k) {
+  if (k.art === SONDERKISTE) return 'Sonderfälle' + (k.sonder && k.sonder.length ? ` (${k.sonder.length})` : '');
+  const e = k.einh || handEinheit(S, k.art), n = num(k.menge);
+  return `${n > 0 ? fmtNum(n, e === 'kg' ? 1 : 0) + ' ' + (e === 'kg' ? 'kg' : e === 'Btl' ? 'Btl' : 'Stk') + ' ' : ''}${k.art}${k.teil ? ' ' + k.teil : ''}`;
+}
+// Nutzer-Eingabe übernehmen: Einheit + geschätzte kg neu rechnen
+function handZeileRechnen(S, k, tierName) {
+  if (k.art === SONDERKISTE) { k.einh = ''; k.kg = 0; delete k.teil; k.sonder = k.sonder || []; return k; }
+  delete k.sonder;
+  k.einh = handEinheit(S, k.art);
+  if (k.art !== BRATEN) delete k.teil; else if (!k.teil && bratenTeile(S).length) k.teil = bratenTeile(S)[0].name;
+  k.kg = r3(handKg(S, k, tierName)); k.plan = null; k.gewogen = false;
+  return k;
+}
+function handNeueZeile(S, tierKey, nr, artName) {
+  const id = S.kisten.reduce((m, k) => Math.max(m, k.id || 0), 0) + 1;
+  const name = artName || BRATEN;
+  const k = { id, hand: true, tier: tierKey, nr, art: name, menge: name === HACK ? (num(S.settings.hackKiste) || 20) : null, platz: '', info: '' };
+  S.kisten.push(handZeileRechnen(S, k, String(tierKey).split(TOPF_SEP)[0]));
+  return k;
+}
+// alten (automatischen) Kistenplan auf Kisten von Hand umstellen: Nummer, Artikel, Platz bleiben; Menge aus den kg geschätzt
+function handUmstellen(S, tierName) {
+  const ctx = kistenKontext(S, tierName);
+  for (const k of ctx.rows) {
+    if (k.hand) continue;
+    k.hand = true;
+    if (k.art !== SONDERKISTE) {
+      const a = art(S, k.art), e = handEinheit(S, k.art), kg = num(k.kg);
+      k.menge = !(kg > 0) ? null : a && a.einheit === 'Stk' ? Math.round(kg) : e === 'kg' ? r2(kg) : e === 'Btl' ? Math.max(1, Math.round(kg * 1000 / num(a.beutelG))) :
+        handStueckweise(S, k.art) ? Math.max(1, Math.round(kg * 1000 / num(a.stueckG))) : k.art === BRATEN ? null : Math.max(1, Math.round(kg / ((ganzStueckKg(S, tierName, k.art) || { kg: 1 }).kg || 1)));
+      if (k.art === BRATEN) k.teil = '';
+    }
+    k.einh = handEinheit(S, k.art); k.plan = null; k.gewogen = false;
+    k.kg = k.art === SONDERKISTE ? 0 : r3(handKg(S, k, tierName) || num(k.kg));
+    if (k.art === SONDERKISTE) k.sonder = k.sonder || [];
+  }
+  for (const n of abschlussNamen(S, tierName)) delete S.packplaene[n];
+}
+// bei: Bestell-Nr., bei der die Kiste leer wurde – diese Bestellung behält ihre Zeile aus der Kiste
+function kisteLeerSetzen(S, tierName, nr, artName, wert, bei) {
+  for (const k of kistenKontext(S, tierName).rows) if (k.hand && k.nr === nr && k.art === artName) { if (wert) { k.leer = true; if (bei) k.leerBei = bei; } else { delete k.leer; delete k.leerBei; } }
+}
+// Zuteilung: welche Bestellung nimmt aus welcher Kiste wie viel. Der Reihe nach wie bisher (zuerst alle Genusspakete, dann die
+// Einzelartikel nach Bestell-Reihenfolge). Je Bedarf zuerst die Kiste, aus der die Bestellung schon genommen hat, dann die erste
+// Kiste (kleinste Nummer), in die der ganze Bedarf passt – nur wenn keine reicht, wird auf mehrere Kisten aufgeteilt.
+// Kisten mit „leer“ bekommen nichts mehr (außer Bestellungen, die schon daraus kommissioniert sind). Ohne Menge = unbegrenzt.
+// Ergebnis: { proNr: {nr: {art: [{k, kg, stk}]}}, proZeile: {id: {kg, stk}}, fehlt: {art: kg} }
+function handZuteilung(S, tierName) {
+  const ctx = kistenKontext(S, tierName), t = ctx.t, ords = ctx.ords;
+  const rows = ctx.rows.filter(k => k.hand && k.art !== SONDERKISTE);
+  const proNr = {}, proZeile = {}, fehlt = {};
+  rows.forEach(k => { proZeile[k.id] = { kg: 0, stk: 0 }; });
+  const pakGes = ords.reduce((s, o) => s + num(o.pakete), 0);
+  for (const a of S.artikel) {
+    const ks = rows.filter(k => k.art === a.name).map((k, i) => ({ k, i })).sort((x, y) => x.k.nr - y.k.nr || x.i - y.i).map(x => x.k);
+    const stw = handStueckweise(S, a.name);
+    const D = t && pakGes > 0 ? anteilJePaket(S, t, a.name) : 0;
+    const pakStk = stw ? paketListe(S).filter(x => x.art === a.name).reduce((s, x) => s + num(x.anzahl), 0) : 0;
+    // je Bestellung EIN Bedarf (Paket + einzeln zusammen, damit alles aus einer Kiste kommt); Bestellungen mit Genusspaketen zuerst (Vorrang)
+    const bedarfe = [];
+    for (const o of ords) {
+      const F = num(o.pakete) > 0 && D > 0 ? num(o.pakete) * D : 0;
+      const E = Math.max(0, qty(S, o, a.name) - specSum(S, o, a.name));
+      if (!(E + F > 0.0001)) continue;
+      let stk = 0;
+      if (stw) {
+        const p = o.pos && o.pos[a.name];
+        const eStk = !(E > 0.0001) ? 0 : a.einheit === 'Stk' ? Math.round(E) : p && num(p.anzahl) > 0 && !(specSum(S, o, a.name) > 0) ? Math.round(num(p.anzahl)) : Math.max(1, Math.round(E * 1000 / num(a.stueckG)));
+        const fStk = F > 0 ? Math.max(1, Math.round(num(o.pakete) * (pakStk || F * 1000 / num(o.pakete) / num(a.stueckG || 1)))) : 0;
+        stk = eStk + fStk;
+      }
+      // Braten: „selbst zuschneiden aus Kugel“ o. ä. → zuerst Kisten mit diesem Teilstück
+      const teil = a.name === BRATEN ? (sonderOf(S, o).find(x => x.art === BRATEN && x.teil && !x.metzger) || {}).teil || '' : '';
+      bedarfe.push({ o, kg: E + F, stk, pak: F > 0, teil });
+    }
+    bedarfe.sort((x, y) => (y.pak ? 1 : 0) - (x.pak ? 1 : 0));
+    if (!bedarfe.length) continue;
+    const kap = k => { const n = num(k.menge); return n > 0 ? (stw ? n : num(k.kg)) : Infinity; };
+    const frei = k => kap(k) - (stw ? proZeile[k.id].stk : proZeile[k.id].kg);
+    for (const b of bedarfe) {
+      const genommen = new Set(Object.entries(b.o.komm || {}).filter(([key, e]) => /^\d+\|/.test(key) && e && e.art === a.name).map(([key]) => +key.split('|')[0]));
+      const darf = k => !k.leer || genommen.has(k.nr) || k.leerBei === b.o.nr;
+      const rang = k => (genommen.has(k.nr) || (k.leer && k.leerBei === b.o.nr) ? 2 : 0) + (b.teil && k.teil === b.teil ? 1 : 0);
+      const kand = ks.filter(darf).sort((x, y) => rang(y) - rang(x));
+      let rest = stw ? b.stk : b.kg;
+      const teile = [];
+      const nimm = (k, m) => { if (!(m > 1e-9)) return; teile.push({ k, m }); if (stw) proZeile[k.id].stk += m; else proZeile[k.id].kg += m; rest -= m; };
+      const ganz = kand.find(k => frei(k) >= rest - 1e-9);
+      if (ganz) nimm(ganz, rest);
+      else {
+        for (const k of kand) { if (rest <= 1e-9) break; const f = frei(k); if (f > 1e-9) nimm(k, Math.min(f, rest)); }
+        // mehr bestellt als eingetragen: der Rest kommt aus der letzten Kiste (Schätzung zu knapp) – erst „leer“ schiebt weiter
+        if (rest > 1e-9 && kand.length) nimm(kand[kand.length - 1], rest);
+      }
+      if (rest > 1e-9) fehlt[a.name] = (fehlt[a.name] || 0) + (stw && b.stk > 0 ? b.kg * rest / b.stk : rest);
+      const L = ((proNr[b.o.nr] = proNr[b.o.nr] || {})[a.name] = proNr[b.o.nr][a.name] || []);
+      for (const x of teile) {
+        const kg = stw ? (b.stk > 0 ? b.kg * x.m / b.stk : 0) : x.m;
+        if (stw) proZeile[x.k.id].kg += kg;
+        const vorh = L.find(y => y.k.nr === x.k.nr);
+        if (vorh) { vorh.kg += kg; vorh.stk += stw ? x.m : 0; if (!vorh.zeilen.includes(x.k)) vorh.zeilen.push(x.k); }
+        else L.push({ k: x.k, zeilen: [x.k], kg, stk: stw ? x.m : 0 });
+      }
+    }
+  }
+  return { proNr, proZeile, fehlt };
+}
+// Summen je Artikel für die Übersicht „Kisten füllen“: eingetragen vs. gebraucht
+function handSummen(S, tierName) {
+  const ctx = kistenKontext(S, tierName), rows = ctx.rows.filter(k => k.hand && k.art !== SONDERKISTE), ords = ctx.ords, t = ctx.t;
+  const pak = ords.reduce((s, o) => s + num(o.pakete), 0);
+  const out = [];
+  for (const a of S.artikel) {
+    if (istOrgan(a.name)) continue;
+    const ks = rows.filter(k => k.art === a.name), e = handEinheit(S, a.name), stw = handStueckweise(S, a.name);
+    const bedarfKg = ords.reduce((s, o) => s + Math.max(0, qty(S, o, a.name) - specSum(S, o, a.name)), 0) + (t ? pak * anteilJePaket(S, t, a.name) : 0);
+    if (!ks.length && !(bedarfKg > 0.001)) continue;
+    const eingetragen = ks.reduce((s, k) => s + num(k.menge), 0), kg = ks.reduce((s, k) => s + num(k.kg), 0);
+    const zaehlt = stw || e === 'Btl'; // Vergleich in Stück/Beuteln, sonst in kg (ganze Stücke/Braten: Stück + ca. kg)
+    const bedarf = stw && a.einheit !== 'Stk' ? Math.round(bedarfKg * 1000 / num(a.stueckG)) : e === 'Btl' ? Math.round(bedarfKg * 1000 / num(a.beutelG)) : bedarfKg;
+    const einT = !ks.length ? '' : a.name === HACK ? `${fmtNum(kg, 0)} kg in ${new Set(ks.map(k => k.nr)).size} ${new Set(ks.map(k => k.nr)).size === 1 ? 'Kiste' : 'Kisten'}`
+      : zaehlt ? `${fmtNum(eingetragen, 0)} ${e}` : e === 'Stk' ? `${fmtNum(eingetragen, 0)} Stk (ca. ${fmtNum(kg, 1)} kg)` : `${fmtNum(kg, 1)} kg`;
+    out.push({ art: a.name, eingetragenText: einT, bedarfText: bedarfKg > 0.001 ? (zaehlt ? `ca. ${fmtNum(bedarf, 0)} ${e}` : `ca. ${fmtNum(bedarfKg, 1)} kg`) : '',
+      zuWenig: a.name !== HACK && ks.length > 0 && !ks.some(k => !(num(k.menge) > 0)) && (zaehlt ? eingetragen : kg) + 1e-6 < bedarf * 0.98,
+      kisten: [...new Set(ks.map(k => k.nr))], ohneMenge: ks.some(k => !(num(k.menge) > 0)), hack: a.name === HACK });
+  }
+  return out;
+}
+// offene Metzger-Sonderfälle (für die Auswahl der Sonderfälle-Kisten): [{key: „nr|Artikel“, text, kiste}]
+function handSonderListe(S, tierName) {
+  const ctx = kistenKontext(S, tierName), sk = ctx.rows.filter(k => k.art === SONDERKISTE), out = [];
+  for (const o of ctx.ords) for (const s of sonderMetzger(S, o)) {
+    if (!(num(s.menge) > 0 || s.ganz) || istOrgan(s.art)) continue;
+    const key = o.nr + '|' + s.art; if (out.some(x => x.key === key)) continue;
+    const k = sk.find(k => (k.sonder || []).includes(key));
+    out.push({ key, nrT: nrText(o), name: o.name, text: `Nr. ${nrText(o)} ${o.name}: ${s.art}${s.ganz ? ' ' + s.ganz + ' Stück' : ' ' + fmtNum(s.menge, 2) + ' ' + ((art(S, s.art) || {}).einheit || 'kg')}${s.wunsch ? ' – ' + s.wunsch : ''}`, kiste: k ? k.nr : null });
+  }
+  return out;
+}
+// Kisten von Hand (seit 3.7): verplant = was die Zuteilung den Bestellungen gibt; Rest = geschätzte Menge minus verplant („leer“ → 0)
+function kistenCalcHand(S, tierName, rows, ords) {
+  const z = handZuteilung(S, tierName);
+  return rows.map(k => {
+    const a = art(S, k.art), sk = k.art === SONDERKISTE, u = z.proZeile[k.id] || { kg: 0, stk: 0 }, stw = handStueckweise(S, k.art);
+    const ohneMenge = !sk && !(num(k.menge) > 0);
+    const rest = sk || k.leer ? 0 : ohneMenge ? null : Math.max(0, num(k.kg) - u.kg);
+    const restStk = stw && !sk && !k.leer && !ohneMenge ? Math.max(0, num(k.menge) - u.stk) : null;
+    const sonderInhalt = sk ? ords.flatMap(o => sonderMetzger(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art) && (k.sonder || []).includes(o.nr + '|' + s.art)).map(s => `Nr. ${nrText(o)}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';
+    return { k, hand: true, start: 0, anteil: 0, bedarf: sk ? 0 : u.kg, verplant: sk ? 0 : u.kg, verplantStk: stw ? u.stk : null, rest, restStk, ohneMenge, einheit: a ? a.einheit : '',
+      teile: sonderInhalt || (k.teil ? k.teil : k.info || '') };
   });
 }
 // Tier abgeschlossen: Reste an Hofladen, Kisten leeren
@@ -2351,12 +2544,15 @@ function kommissionierung(S, nr) {
       bereiche: [[pakVorher, pakVorher + F], [einzVorher, einzVorher + E]] };
   });
   const picks = [];
+  const hand = ctx && handModus(ctx.rows);
   if (t) {
-    for (const c of kistenCalc(S, t0.name)) {
-      const r = rows.find(x => x.art === c.k.art);
-      if (!r) continue;
-      const von = c.start, bis = c.start + num(c.k.kg);
-      const m = r.bereiche.reduce((s, [a0, a1]) => s + Math.max(0, Math.min(bis, a1) - Math.max(von, a0)), 0);
+    // Kisten von Hand (seit 3.7): Zuteilung je Kiste statt kg-Bereichen – ganze Stücke werden nicht auf Kisten zerrissen
+    const quellen = hand ? (() => { const z = handZuteilung(S, t0.name), L = []; for (const [an, xs] of Object.entries(z.proNr[nr] || {})) for (const x of xs) {
+        const kopf = x.zeilen[0]; L.push({ c: { k: kopf, einheit: (art(S, an) || {}).einheit || 'kg' }, m: x.kg, stk: handStueckweise(S, an) && (art(S, an) || {}).einheit !== 'Stk' ? x.stk : null, teile: [...new Set(x.zeilen.map(k => k.teil).filter(Boolean))], leer: x.zeilen.every(k => k.leer), hand: true }); } return L; })()
+      : kistenCalc(S, t0.name).map(c => { const r = rows.find(x => x.art === c.k.art); if (!r) return null; const von = c.start, bis = c.start + num(c.k.kg);
+        return { c, m: r.bereiche.reduce((s, [a0, a1]) => s + Math.max(0, Math.min(bis, a1) - Math.max(von, a0)), 0) }; }).filter(Boolean);
+    for (const q of quellen) {
+      const c = q.c, m = q.m;
       if (m > 0.0001) {
         let verp = '';
         if (c.k.art === HACK) verp = 'vom Hack-Tisch (fertig verpackt)';
@@ -2367,7 +2563,8 @@ function kommissionierung(S, nr) {
           if (pz.length) verp += (verp ? ' · ' : '') + 'Paket: ' + pz.map(x => `${fmtNum(num(o.pakete) * num(x.anzahl))} × ${gText(paketG(S, x))}`).join(' + ');
         }
         if (c.k.info && c.k.art !== OCHS) verp = `Kiste enthält: ${c.k.info}` + (verp ? ' · ' + verp : '');
-        picks.push({ kiste: c.k.nr, menge: r2(m + 1e-9), roh: m, einheit: c.einheit, art: c.k.art, verpacken: verp, platz: c.k.platz || '' });
+        if (q.teile && q.teile.length) verp = `aus ${q.teile.join(' / ')}` + (verp ? ' · ' + verp : '');
+        picks.push({ kiste: c.k.nr, menge: r2(m + 1e-9), roh: m, einheit: c.einheit, art: c.k.art, verpacken: verp, platz: c.k.platz || '', ...(q.hand ? { hand: true, stkHand: q.stk, kisteLeer: q.leer } : {}) });
       }
     }
     // Hackfleisch packt die Hilfsperson vorab am Hack-Tisch – hier nur als fertige Tüten, ohne Kistennummer
@@ -2410,7 +2607,7 @@ function kommissionierung(S, nr) {
       const a = art(S, s.art);
       const sk = skAlle.find(k => k.sonder && k.sonder.includes(o.nr + '|' + s.art)) || skAlle.find(k => !k.sonder) || null;
       picks.push({ kiste: sk ? sk.nr : null, sonderfall: true, key: 'S' + si + '|' + s.art, menge: r2(num(s.soll != null ? s.soll : s.menge)), roh: 0, einheit: a ? a.einheit : 'kg', art: s.art,
-        verpacken: `Sonderfall${s.wunsch ? ' „' + s.wunsch + '“' : ''} – beim Metzger mit Nr. ${nrText(o)} beschriftet${sk ? '' : ' (keine Kiste dafür im Plan)'}`, platz: sk ? sk.platz || '' : '' });
+        verpacken: `Sonderfall${s.wunsch ? ' „' + s.wunsch + '“' : ''} – beim Metzger mit Nr. ${nrText(o)} beschriftet${sk ? '' : hand ? ' (noch keiner Sonderfälle-Kiste zugeordnet)' : ' (keine Kiste dafür im Plan)'}`, platz: sk ? sk.platz || '' : '' });
     }
     picks.sort((a, b) => (a.kiste === null ? -1 : a.kiste) - (b.kiste === null ? -1 : b.kiste));
   }
@@ -2422,7 +2619,7 @@ function kommissionierung(S, nr) {
     if (!p.key) p.key = (p.hackTisch ? 'H' : p.kiste === null ? '-' : p.kiste) + '|' + p.art;
     p.wiegen = !ohneWiegen(p.art);
     p.ist = (o.komm || {})[p.key] || null;
-    p.stkSoll = stkSoll(S, p);
+    p.stkSoll = has(p.stkHand) && p.stkHand > 0 ? Math.round(p.stkHand) : stkSoll(S, p);
   }
   return { o, tier: t, rows, picks, innereien, sonder, nichtVak: nichtVak(S, o) };
 }
