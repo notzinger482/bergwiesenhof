@@ -386,7 +386,12 @@ function istText(e, p) {
   if (!e) return '';
   if (e.ok && !has(e.kg) && !has(e.stk)) return 'erledigt';
   const kg = has(e.kg) ? fmtNum(e.kg, 3) + ' kg' : '', stk = has(e.stk) ? fmtNum(e.stk) + ' Stk' : '';
-  return p && p.einheit === 'Stk' ? [stk, kg].filter(Boolean).join(' · ') : [kg, stk && p && p.stkSoll ? stk : ''].filter(Boolean).join(' · ');
+  return p && (p.einheit === 'Stk' || p.stkSoll) ? [stk, kg].filter(Boolean).join(' · ') : kg;
+}
+// Menge einer Pick-Zeile (seit 3.7.2, Wunsch Nutzer): Stückartikel (Rouladen, Steak …) groß in Stück, kg klein als ca.-Wert
+function pickMengeHtml(p) {
+  if (p.stkSoll && p.einheit !== 'Stk') return `${fmtNum(p.stkSoll)} Stk<div class="klein">ca. ${fmtNum(p.menge, 2)} ${esc(p.einheit)}</div>`;
+  return `${fmtNum(p.menge, 2)} ${esc(p.einheit)}`;
 }
 // Gewicht in Gramm aus einer Eingabe („1.450“, „1450“, „1,45 kg“)
 function grammAus(v) {
@@ -401,7 +406,7 @@ async function pickDialog(o, p) {
   const stkFeld = p.einheit === 'Stk' || !!p.stkSoll, tol = kommToleranz(S);
   let w = { pg: p.ist && has(p.ist.kg) ? fmtIn(num(p.ist.kg) * 1000, 0) : '', pstk: p.ist && has(p.ist.stk) ? String(p.ist.stk) : p.stkSoll ? String(p.stkSoll) : '', pverm: p.ist && p.ist.vermerk || '' }, fehler = '';
   for (;;) {
-    const sollTxt = `${fmtNum(p.menge, 2)} ${p.einheit}${p.stkSoll && p.einheit !== 'Stk' ? ` (ca. ${fmtNum(p.stkSoll)} Stück)` : ''}`;
+    const sollTxt = p.stkSoll && p.einheit !== 'Stk' ? `${fmtNum(p.stkSoll)} Stück (ca. ${fmtNum(p.menge, 2)} ${p.einheit})` : `${fmtNum(p.menge, 2)} ${p.einheit}`;
     const { k, werte } = await dialogFelder(`${p.kiste !== null ? 'Kiste ' + p.kiste + ' – ' : ''}${p.art}`, `
       <p>Nr. ${nrText(o)} ${esc(o.name)} · Soll <b>${esc(sollTxt)}</b> · Toleranz ±${fmtNum(tol * 100, 0)} %</p>
       ${fehler ? `<div class="fehlerbox">${esc(fehler)}</div>` : ''}
@@ -490,7 +495,7 @@ function docPick(ko) {
     blocks: [{ type: 'kv', rows: [['Lagerplatz', lagerText(o) || lagerVorschlag(S, o).ort, lagerText(o) ? '' : '(' + lagerVorschlag(S, o).grund + ')'], ['Sonderfälle (Metzger)', ko.sonder.join('; ') || '–']] },
       ...(o.packNotiz ? [{ type: 'text', bold: true, text: 'Notiz: ' + o.packNotiz }] : []),
       { type: 'table', head: ['✓', 'Kiste', 'Soll', 'Ist', 'Inhalt', 'verpacken', 'Stellplatz'], widths: [0.5, 0.9, 1.1, 1.3, 2.2, 3.8, 2.2], align: ['', 'r', 'r', 'r', '', '', ''],
-        rows: ko.picks.map(p => [p.ist ? '✓' : '☐', p.hackTisch ? 'Hack-Tisch' : p.innTisch ? 'Innereien' : p.kiste === null ? '–' : p.kiste, `${fmtNum(p.menge, 2)} ${p.einheit}`, p.ist ? istText(p.ist, p) : '', p.art, (p.nichtVak ? `NICHT VAKUUMIEREN${p.nichtVak === 'einzeln' ? ' (einzeln)' : ''}\n` : '') + p.verpacken + (p.ist && p.ist.vermerk ? '\nVermerk: ' + p.ist.vermerk : ''), p.platz]),
+        rows: ko.picks.map(p => [p.ist ? '✓' : '☐', p.hackTisch ? 'Hack-Tisch' : p.innTisch ? 'Innereien' : p.kiste === null ? '–' : p.kiste, p.stkSoll && p.einheit !== 'Stk' ? `${fmtNum(p.stkSoll)} Stk (ca. ${fmtNum(p.menge, 2)} ${p.einheit})` : `${fmtNum(p.menge, 2)} ${p.einheit}`, p.ist ? istText(p.ist, p) : '', p.art, (p.nichtVak ? `NICHT VAKUUMIEREN${p.nichtVak === 'einzeln' ? ' (einzeln)' : ''}\n` : '') + p.verpacken + (p.ist && p.ist.vermerk ? '\nVermerk: ' + p.ist.vermerk : ''), p.platz]),
         rowClass: ko.picks.map(p => p.ist && p.ist.vermerk ? 'rot' : p.ist ? 'erledigt' : ''), leer: 'keine Kisten eingetragen' },
       ...ko.rows.filter(r => r.fehlt > 0).map(r => ({ type: 'text', warn: true, text: `Fehlt: ${fmtNum(r.fehlt, 2)} ${r.einheit} ${r.art}` }))], footer: fussZeile() };
 }
@@ -981,7 +986,7 @@ function viewKommissionierung(q) {
       ${ko.rows.filter(r => r.bedarf > 0.0001).map(r => `<tr class="${r.fehlt > 0 ? 'rot' : ''}"><td>${esc(r.art)}${istOrgan(r.art) ? ' <span class="klein">(separat)</span>' : ''}</td><td class="r">${fmtNum(r.einzeln, 2)}</td><td class="r">${fmtNum(r.ausPak, 2)}</td><td class="r">${fmtNum(r.bedarf, 2)}</td><td class="r">${fmtNum(r.ausKisten, 2)}</td><td class="r">${r.fehlt > 0 ? fmtNum(r.fehlt, 2) : ''}</td></tr>`).join('')}
       </tbody></table></div>
     <div class="karte" style="padding:0"><h3 style="margin:14px 16px 4px">Pickliste – antippen, wiegen, bestätigen <span class="klein">${offenZeilen ? offenZeilen + ' offen' : 'alles erledigt ✓'}</span></h3>
-      ${ko.picks.map((p, i) => `<div class="pick ${p.ist ? 'erledigt' : ''}" data-act="pick" data-i="${i}"><div class="kiste${p.hackTisch ? ' hack' : ''}${p.innTisch ? ' inn' : ''}${p.sonderfall ? ' sonder' : ''}">${p.hackTisch ? 'Hack' : p.innTisch ? 'Inner&shy;eien' : p.kiste === null ? '–' : p.kiste}</div><div class="menge">${fmtNum(p.menge, 2)} ${p.einheit}${p.stkSoll && p.einheit !== 'Stk' ? `<div class="klein">ca. ${fmtNum(p.stkSoll)} Stk</div>` : ''}</div><div><b>${esc(p.art)}</b>${p.nichtVak ? ` <span class="nvak">NICHT VAKUUMIEREN${p.nichtVak === 'einzeln' ? ' (einzeln)' : ''}</span>` : ''}${p.verpacken ? `<div class="klein">${esc(p.verpacken)}</div>` : ''}${p.ist && p.ist.vermerk ? `<div class="klein warn">Vermerk: ${esc(p.ist.vermerk)}</div>` : ''}</div><div class="klein r">${p.ist ? `<span class="ist">✓ ${istText(p.ist, p)}</span><br>` : p.wiegen ? '<span class="klein">wiegen</span><br>' : ''}${esc(p.platz)}${p.hand ? `<br><button class="btn klein ${p.kisteLeer ? 'rot' : ''}" data-act="kleer" data-i="${i}" style="margin-top:6px">${p.kisteLeer ? 'Kiste leer ✓' : 'Kiste leer'}</button>` : ''}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts aus den Kisten zu holen.</div>'}
+      ${ko.picks.map((p, i) => `<div class="pick ${p.ist ? 'erledigt' : ''}" data-act="pick" data-i="${i}"><div class="kiste${p.hackTisch ? ' hack' : ''}${p.innTisch ? ' inn' : ''}${p.sonderfall ? ' sonder' : ''}">${p.hackTisch ? 'Hack' : p.innTisch ? 'Inner&shy;eien' : p.kiste === null ? '–' : p.kiste}</div><div class="menge">${pickMengeHtml(p)}</div><div><b>${esc(p.art)}</b>${p.nichtVak ? ` <span class="nvak">NICHT VAKUUMIEREN${p.nichtVak === 'einzeln' ? ' (einzeln)' : ''}</span>` : ''}${p.verpacken ? `<div class="klein">${esc(p.verpacken)}</div>` : ''}${p.ist && p.ist.vermerk ? `<div class="klein warn">Vermerk: ${esc(p.ist.vermerk)}</div>` : ''}</div><div class="klein r">${p.ist ? `<span class="ist">✓ ${istText(p.ist, p)}</span><br>` : p.wiegen ? '<span class="klein">wiegen</span><br>' : ''}${esc(p.platz)}${p.hand ? `<br><button class="btn klein ${p.kisteLeer ? 'rot' : ''}" data-act="kleer" data-i="${i}" style="margin-top:6px">${p.kisteLeer ? 'Kiste leer ✓' : 'Kiste leer'}</button>` : ''}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts aus den Kisten zu holen.</div>'}
       <div class="knopfleiste pickende">${offenZeilen ? `<span class="klein platz">${offenZeilen} ${offenZeilen === 1 ? 'Zeile' : 'Zeilen'} offen</span>` : '<span class="klein platz ok">alles erledigt ✓</span>'}
         <button class="btn" data-act="vor" data-d="-1" ${idx <= 0 ? 'disabled' : ''}>◀ vorige</button>
         <button class="btn haupt" data-act="gepackt">Gepackt ✓ und weiter</button>
