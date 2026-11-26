@@ -386,13 +386,15 @@ function istText(e, p) {
   if (!e) return '';
   if (e.ok && !has(e.kg) && !has(e.stk)) return 'erledigt';
   const kg = has(e.kg) ? fmtNum(e.kg, 3) + ' kg' : '', stk = has(e.stk) ? fmtNum(e.stk) + ' Stk' : '';
-  return p && (p.einheit === 'Stk' || p.stkSoll) ? [stk, kg].filter(Boolean).join(' · ') : kg;
+  return p && (p.einheit === 'Stk' || (p.anz ? p.anz.nachStk : p.stkSoll)) ? [stk, kg].filter(Boolean).join(' · ') : [kg, stk && p && p.stkSoll ? stk : ''].filter(Boolean).join(' · ');
 }
 // Menge einer Pick-Zeile (seit 3.7.2, Wunsch Nutzer): Stückartikel (Rouladen, Steak …) groß in Stück, kg klein als ca.-Wert
+// seit 3.7.3: genau so, wie bestellt (2 kg / 4 × 4 Stk / 16 Stk) – Text kommt aus pickAnzeige (logic.js)
 function pickMengeHtml(p) {
-  if (p.stkSoll && p.einheit !== 'Stk') return `${fmtNum(p.stkSoll)} Stk<div class="klein">ca. ${fmtNum(p.menge, 2)} ${esc(p.einheit)}</div>`;
+  if (p.anz) return `${esc(p.anz.gross)}${p.anz.klein ? `<div class="klein">${esc(p.anz.klein)}</div>` : ''}`;
   return `${fmtNum(p.menge, 2)} ${esc(p.einheit)}`;
 }
+const pickMengeText = p => p.anz ? p.anz.gross + (p.anz.klein ? ` (${p.anz.klein})` : '') : `${fmtNum(p.menge, 2)} ${p.einheit}`;
 // Gewicht in Gramm aus einer Eingabe („1.450“, „1450“, „1,45 kg“)
 function grammAus(v) {
   const t = String(v || '').trim().toLowerCase();
@@ -406,7 +408,7 @@ async function pickDialog(o, p) {
   const stkFeld = p.einheit === 'Stk' || !!p.stkSoll, tol = kommToleranz(S);
   let w = { pg: p.ist && has(p.ist.kg) ? fmtIn(num(p.ist.kg) * 1000, 0) : '', pstk: p.ist && has(p.ist.stk) ? String(p.ist.stk) : p.stkSoll ? String(p.stkSoll) : '', pverm: p.ist && p.ist.vermerk || '' }, fehler = '';
   for (;;) {
-    const sollTxt = p.stkSoll && p.einheit !== 'Stk' ? `${fmtNum(p.stkSoll)} Stück (ca. ${fmtNum(p.menge, 2)} ${p.einheit})` : `${fmtNum(p.menge, 2)} ${p.einheit}`;
+    const sollTxt = pickMengeText(p);
     const { k, werte } = await dialogFelder(`${p.kiste !== null ? 'Kiste ' + p.kiste + ' – ' : ''}${p.art}`, `
       <p>Nr. ${nrText(o)} ${esc(o.name)} · Soll <b>${esc(sollTxt)}</b> · Toleranz ±${fmtNum(tol * 100, 0)} %</p>
       ${fehler ? `<div class="fehlerbox">${esc(fehler)}</div>` : ''}
@@ -495,7 +497,7 @@ function docPick(ko) {
     blocks: [{ type: 'kv', rows: [['Lagerplatz', lagerText(o) || lagerVorschlag(S, o).ort, lagerText(o) ? '' : '(' + lagerVorschlag(S, o).grund + ')'], ['Sonderfälle (Metzger)', ko.sonder.join('; ') || '–']] },
       ...(o.packNotiz ? [{ type: 'text', bold: true, text: 'Notiz: ' + o.packNotiz }] : []),
       { type: 'table', head: ['✓', 'Kiste', 'Soll', 'Ist', 'Inhalt', 'verpacken', 'Stellplatz'], widths: [0.5, 0.9, 1.1, 1.3, 2.2, 3.8, 2.2], align: ['', 'r', 'r', 'r', '', '', ''],
-        rows: ko.picks.map(p => [p.ist ? '✓' : '☐', p.hackTisch ? 'Hack-Tisch' : p.innTisch ? 'Innereien' : p.kiste === null ? '–' : p.kiste, p.stkSoll && p.einheit !== 'Stk' ? `${fmtNum(p.stkSoll)} Stk (ca. ${fmtNum(p.menge, 2)} ${p.einheit})` : `${fmtNum(p.menge, 2)} ${p.einheit}`, p.ist ? istText(p.ist, p) : '', p.art, (p.nichtVak ? `NICHT VAKUUMIEREN${p.nichtVak === 'einzeln' ? ' (einzeln)' : ''}\n` : '') + p.verpacken + (p.ist && p.ist.vermerk ? '\nVermerk: ' + p.ist.vermerk : ''), p.platz]),
+        rows: ko.picks.map(p => [p.ist ? '✓' : '☐', p.hackTisch ? 'Hack-Tisch' : p.innTisch ? 'Innereien' : p.kiste === null ? '–' : p.kiste, pickMengeText(p), p.ist ? istText(p.ist, p) : '', p.art, (p.nichtVak ? `NICHT VAKUUMIEREN${p.nichtVak === 'einzeln' ? ' (einzeln)' : ''}\n` : '') + p.verpacken + (p.ist && p.ist.vermerk ? '\nVermerk: ' + p.ist.vermerk : ''), p.platz]),
         rowClass: ko.picks.map(p => p.ist && p.ist.vermerk ? 'rot' : p.ist ? 'erledigt' : ''), leer: 'keine Kisten eingetragen' },
       ...ko.rows.filter(r => r.fehlt > 0).map(r => ({ type: 'text', warn: true, text: `Fehlt: ${fmtNum(r.fehlt, 2)} ${r.einheit} ${r.art}` }))], footer: fussZeile() };
 }

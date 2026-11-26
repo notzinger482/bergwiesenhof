@@ -1703,10 +1703,10 @@ function abholGruppe(S, tierName) {
 const PP_BIG = 100000;
 // ---------- Kommissionieren mit Ist-Gewicht (seit 3.1, Wunsch Nutzer) ----------
 // Jede Pick-Zeile wird gewogen (Summe der Teile der Zeile, z. B. 6 Steaks zusammen); Hack und Innereien sind vorgepackt → nur abhaken.
-// Abweichung über der Toleranz (Standard ±15 %) braucht einen Vermerk an der Bestellung. Preis bleibt bei der Waage beim Abholen –
+// Abweichung über der Toleranz (Standard ±35 %, bis 3.7.2 ±15 %) braucht einen Vermerk an der Bestellung (Standard seit 3.7.3: ±35 %). Preis bleibt bei der Waage beim Abholen –
 // die Ist-Gewichte sind für die Ausbeute-Statistik und die Referenz-Einzelgewichte.
 const ohneWiegen = name => name === HACK || istOrgan(name);
-const kommToleranz = S => (has(S.settings.kommToleranz) ? num(S.settings.kommToleranz) : 15) / 100;
+const kommToleranz = S => (has(S.settings.kommToleranz) ? num(S.settings.kommToleranz) : 35) / 100;
 const mitStueck = (S, name) => name === OCHS || (art(S, name) && num(art(S, name).stueckG) > 0 && !(num(art(S, name).beutelG) > 0));
 function stkSoll(S, p) {
   if (p.einheit === 'Stk') return Math.round(num(p.menge));
@@ -2565,6 +2565,35 @@ function tierAbschliessen(S, tierName) {
 }
 
 // ---------- Kommissionierung ----------
+// Menge einer Pick-Zeile in der Form der Bestellung: { gross, klein, nachStk }
+function pickAnzeige(S, o, p, picks, rows) {
+  const a = art(S, p.art), pos = o.pos && o.pos[p.art], r = rows.find(x => x.art === p.art);
+  const kgTxt = (kg, ca) => `${ca ? 'ca. ' : ''}${fmtNum(kg, 2)} kg`;
+  if (!a || p.einheit === 'Stk') return { gross: `${fmtNum(p.menge)} ${p.einheit}`, klein: '', nachStk: true };
+  const po = portionOf(S, o, p.art);
+  const nachStk = !!(po && po.stk > 0);
+  const stk = p.stkSoll || null;
+  const allein = picks.filter(x => x.art === p.art && !x.hackTisch && !x.innTisch && !x.sonderfall).length === 1 && !(r && r.ausPak > 0.0001);
+  if (allein && pos) {
+    // ganze Einzelbestellung aus einer Kiste: genau wie bestellt
+    const pk = packGilt(S, a, pos);
+    if (pk) {
+      const t = pk.teile.map(x => x.stk ? `${fmtNum(x.n)} × ${fmtNum(x.stk)} Stk` : `${fmtNum(x.n)} × ${fmtNum(x.g)} g`).join(' + ');
+      return { gross: t, klein: (pk.stk > 0 ? `${fmtNum(pk.stk)} Stk, ` : '') + kgTxt(pk.kg, pk.stk > 0), nachStk };
+    }
+    if (a.beutelG > 0 && num(pos.menge) > 0) return { gross: `${fmtNum(pos.menge)} Btl`, klein: `à ${fmtNum(a.beutelG)} g, ${kgTxt(p.menge)}`, nachStk: false };
+    if (po && po.stk > 0) return { gross: `${fmtNum(po.stk)} Stk`, klein: kgTxt(p.menge, true), nachStk };
+    if (po && po.g > 0) return { gross: `${fmtNum(po.anzahl)} × ${fmtNum(po.g)} g`, klein: kgTxt(p.menge), nachStk: false };
+    if (po && po.text) return { gross: po.text, klein: kgTxt(p.menge, true), nachStk: false };
+    return { gross: kgTxt(num(pos.menge) > 0 ? num(pos.menge) : p.menge), klein: stk ? `ca. ${fmtNum(stk)} Stk` : '', nachStk: false };
+  }
+  // auf mehrere Kisten verteilt oder mit Genusspaket: Teilmenge in der Einheit der Bestellung, dazu die Bestellung klein
+  const best = po && po.stk > 0 ? `${fmtNum(po.stk)} Stk` : po && po.text ? po.text : pos && num(qty(S, o, p.art)) > 0 ? kgTxt(qty(S, o, p.art)) : '';
+  const mitPak = r && r.ausPak > 0.0001;
+  const extra = mitPak ? (best ? `${best} einzeln + Paket` : 'für das Paket') : best ? 'bestellt ' + best + ', auf mehrere Kisten' : '';
+  if (nachStk && stk) return { gross: `${fmtNum(stk)} Stk`, klein: [kgTxt(p.menge, true), extra].filter(Boolean).join(' · '), nachStk };
+  return { gross: kgTxt(p.menge), klein: [stk ? `ca. ${fmtNum(stk)} Stk` : '', extra].filter(Boolean).join(' · '), nachStk: false };
+}
 function kommissionierung(S, nr) {
   const o = S.bestellungen.find(x => x.nr === nr);
   if (!o) return null;
@@ -2664,6 +2693,8 @@ function kommissionierung(S, nr) {
     p.ist = (o.komm || {})[p.key] || null;
     p.stkSoll = has(p.stkHand) && p.stkHand > 0 ? Math.round(p.stkHand) : stkSoll(S, p);
   }
+  // Anzeige der Menge so, wie bestellt (seit 3.7.3, Wunsch Nutzer): 2 kg → „2 kg“, 4x4 → „4 × 4 Stk“, 16 Stück → „16 Stk“
+  for (const p of picks) if (!p.hackTisch && !p.innTisch && !p.sonderfall) p.anz = pickAnzeige(S, o, p, picks, rows);
   return { o, tier: t, rows, picks, innereien, sonder, nichtVak: nichtVak(S, o) };
 }
 
@@ -2861,6 +2892,7 @@ function standPruefen(x) {
   const altSchema = num(x.schema);
   if (!(altSchema >= 8)) throw new Error('Die Sicherung stammt aus einer Version vor 1.9.0 und kann nicht mehr eingespielt werden.');
   const hattePreislisten = !!(x.settings && Array.isArray(x.settings.preislisten) && x.settings.preislisten.length);
+  const tolNeu = !(x.settings && x.settings.kommTol35); // vor dem Mischen mit den Standardwerten merken
   for (const k of Object.keys(base)) if (x[k] === undefined) x[k] = base[k];
   x.settings = Object.assign({}, base.settings, x.settings);
   // letzte Bestellung und Anlagedatum je Kunde (für die Löschfrist; bleibt auch erhalten, wenn Bestellungen gelöscht werden)
@@ -2871,6 +2903,8 @@ function standPruefen(x) {
   });
   // Version 1.9.6: Sicherungen vor 1.9.0 werden nicht mehr umgebaut (alte Umbauschritte entfernt)
   ['preislisteTitel', 'skKg', 'fkKg', 'preisTuete'].forEach(f => delete x.settings[f]);
+  // Toleranz beim Kommissionieren (seit 3.7.3, Wunsch Nutzer 26.11.): Standard ±35 % statt ±15 % – einmalig umstellen, eigener anderer Wert bleibt
+  if (tolNeu) { if (!has(x.settings.kommToleranz) || num(x.settings.kommToleranz) === 15) x.settings.kommToleranz = 35; x.settings.kommTol35 = true; }
   if (!(altSchema >= 9)) {
     // Bäckle bekommt einen Preis (15 €/kg) in der aktuellen und allen kommenden Preislisten, falls dort noch 0 €/kg
     const heute = todayISO(), akt = Array.isArray(x.settings.preislisten) && x.settings.preislisten.length ? preislisteAm(x, heute) : null;
