@@ -914,13 +914,29 @@ function docKistenHand(tn, calc, t) {
 }
 
 function tabPackliste(tn, ziel) {
-  const pl = packliste(S, tn);
+  // Sortieren (seit 3.7.4, Wunsch Nutzer): Spaltenkopf antippen; Standard = Reihenfolge der Zuteilung
+  const SP = ui.sortP = ui.sortP || { k: 'rang', d: 1 };
+  const stRang = { offen: 0, gepackt: 1, abgeholt: 2 };
+  const sortiert = pl0 => { if (!pl0) return pl0; pl0.rows.forEach((r, i) => { r.rang = i; }); return Object.assign({}, pl0, { rows: sortiere(pl0.rows, SP, (r, k) => k === 'rang' ? r.rang : k === 'nr' ? String(r.nrT || r.nr) : k === 'name' ? r.name || '' : k === 'lager' ? r.lager || '' : k === 'schaetz' ? r.schaetz : k === 'endbetrag' ? r.endbetrag : k === 'status' ? stRang[r.status] : '') }); };
+  const pl = sortiert(packliste(S, tn));
   ziel.innerHTML = `<div class="knopfleiste" style="margin-bottom:10px"><button class="btn haupt" data-act="teilen">Als Bild teilen</button><button class="btn" data-act="drucken">Drucken</button></div>
+    <div class="zeile oben" style="margin-bottom:8px;align-items:center"><input class="feld" id="packSuche" type="search" placeholder="Suchen: Name, Nr. oder Lagerplatz" value="${esc(ui.packSuche || '')}" style="max-width:380px;font-size:19px"><span class="klein" id="packTreffer"></span><span class="platz"></span>${SP.k !== 'rang' ? '<button class="btn klein" data-act="sortStd">Sortierung zurücksetzen</button>' : '<span class="klein">Spaltenkopf antippen zum Sortieren</span>'}</div>
     <div class="klein" style="margin-bottom:8px">Endbetrag nach dem Wiegen eintragen. Status antippen: offen → gepackt (mit Lagerplatz) → abgeholt.</div>
-    <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>Bestellung</th><th>Sonderfälle</th><th>Lagerplatz</th><th class="r">Schätzpreis</th><th class="r">Endbetrag</th><th>Status</th></tr></thead><tbody>
-    ${pl.rows.map(r => `<tr data-nr="${r.nr}"><td class="r"><a href="#/bestellung/${r.nr}">${r.nrT || r.nr}</a></td><td class="fett">${esc(r.name)}</td><td>${r.tel ? `<a href="tel:${esc(r.tel)}">${esc(r.tel)}</a>` : ''}</td><td class="klein">${esc(r.text)}${r.notiz ? `<div class="packnotiz-k">Notiz: ${esc(r.notiz)}</div>` : ''}</td><td class="klein">${esc(r.sonder)}</td><td>${r.lager ? `<b>${esc(r.lager)}</b>` : `<span class="klein">Vorschlag: ${esc(r.lagerVorschlag)}</span>`}</td><td class="r">${fmtEur(r.schaetz)}</td>
+    <div class="tabwrap"><table class="tab" id="packTab"><thead><tr>${thSort(SP, 'nr', 'Nr.', 'r')}${thSort(SP, 'name', 'Name')}<th>Telefon</th><th>Bestellung</th><th>Sonderfälle</th>${thSort(SP, 'lager', 'Lagerplatz')}${thSort(SP, 'schaetz', 'Schätzpreis', 'r')}${thSort(SP, 'endbetrag', 'Endbetrag', 'r')}${thSort(SP, 'status', 'Status')}</tr></thead><tbody>
+    ${pl.rows.map(r => `<tr data-nr="${r.nr}" data-such="${esc([r.nrT || r.nr, r.nr, r.name, r.lager || ''].join(' ').toLowerCase())}"><td class="r"><a href="#/bestellung/${r.nr}">${r.nrT || r.nr}</a></td><td class="fett">${esc(r.name)}</td><td>${r.tel ? `<a href="tel:${esc(r.tel)}">${esc(r.tel)}</a>` : ''}</td><td class="klein">${esc(r.text)}${r.notiz ? `<div class="packnotiz-k">Notiz: ${esc(r.notiz)}</div>` : ''}</td><td class="klein">${esc(r.sonder)}</td><td>${r.lager ? `<b>${esc(r.lager)}</b>` : `<span class="klein">Vorschlag: ${esc(r.lagerVorschlag)}</span>`}</td><td class="r">${fmtEur(r.schaetz)}</td>
       <td style="width:120px"><input class="feld zahl" inputmode="decimal" data-ch="betrag" value="${r.endbetrag !== null ? fmtIn(r.endbetrag, 2, 2) : ''}"></td><td><button class="btn klein" data-act="status">${statusMarke(r.status)}</button>${r.status === 'abgeholt' ? `<button class="btn klein" data-act="zahl">${r.zahlOffen ? '<span class="marke rot">Zahlung offen</span>' : '<span class="marke gruen">bezahlt</span>'}</button>` : ''}</td></tr>`).join('') || '<tr><td colspan="9" class="klein">Keine Bestellungen für dieses Tier.</td></tr>'}
     </tbody></table></div>`;
+  // Suche (seit 3.7.4, Wunsch Nutzer): Name, Nummer oder Lagerplatz – filtert beim Tippen, bleibt beim Neuzeichnen stehen
+  const such = $('#packSuche');
+  const filtern = () => {
+    const w = String(ui.packSuche || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+    let n = 0; const trs = [...ziel.querySelectorAll('#packTab tbody tr[data-nr]')];
+    for (const tr of trs) { const ok = w.every(x => /^\d+$/.test(x) ? tr.dataset.such.split(/[\s.\-–,/]+/).includes(x) : tr.dataset.such.includes(x)); tr.style.display = ok ? '' : 'none'; if (ok) n++; }
+    $('#packTreffer').textContent = w.length ? `${n} von ${trs.length}` : '';
+  };
+  if (such) { such.addEventListener('input', () => { ui.packSuche = such.value; filtern(); }); filtern(); }
+  ui.acts.sort = el => { sortKlick(SP, el.dataset.k, ['schaetz', 'endbetrag']); render(); };
+  ui.acts.sortStd = () => { SP.k = 'rang'; SP.d = 1; render(); };
   const best = el => S.bestellungen.find(o => o.nr === +el.closest('tr').dataset.nr);
   ui.acts.betrag = el => { const o = best(el); const v = num(el.value); if (el.value.trim() !== '' && !(v >= 0)) { meldung('Endbetrag: bitte einen Betrag ab 0 € eintragen.', true); el.value = has(o.endbetrag) ? fmtIn(o.endbetrag, 2, 2) : ''; return; } o.endbetrag = el.value.trim() === '' ? null : r2(v); speichern(); };
   ui.acts.status = async el => {
@@ -939,8 +955,8 @@ function tabPackliste(tn, ziel) {
     render();
   };
   ui.acts.zahl = el => { const o = best(el); o.zahlungOffen = !o.zahlungOffen; speichern(); meldung(`Nr. ${nrText(o)}: ${o.zahlungOffen ? 'Bezahlung offen' : 'bezahlt'}.`); render(); };
-  ui.acts.teilen = async () => { const d = docPackliste(packliste(S, tn)); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
-  ui.acts.drucken = () => docDrucken(docPackliste(packliste(S, tn)));
+  ui.acts.teilen = async () => { const d = docPackliste(sortiert(packliste(S, tn))); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
+  ui.acts.drucken = () => docDrucken(docPackliste(sortiert(packliste(S, tn))));
 }
 
 // =====================================================================
@@ -953,20 +969,28 @@ function viewKommissionierung(q) {
   // Topf: alle Bestellungen des Abholtags in einer Reihenfolge (wie die Kisten geplant sind)
   const ords = !tn ? [] : kistenRows(S, tn).length ? kistenKontext(S, tn).ords : ordersOfTopf(S, topfTier(S, tn));
   let nr = q.get('nr') === 'hof' ? 'hof' : +q.get('nr') || ui.kommiNr;
-  if (nr !== 'hof' && !ords.some(o => o.nr === nr)) nr = (ords.find(o => (o.status || 'offen') === 'offen') || ords[0] || {}).nr;
+  // Auswahl nach Bestell-Nr. (seit 3.7.4, Wunsch Nutzer); gepackte/abgeholte nur mit Haken „gepackte anzeigen“
+  const nrSort = o => (o.teilVon || o.nr) + (o.teilVon ? (o.teilNr || 2) / 1000 : 0);
+  const istOffen = o => (o.status || 'offen') === 'offen';
+  const alleNr = [...ords].sort((a, b) => nrSort(a) - nrSort(b));
+  if (nr !== 'hof' && !ords.some(o => o.nr === nr)) nr = (alleNr.find(istOffen) || alleNr[0] || {}).nr;
   ui.kommiNr = nr;
+  const liste = ui.kommiGepackt ? alleNr : alleNr.filter(o => istOffen(o) || o.nr === nr);
+  const nGepackt = alleNr.filter(o => !istOffen(o)).length;
   let h = `<div class="zeile" style="margin-bottom:12px"><h1 class="platz" style="margin:0">Kommissionieren</h1>
     <label class="f" style="min-width:300px">Tier<select class="feld" data-ch="tierwahl">${tiereSortiert().map(t => { const tp = topfTier(S, t.name); return opt(t.name, `${t.name} – ${abholTxt(t)}${tp && tp.glieder ? ' (ein Topf: ' + tp.name + ')' : ''}`, t.name === tn); }).join('')}</select></label></div>`;
   if (!ords.length) { inhalt().innerHTML = h + '<div class="karte">Keine Bestellungen für dieses Tier.</div>'; ui.acts.tierwahl = el => { ui.tierWahl = el.value; ui.kommiNr = null; render(); }; return; }
-  const idx = nr === 'hof' ? ords.length : ords.findIndex(o => o.nr === nr);
+  const idx = nr === 'hof' ? liste.length : liste.findIndex(o => o.nr === nr);
   const ohneKisten = !kistenRows(S, tn).length;
   h += `<div class="zeile" style="margin-bottom:12px">
       <button class="btn" data-act="vor" data-d="-1" ${idx <= 0 ? 'disabled' : ''}>◀ vorige</button>
-      <select class="feld platz" data-ch="nrwahl">${ords.map(o => opt(o.nr, `Nr. ${nrText(o)} – ${o.name} (${o.status || 'offen'})`, o.nr === nr)).join('')}${ohneKisten ? '' : opt('hof', '▣ Hofladen – Reste verpacken (zum Schluss)', nr === 'hof')}</select>
-      <button class="btn" data-act="vor" data-d="1" ${idx >= ords.length - (ohneKisten ? 1 : 0) ? 'disabled' : ''}>nächste ▶</button></div>`;
+      <select class="feld platz" data-ch="nrwahl">${liste.map(o => opt(o.nr, `Nr. ${nrText(o)} – ${o.name} (${o.status || 'offen'})`, o.nr === nr)).join('')}${ohneKisten ? '' : opt('hof', '▣ Hofladen – Reste verpacken (zum Schluss)', nr === 'hof')}</select>
+      <button class="btn" data-act="vor" data-d="1" ${idx >= liste.length - (ohneKisten ? 1 : 0) ? 'disabled' : ''}>nächste ▶</button>
+      ${nGepackt ? `<label class="zeile" style="gap:8px;align-items:center;white-space:nowrap"><input type="checkbox" style="width:26px;height:26px;accent-color:var(--gruen-d)" data-ch="gepacktZeigen"${ui.kommiGepackt ? ' checked' : ''}> gepackte anzeigen (${nGepackt})</label>` : ''}</div>`;
+  ui.acts.gepacktZeigen = el => { ui.kommiGepackt = el.checked; render(); };
   ui.acts.tierwahl = el => { ui.tierWahl = el.value; ui.kommiNr = null; render(); };
   ui.acts.nrwahl = el => { ui.kommiNr = el.value === 'hof' ? 'hof' : +el.value; gehe('#/kommissionierung?nr=' + el.value); };
-  ui.acts.vor = el => { const i = idx + num(el.dataset.d); const o = ords[i]; if (o) gehe('#/kommissionierung?nr=' + o.nr); else if (i === ords.length) gehe('#/kommissionierung?nr=hof'); };
+  ui.acts.vor = el => { const i = idx + num(el.dataset.d); const o = liste[i]; if (o) gehe('#/kommissionierung?nr=' + o.nr); else if (i === liste.length) gehe('#/kommissionierung?nr=hof'); };
   if (nr === 'hof') return kommiHofladen(tn, h);
   const ko = kommissionierung(S, nr);
   const offenZeilen = ko.picks.filter(p => !p.ist).length;
@@ -992,7 +1016,7 @@ function viewKommissionierung(q) {
       <div class="knopfleiste pickende">${offenZeilen ? `<span class="klein platz">${offenZeilen} ${offenZeilen === 1 ? 'Zeile' : 'Zeilen'} offen</span>` : '<span class="klein platz ok">alles erledigt ✓</span>'}
         <button class="btn" data-act="vor" data-d="-1" ${idx <= 0 ? 'disabled' : ''}>◀ vorige</button>
         <button class="btn haupt" data-act="gepackt">Gepackt ✓ und weiter</button>
-        <button class="btn" data-act="vor" data-d="1" ${idx >= ords.length - (ohneKisten ? 1 : 0) ? 'disabled' : ''}>nächste ▶</button></div>
+        <button class="btn" data-act="vor" data-d="1" ${idx >= liste.length - (ohneKisten ? 1 : 0) ? 'disabled' : ''}>nächste ▶</button></div>
     </div></div>`;
   inhalt().innerHTML = h;
   // Kisten von Hand (seit 3.7): Kiste ist früher leer als eingetragen → ab dieser Bestellung kommt der Rest aus der nächsten Kiste
@@ -1005,7 +1029,7 @@ function viewKommissionierung(q) {
     const o = S.bestellungen.find(x => x.nr === nr);
     if (offenZeilen && !(await frage('Noch nicht alles gewogen', `${offenZeilen} ${offenZeilen === 1 ? 'Zeile ist' : 'Zeilen sind'} noch nicht gewogen bzw. abgehakt. Trotzdem als gepackt melden?`, 'Trotzdem gepackt', 'Zurück'))) return;
     if (!(await lagerDialog(o))) return;
-    const naechste = ords.slice(idx + 1).find(x => (x.status || 'offen') === 'offen') || ords[idx + 1];
+    const naechste = liste.slice(idx + 1).find(istOffen) || liste.slice(0, idx).find(istOffen) || liste[idx + 1];
     meldung(`Nr. ${nrText(o)} gepackt → ${lagerText(o)}.`);
     if (naechste) gehe('#/kommissionierung?nr=' + naechste.nr); else if (!ohneKisten) gehe('#/kommissionierung?nr=hof'); else render();
   };
