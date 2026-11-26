@@ -2309,21 +2309,25 @@ function handKg(S, k, tierName) {
 function handZeileText(S, k) {
   if (k.art === SONDERKISTE) return 'Sonderfälle' + (k.sonder && k.sonder.length ? ` (${k.sonder.length})` : '');
   const e = k.einh || handEinheit(S, k.art), n = num(k.menge);
-  return `${n > 0 ? fmtNum(n, e === 'kg' ? 1 : 0) + ' ' + (e === 'kg' ? 'kg' : e === 'Btl' ? 'Btl' : 'Stk') + ' ' : ''}${k.art}${k.teil ? ' ' + k.teil : ''}`;
+  return `${n > 0 ? fmtNum(n, e === 'kg' ? 1 : 0) + ' ' + (e === 'kg' ? 'kg' : e === 'Btl' ? 'Btl' : 'Stk') + ' ' : ''}${k.art}${k.teil ? ' ' + k.teil : ''}${num(k.kgIst) > 0 ? ` (gewogen ${fmtNum(k.kgIst, 1)} kg)` : ''}`;
 }
 // Nutzer-Eingabe übernehmen: Einheit + geschätzte kg neu rechnen
 function handZeileRechnen(S, k, tierName) {
   if (k.art === SONDERKISTE) { k.einh = ''; k.kg = 0; delete k.teil; k.sonder = k.sonder || []; return k; }
   delete k.sonder;
   k.einh = handEinheit(S, k.art);
-  if (k.art !== BRATEN) delete k.teil; else if (!k.teil && bratenTeile(S).length) k.teil = bratenTeile(S)[0].name;
-  k.kg = r3(handKg(S, k, tierName)); k.plan = null; k.gewogen = false;
+  if (k.art !== BRATEN) delete k.teil;
+  // Kistengewicht freiwillig (Wunsch Nutzer 26.11.): gewogen → k.kg = Gewicht, zählt (Hack/SK/FK) für die Ausbeute-Statistik
+  const ist = num(k.kgIst) > 0 ? num(k.kgIst) : 0;
+  if (k.art === OCHS) { k.kg = r3(handKg(S, k, tierName)); k.gew = ist || null; k.gewogen = !!ist; }
+  else { k.kg = ist ? r3(ist) : r3(handKg(S, k, tierName)); k.gewogen = !!ist; }
+  k.plan = null;
   return k;
 }
 function handNeueZeile(S, tierKey, nr, artName) {
   const id = S.kisten.reduce((m, k) => Math.max(m, k.id || 0), 0) + 1;
   const name = artName || BRATEN;
-  const k = { id, hand: true, tier: tierKey, nr, art: name, menge: name === HACK ? (num(S.settings.hackKiste) || 20) : null, platz: '', info: '' };
+  const k = { id, hand: true, tier: tierKey, nr, art: name, menge: name === HACK ? (num(S.settings.hackKiste) || 20) : null, platz: '', info: '', ...(name === BRATEN && bratenTeile(S).length ? { teil: bratenTeile(S)[0].name } : {}) };
   S.kisten.push(handZeileRechnen(S, k, String(tierKey).split(TOPF_SEP)[0]));
   return k;
 }
@@ -2332,6 +2336,8 @@ function handUmstellen(S, tierName) {
   const ctx = kistenKontext(S, tierName);
   for (const k of ctx.rows) {
     if (k.hand) continue;
+    const warGewogen = k.art !== SONDERKISTE && kisteGewogen(k);
+    if (warGewogen) k.kgIst = k.art === OCHS ? num(k.gew) : num(k.kg); // gewogene kg bleiben als freiwilliges Gewicht
     k.hand = true;
     if (k.art !== SONDERKISTE) {
       const a = art(S, k.art), e = handEinheit(S, k.art), kg = num(k.kg);
@@ -2340,8 +2346,9 @@ function handUmstellen(S, tierName) {
       if (k.art === BRATEN) k.teil = '';
     }
     k.einh = handEinheit(S, k.art); k.plan = null; k.gewogen = false;
-    k.kg = k.art === SONDERKISTE ? 0 : r3(handKg(S, k, tierName) || num(k.kg));
-    if (k.art === SONDERKISTE) k.sonder = k.sonder || [];
+    if (k.art === SONDERKISTE) { k.kg = 0; k.sonder = k.sonder || []; }
+    else if (warGewogen || has(k.menge)) handZeileRechnen(S, k, tierName);
+    else k.kg = r3(num(k.kg)); // Braten ohne Menge: Planwert als Schätzung für den Rest
   }
   for (const n of abschlussNamen(S, tierName)) delete S.packplaene[n];
 }
@@ -2384,7 +2391,7 @@ function handZuteilung(S, tierName) {
     }
     bedarfe.sort((x, y) => (y.pak ? 1 : 0) - (x.pak ? 1 : 0));
     if (!bedarfe.length) continue;
-    const kap = k => { const n = num(k.menge); return n > 0 ? (stw ? n : num(k.kg)) : Infinity; };
+    const kap = k => { const n = num(k.menge); return stw ? (n > 0 ? n : Infinity) : n > 0 || num(k.kgIst) > 0 ? num(k.kg) : Infinity; };
     const frei = k => kap(k) - (stw ? proZeile[k.id].stk : proZeile[k.id].kg);
     for (const b of bedarfe) {
       const genommen = new Set(Object.entries(b.o.komm || {}).filter(([key, e]) => /^\d+\|/.test(key) && e && e.art === a.name).map(([key]) => +key.split('|')[0]));
@@ -2451,7 +2458,7 @@ function kistenCalcHand(S, tierName, rows, ords) {
   const z = handZuteilung(S, tierName);
   return rows.map(k => {
     const a = art(S, k.art), sk = k.art === SONDERKISTE, u = z.proZeile[k.id] || { kg: 0, stk: 0 }, stw = handStueckweise(S, k.art);
-    const ohneMenge = !sk && !(num(k.menge) > 0);
+    const ohneMenge = !sk && !(num(k.menge) > 0) && !(num(k.kgIst) > 0 && !stw);
     const rest = sk || k.leer ? 0 : ohneMenge ? null : Math.max(0, num(k.kg) - u.kg);
     const restStk = stw && !sk && !k.leer && !ohneMenge ? Math.max(0, num(k.menge) - u.stk) : null;
     const sonderInhalt = sk ? ords.flatMap(o => sonderMetzger(S, o).filter(s => num(s.menge) > 0 && !istOrgan(s.art) && (k.sonder || []).includes(o.nr + '|' + s.art)).map(s => `Nr. ${nrText(o)}: ${s.art} ${fmtNum(s.menge, 3)} ${(art(S, s.art) || {}).einheit || 'kg'}${s.wunsch ? ' ' + s.wunsch : ''}`)).join(' · ') : '';

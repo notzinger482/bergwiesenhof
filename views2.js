@@ -738,7 +738,7 @@ function tabKistenHand(tn, ziel) {
   if (sicht === 'fuellen') {
     const su = handSummen(S, tn);
     h += `<div class="karte" style="padding:0">
-      <div class="tabwrap" style="border:none"><table class="tab ktab"><thead><tr><th class="r">Kiste</th><th>Artikel</th><th>Teilstück / Inhalt</th><th class="r">Menge</th><th>Platz im Auto</th><th></th></tr></thead><tbody>
+      <div class="tabwrap" style="border:none"><table class="tab ktab"><thead><tr><th class="r">Kiste</th><th>Artikel</th><th>Teilstück / Inhalt</th><th class="r">Menge</th><th class="r">gewogen kg <span class="klein">(freiwillig)</span></th><th>Platz im Auto</th><th></th></tr></thead><tbody>
       ${calc.map(c => { const k = c.k, sk = k.art === SONDERKISTE, e = k.einh || handEinheit(S, k.art);
         return `<tr data-id="${k.id}">
         <td style="width:64px"><input class="feld zahl" inputmode="numeric" data-ch="hf" data-f="nr" value="${k.nr}" style="font-size:20px"></td>
@@ -747,8 +747,9 @@ function tabKistenHand(tn, ziel) {
           : sk ? `<button class="btn" data-act="hsonder" data-id="${k.id}">Sonderfälle wählen (${(k.sonder || []).length})</button>${c.teile ? `<div class="klein teile">${esc(c.teile)}</div>` : ''}` : ''}</td>
         <td style="width:150px">${sk ? '' : `<div class="zeile" style="gap:6px;flex-wrap:nowrap"><input class="feld zahl" inputmode="decimal" data-ch="hf" data-f="menge" value="${has(k.menge) ? fmtIn(k.menge, e === 'kg' ? 2 : 0) : ''}" placeholder="${e === 'kg' ? 'ca. kg' : 'Anzahl'}" style="width:84px;font-size:20px"><span>${e === 'kg' ? 'kg' : e === 'Btl' ? 'Btl' : 'Stk'}</span></div>`}
           ${k.leer ? `<button class="btn klein" data-act="hleer" data-id="${k.id}" title="beim Kommissionieren als leer gemeldet – antippen, um es zurückzunehmen"><span class="marke rot">leer</span></button>` : ''}</td>
+        <td style="width:96px">${sk ? '' : `<input class="feld zahl" inputmode="decimal" data-ch="hf" data-f="kgIst" value="${num(k.kgIst) > 0 ? fmtIn(k.kgIst, 2) : ''}" placeholder="–" style="width:84px">`}</td>
         <td class="klein">${esc(k.platz || '–')}</td>
-        <td style="width:44px"><button class="btn klein rot" data-act="hweg" data-id="${k.id}">✕</button></td></tr>`; }).join('') || '<tr><td colspan="6" class="klein" style="padding:16px">Noch keine Kisten eingetragen. Unten mit „+“ die erste Zeile anlegen.</td></tr>'}
+        <td style="width:44px"><button class="btn klein rot" data-act="hweg" data-id="${k.id}">✕</button></td></tr>`; }).join('') || '<tr><td colspan="7" class="klein" style="padding:16px">Noch keine Kisten eingetragen. Unten mit „+“ die erste Zeile anlegen.</td></tr>'}
       </tbody></table></div>
       <div class="knopfleiste" style="padding:10px 12px">
         <button class="btn haupt" data-act="hneu" style="min-height:56px;font-size:20px">+ Zeile${rows.length ? ' (Kiste ' + rows[rows.length - 1].nr + ')' : ''}</button>
@@ -761,7 +762,7 @@ function tabKistenHand(tn, ziel) {
         <div>${sl.length ? `<div class="karte"><h3 style="margin-top:0">Sonderfälle ${sOffen.length ? `<span class="marke gelb">${sOffen.length} ohne Kiste</span>` : '<span class="marke gruen">alle in Kisten</span>'}</h3>
           <div class="klein">${sl.map(x => `${x.kiste !== null ? '<b>K' + x.kiste + '</b>' : '<span class="warn">–</span>'} ${esc(x.text)}`).join('<br>')}</div>
           <p class="klein">Zeile mit Artikel „Sonderfälle (beschriftet)“ anlegen und dort „Sonderfälle wählen“.</p></div>` : ''}
-        <div class="karte klein">So geht's: Kiste füllen, dann je Artikel eine Zeile – z. B. Kiste 1 · Filet · 2 Stk, „+“, Kiste 1 · Braten · Kugel · 2 Stk. Braten nach Teilstück, Steak/Rouladen/Rostbraten/Beinscheiben in Stück, Gulasch/Siedfleisch in ca. kg, Knochen in Beuteln. Menge leer = unbekannt. Beim Kommissionieren zeigt die App, wer aus welcher Kiste nimmt; ist eine Kiste früher leer, dort „Kiste leer“ antippen.</div></div></div>`;
+        <div class="karte klein">So geht's: Kiste füllen, dann je Artikel eine Zeile – z. B. Kiste 1 · Filet · 2 Stk, „+“, Kiste 1 · Braten · Kugel · 2 Stk. Braten nach Teilstück, Steak/Rouladen/Rostbraten/Beinscheiben in Stück, Gulasch/Siedfleisch in ca. kg, Knochen in Beuteln. Menge leer = unbekannt. Gewicht ist freiwillig – gewogene Hack- und Knochenkisten zählen wieder für die Ausbeute-Statistik. Beim Kommissionieren zeigt die App, wer aus welcher Kiste nimmt; ist eine Kiste früher leer, dort „Kiste leer“ antippen.</div></div></div>`;
   } else {
     h += `<div class="kistenlayout"><div>${autoDraufsicht(felderAusKisten(isG ? gruppe : tn), true)}</div>
       <div class="karte" style="padding:0"><div class="tabwrap" style="border:none"><table class="tab ktab"><thead><tr><th class="r">Kiste</th><th>Inhalt</th><th>Platz im Auto</th></tr></thead><tbody>
@@ -782,7 +783,8 @@ function tabKistenHand(tn, ziel) {
     speichern(); render();
   };
   ui.acts.hneuK = () => { handNeueZeile(S, schluessel, Math.min(99, Math.max(...nummern) + 1), BRATEN); speichern(); render(); };
-  ui.acts.hf = el => {
+  ui.acts.hf = async el => {
+    if ($('#dialog.auf')) return;
     const k = find(el.closest('tr').dataset.id); if (!k) return; const f = el.dataset.f;
     if (f === 'nr') {
       const n = Math.round(num(el.value)); if (n < 1 || n > 99) { meldung('Kistennummer 1 bis 99', true); render(); return; }
@@ -791,8 +793,14 @@ function tabKistenHand(tn, ziel) {
       if (el.value.trim() === '') k.menge = null;
       else { const v = num(el.value); if (!(v > 0) || v > 999) { meldung('Menge: bitte eine Zahl über 0 (oder leer lassen).', true); render(); return; }
         k.menge = (k.einh || handEinheit(S, k.art)) === 'kg' ? r2(v) : Math.round(v); }
-    } else if (f === 'art') { k.art = el.value; if (k.art === HACK && !has(k.menge)) k.menge = num(S.settings.hackKiste) || 20; if (k.art !== HACK && k.einh !== handEinheit(S, k.art)) k.menge = null; }
+    } else if (f === 'art') { k.art = el.value; if (k.art === HACK && !has(k.menge)) k.menge = num(S.settings.hackKiste) || 20; if (k.art !== HACK && k.einh !== handEinheit(S, k.art)) k.menge = null; if (k.art === BRATEN && !k.teil && bratenTeile(S).length) k.teil = bratenTeile(S)[0].name; }
     else if (f === 'teil') k.teil = el.value;
+    else if (f === 'kgIst') {
+      if (el.value.trim() === '') delete k.kgIst;
+      else { const v = num(el.value), grenze = k.art === OCHS ? 15 : 35;
+        if (!(v > 0)) { meldung('Gewicht: bitte eine Zahl über 0 kg (oder leer lassen).', true); render(); return; }
+        if (v > grenze && !(await frage('Gewicht prüfen', `Kiste <b>${esc(k.nr)}</b> – ${esc(k.art)}: ${fmtNum(v, 2)} kg ist sehr viel für eine Kiste. Stimmt das? <span class="klein">(Komma beachten, z. B. 19,5)</span>`, 'Ja, stimmt', 'Korrigieren'))) { render(); return; }
+        k.kgIst = r3(v); } }
     handZeileRechnen(S, k, tierFuer()); speichern(); render();
   };
   ui.acts.hweg = async el => { const k = find(el.dataset.id); if (!k) return;
