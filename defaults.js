@@ -282,6 +282,7 @@ const DEFAULTS = {
   "hackHof500Prozent": 50,
   "kommToleranz": 35,
   "kommTol35": true,
+  "autoH375": true,
   "lagerKuehlhaus": 30,
   "kisteMax": 20,
   "kisteAusnahme": 25,
@@ -331,21 +332,21 @@ const DEFAULTS = {
  "auto": [
   {
    "name": "hinten links",
-   "hoehe": 4,
+   "hoehe": 5,
    "reihenfolge": 1,
    "zugang": "Tür hinten",
    "spaeter": true
   },
   {
    "name": "hinten rechts",
-   "hoehe": 4,
+   "hoehe": 5,
    "reihenfolge": 2,
    "zugang": "Tür hinten",
    "spaeter": true
   },
   {
    "name": "vorne rechts",
-   "hoehe": 4,
+   "hoehe": 5,
    "reihenfolge": 3,
    "zugang": "rechte Tür",
    "spaeter": false
@@ -359,7 +360,7 @@ const DEFAULTS = {
   },
   {
    "name": "Mitte Mitte",
-   "hoehe": 4,
+   "hoehe": 5,
    "reihenfolge": 5,
    "zugang": "wenn hinten leer",
    "spaeter": false
@@ -373,14 +374,14 @@ const DEFAULTS = {
   },
   {
    "name": "vorne Mitte",
-   "hoehe": 3,
+   "hoehe": 4,
    "reihenfolge": 7,
    "zugang": "wenn Mitte leer",
    "spaeter": false
   },
   {
    "name": "vorne links",
-   "hoehe": 4,
+   "hoehe": 5,
    "reihenfolge": 8,
    "zugang": "wenn Mitte links leer",
    "spaeter": false

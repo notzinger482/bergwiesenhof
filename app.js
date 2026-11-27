@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.7.4';
+const APP_VERSION = '3.7.5';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '', archiv: false }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -395,7 +395,7 @@ function viewBestellung(nr, q, vorlage) {
   const sonderRows = () => (o.sonder.length ? o.sonder : []).map((s, i) => sonderZeile(s, i)).join('');
   const letzte = !nr && o.name ? letzteBestellungVon(o.name) : null;
   inhalt().innerHTML = `
-  <div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0">${nr ? `Bestellung Nr. ${nrText(o)}` : 'Neue Bestellung'}</h1>
+  <div class="zeile" style="margin-bottom:10px"><h1 class="platz" style="margin:0;white-space:nowrap">${nr ? `Bestellung Nr. ${nrText(o)}` : 'Neue Bestellung'}</h1>
     ${nr ? `${o.lagerOrt ? `<span class="marke blau" style="font-size:15px;padding:6px 12px">${esc(lagerText(o))}</span>` : ''}<button class="btn" data-act="lager">Lagerplatz …</button><select class="feld" style="width:auto" data-in="kopf" data-f="status">${['offen', 'gepackt', 'abgeholt'].map(s => opt(s, s, (o.status || 'offen') === s)).join('')}</select><label class="check zahlcheck" id="zahlbox" style="${(o.status || 'offen') === 'abgeholt' ? '' : 'display:none'}"><input type="checkbox" id="zahloffen"${o.zahlungOffen ? ' checked' : ''}> Bezahlung offen</label>
     <button class="btn" data-act="teilen">Teilen …</button><button class="btn rot" data-act="loeschen">Löschen</button>` : ''}
     ${ui.letzteNr && !nr ? `<a class="btn klein" href="#/bestellung/${ui.letzteNr}">Zuletzt: Nr. ${esc(nrText(S.bestellungen.find(x => x.nr === ui.letzteNr) || { nr: ui.letzteNr }))} öffnen</a>` : ''}</div>

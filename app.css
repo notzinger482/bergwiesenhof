@@ -322,7 +322,7 @@ details.karte summary { cursor: pointer; }
 .mcheck .mcheck-tab th, .mcheck .mcheck-tab td { padding: 6px 14px; position: static; }
 .lnr { display: flex; flex-wrap: wrap; gap: 6px; }
 .lnr .btn { min-width: 52px; min-height: 48px; padding: 0 10px; font-size: 18px; }
-.zahlcheck { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; color: var(--rot); margin-left: 6px; }
+.zahlcheck { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; color: var(--rot); margin-left: 6px; width: auto; height: auto; min-height: 46px; padding: 0 8px; white-space: nowrap; }
 .zahlkarte { border-color: #f1a7a7; }
 .packnotiz { background: #fff4c2; border: 2px solid #e0b93b; border-radius: 10px; padding: 8px 12px; margin: 6px 0 12px; font-size: 18px; font-weight: 600; }
 .packnotiz .klein { font-weight: 400; display: block; }

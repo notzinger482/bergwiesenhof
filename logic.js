@@ -2250,9 +2250,12 @@ function kommissionierBegonnen(S, namen) {
 function kistenKontext(S, tierName) {
   const rows = kistenRows(S, tierName);
   const key = (rows.find(k => String(k.tier).includes(TOPF_SEP)) || {}).tier;
-  if (key) { const t = topfAus(S, key.split(TOPF_SEP)); return { t, ords: ordersOfTopf(S, t), rows: rows.filter(k => k.tier === key), key, topf: !!(t && t.glieder) }; }
+  // seit 3.7.5: direkt ausgelieferte Bestellungen (beim Metzger extra gerichtet, o.ohneKisten) bekommen nichts aus den Kisten
+  const ausKisten = o => !o.ohneKisten;
+  if (key) { const t = topfAus(S, key.split(TOPF_SEP)); const alle = ordersOfTopf(S, t); return { t, ords: alle.filter(ausKisten), ordsAlle: alle, rows: rows.filter(k => k.tier === key), key, topf: !!(t && t.glieder) }; }
   const t = tier(S, tierName);
-  return { t, ords: t ? ordersOfTier(S, t.name) : [], rows, key: tierName, topf: false };
+  const alle = t ? ordersOfTier(S, t.name) : [];
+  return { t, ords: alle.filter(ausKisten), ordsAlle: alle, rows, key: tierName, topf: false };
 }
 // Menge je Genusspaket (feste Zusammensetzung aus den Einstellungen)
 function anteilJePaket(S, t, artName) { return paketKgArt(S, artName); }
@@ -2307,9 +2310,9 @@ function handKg(S, k, tierName) {
   return n * num(a.stueckG) / 1000;
 }
 function handZeileText(S, k) {
-  if (k.art === SONDERKISTE) return 'Sonderfälle' + (k.sonder && k.sonder.length ? ` (${k.sonder.length})` : '');
+  if (k.art === SONDERKISTE) return 'Sonderfälle' + (k.sonder && k.sonder.length ? ` (${k.sonder.length})` : '') + (k.info ? ' – ' + k.info : '');
   const e = k.einh || handEinheit(S, k.art), n = num(k.menge);
-  return `${n > 0 ? fmtNum(n, e === 'kg' ? 1 : 0) + ' ' + (e === 'kg' ? 'kg' : e === 'Btl' ? 'Btl' : 'Stk') + ' ' : ''}${k.art}${k.teil ? ' ' + k.teil : ''}${num(k.kgIst) > 0 ? ` (gewogen ${fmtNum(k.kgIst, 1)} kg)` : ''}`;
+  return `${n > 0 ? fmtNum(n, e === 'kg' ? 1 : 0) + ' ' + (e === 'kg' ? 'kg' : e === 'Btl' ? 'Btl' : 'Stk') + ' ' : ''}${k.art}${k.teil ? ' ' + k.teil : ''}${k.info ? ' – ' + k.info : ''}${num(k.kgIst) > 0 ? ` (gewogen ${fmtNum(k.kgIst, 1)} kg)` : ''}`;
 }
 // Nutzer-Eingabe übernehmen: Einheit + geschätzte kg neu rechnen
 function handZeileRechnen(S, k, tierName) {
@@ -2591,7 +2594,21 @@ function pickAnzeige(S, o, p, picks, rows) {
   const best = po && po.stk > 0 ? `${fmtNum(po.stk)} Stk` : po && po.text ? po.text : pos && num(qty(S, o, p.art)) > 0 ? kgTxt(qty(S, o, p.art)) : '';
   const mitPak = r && r.ausPak > 0.0001;
   const extra = mitPak ? (best ? `${best} einzeln + Paket` : 'für das Paket') : best ? 'bestellt ' + best + ', auf mehrere Kisten' : '';
-  if (nachStk && stk) return { gross: `${fmtNum(stk)} Stk`, klein: [kgTxt(p.menge, true), extra].filter(Boolean).join(' · '), nachStk };
+  // Genusspaket wird nach Stück gerichtet, wo es geht (seit 3.7.5, Wunsch Nutzer): Steak, Rostbraten, Rouladen, Beinscheiben – Knochen in Beuteln
+  if (a.beutelG > 0 && (mitPak || (pos && num(pos.menge) > 0))) { const n = Math.max(1, Math.round(p.menge * 1000 / a.beutelG)); return { gross: `${fmtNum(n)} Btl`, klein: [`à ${fmtNum(a.beutelG)} g, ${kgTxt(p.menge)}`, extra].filter(Boolean).join(' · '), nachStk: false }; }
+  let stkG = stk;
+  const einzig = picks.filter(x => x.art === p.art && !x.hackTisch && !x.innTisch && !x.sonderfall).length === 1;
+  // Paket in Stück + einzeln nach kg bestellt (z. B. 8 Rouladen fürs Paket + 1 kg einzeln): beides so hinschreiben
+  if (mitPak && stk && einzig && !(po && po.stk > 0) && qty(S, o, p.art) - specSum(S, o, p.art) > 0.0001) {
+    const pakStk = paketListe(S).filter(x => x.art === p.art).reduce((t, x) => t + num(x.anzahl), 0) * num(o.pakete);
+    if (pakStk > 0) return { gross: `${fmtNum(pakStk)} Stk + ${kgTxt(qty(S, o, p.art) - specSum(S, o, p.art))}`, klein: `${fmtNum(pakStk)} Stk fürs Paket + ${kgTxt(qty(S, o, p.art) - specSum(S, o, p.art))} einzeln · zusammen ${kgTxt(p.menge, true)}`, nachStk: true };
+  }
+  if (mitPak && stk && einzig && !(has(p.stkHand) && p.stkHand > 0)) { // ganze Menge aus einer Kiste: Stückzahl genau aus der Paket-Zusammensetzung
+    const pakStk = paketListe(S).filter(x => x.art === p.art).reduce((t, x) => t + num(x.anzahl), 0) * num(o.pakete);
+    const einzStk = po && po.stk > 0 ? po.stk : qty(S, o, p.art) > 0 ? null : 0;
+    if (pakStk > 0 && einzStk !== null) stkG = pakStk + einzStk;
+  }
+  if ((nachStk || mitPak) && stkG) return { gross: `${fmtNum(stkG)} Stk`, klein: [kgTxt(p.menge, true), extra].filter(Boolean).join(' · '), nachStk: true };
   return { gross: kgTxt(p.menge), klein: [stk ? `ca. ${fmtNum(stk)} Stk` : '', extra].filter(Boolean).join(' · '), nachStk: false };
 }
 function kommissionierung(S, nr) {
@@ -2634,7 +2651,7 @@ function kommissionierung(S, nr) {
           const pz = num(o.pakete) > 0 ? paketListe(S).filter(x => x.art === c.k.art) : [];
           if (pz.length) verp += (verp ? ' · ' : '') + 'Paket: ' + pz.map(x => `${fmtNum(num(o.pakete) * num(x.anzahl))} × ${gText(paketG(S, x))}`).join(' + ');
         }
-        if (c.k.info && c.k.art !== OCHS) verp = `Kiste enthält: ${c.k.info}` + (verp ? ' · ' + verp : '');
+        if (c.k.info && c.k.art !== OCHS) verp = `${c.k.hand ? 'Notiz Kiste' : 'Kiste enthält'}: ${c.k.info}` + (verp ? ' · ' + verp : '');
         if (q.teile && q.teile.length) verp = `aus ${q.teile.join(' / ')}` + (verp ? ' · ' + verp : '');
         picks.push({ kiste: c.k.nr, menge: r2(m + 1e-9), roh: m, einheit: c.einheit, art: c.k.art, verpacken: verp, platz: c.k.platz || '', ...(q.hand ? { hand: true, stkHand: q.stk, kisteLeer: q.leer } : {}) });
       }
@@ -2643,7 +2660,7 @@ function kommissionierung(S, nr) {
     const hp = picks.filter(p => p.art === HACK);
     if (hp.length) {
       const r = rows.find(x => x.art === HACK), teile = [];
-      if (r.einzeln > 0) { const po = portionOf(S, o, HACK); teile.push(po ? po.text : `${fmtNum(r.einzeln, 2)} kg in 1 Tüte`); }
+      if (r.einzeln > 0) { const po = portionOf(S, o, HACK); teile.push(hackPortionText(po, r.einzeln, qty(S, o, HACK))); } // seit 3.7.5: ohne den Sonderfall-Teil
       if (r.ausPak > 0) teile.push('Paket: ' + hackPaketText(S, o.pakete, o.pakVak));
       const roh = hp.reduce((s, p) => s + p.roh, 0), summe = r2(roh + 1e-9);
       for (const p of hp) picks.splice(picks.indexOf(p), 1);
@@ -2695,6 +2712,14 @@ function kommissionierung(S, nr) {
   }
   // Anzeige der Menge so, wie bestellt (seit 3.7.3, Wunsch Nutzer): 2 kg → „2 kg“, 4x4 → „4 × 4 Stk“, 16 Stück → „16 Stk“
   for (const p of picks) if (!p.hackTisch && !p.innTisch && !p.sonderfall) p.anz = pickAnzeige(S, o, p, picks, rows);
+  // Sonderfall mit portionierter Bestellung (seit 3.7.5, Fehler Nutzer: „6 × 500 g“ Hack ging verloren): Portionierung groß bzw. als Hinweis
+  for (const p of picks) if (p.sonderfall) {
+    const po = portionOf(S, o, p.art);
+    if (!po || !po.text || !(po.g > 0 || po.stk > 0 || po.pack)) continue;
+    if (Math.abs(num(po.kg) - num(p.menge)) < 0.011) p.anz = { gross: po.text.replace(/ Stück$/, ' Stk'), klein: `${fmtNum(p.menge, 3)} ${p.einheit} · Sonderfall`, nachStk: po.stk > 0 };
+    else if (po.g > 0 && Math.abs(num(p.menge) * 1000 / po.g - Math.round(num(p.menge) * 1000 / po.g)) < 0.01) p.anz = { gross: `${fmtNum(Math.round(num(p.menge) * 1000 / po.g))} × ${fmtNum(po.g)} g`, klein: `${fmtNum(p.menge, 3)} ${p.einheit} · Sonderfall`, nachStk: false };
+    else p.verpacken += ` · Bestellung portioniert: ${po.text}`;
+  }
   return { o, tier: t, rows, picks, innereien, sonder, nichtVak: nichtVak(S, o) };
 }
 
@@ -2853,9 +2878,16 @@ const offeneZahlungen = S => (S.bestellungen || []).filter(zahlungOffen).sort((a
 // Status setzen mit allem, was dazugehört (abgeholt am, fester Preis, Lager leeren bei „offen“)
 function statusSetzen(S, o, neu, zahlungOffenJa) {
   o.status = neu;
-  if (neu === 'offen') { o.lagerOrt = ''; o.lagerPlatz = ''; o.gepacktAm = null; }
+  if (neu === 'offen') { o.lagerOrt = ''; o.lagerPlatz = ''; o.gepacktAm = null; delete o.ohneKisten; delete o.direkt; }
   if (neu === 'abgeholt') { o.abgeholtAm = o.abgeholtAm || todayISO(); if (zahlungOffenJa !== undefined) o.zahlungOffen = !!zahlungOffenJa; preisFestsetzen(S, o); }
   else { delete o.abgeholtAm; delete o.zahlungOffen; if (!preisBleibtFest(S, o)) delete o.preisFest; }
+}
+// Direkt ausgeliefert (seit 3.7.5, Wunsch Nutzer 27.11.): ohne Kommissionieren gleich „abgeholt“.
+// ausKisten=false: Ware war nicht in den Kisten (beim Metzger extra gerichtet) → Kisten und Hofladen-Reste rechnen ohne diese Bestellung.
+function direktAbgeholt(S, o, zahlungOffenJa, ausKisten) {
+  if (ausKisten) delete o.ohneKisten; else o.ohneKisten = true;
+  o.direkt = true;
+  statusSetzen(S, o, 'abgeholt', zahlungOffenJa);
 }
 const lagerText = o => o.lagerOrt ? (o.lagerOrt === 'Kühlraum' ? 'Kühlraum (Metzgerkiste)' : o.lagerOrt) + (o.lagerPlatz ? ' – ' + lagerPlatzText(o) : '') : '';
 
@@ -2893,6 +2925,7 @@ function standPruefen(x) {
   if (!(altSchema >= 8)) throw new Error('Die Sicherung stammt aus einer Version vor 1.9.0 und kann nicht mehr eingespielt werden.');
   const hattePreislisten = !!(x.settings && Array.isArray(x.settings.preislisten) && x.settings.preislisten.length);
   const tolNeu = !(x.settings && x.settings.kommTol35); // vor dem Mischen mit den Standardwerten merken
+  const autoNeu = !(x.settings && x.settings.autoH375);
   for (const k of Object.keys(base)) if (x[k] === undefined) x[k] = base[k];
   x.settings = Object.assign({}, base.settings, x.settings);
   // letzte Bestellung und Anlagedatum je Kunde (für die Löschfrist; bleibt auch erhalten, wenn Bestellungen gelöscht werden)
@@ -2905,6 +2938,9 @@ function standPruefen(x) {
   ['preislisteTitel', 'skKg', 'fkKg', 'preisTuete'].forEach(f => delete x.settings[f]);
   // Toleranz beim Kommissionieren (seit 3.7.3, Wunsch Nutzer 26.11.): Standard ±35 % statt ±15 % – einmalig umstellen, eigener anderer Wert bleibt
   if (tolNeu) { if (!has(x.settings.kommToleranz) || num(x.settings.kommToleranz) === 15) x.settings.kommToleranz = 35; x.settings.kommTol35 = true; }
+  // Stapelhöhen im Auto (seit 3.7.5, Korrektur Nutzer 27.11.): vorne/hinten links+rechts und Mitte Mitte 5, vorne Mitte 4 – einmalig, nur wo noch der alte Standard steht
+  if (autoNeu) { const neu = { 'hinten links': [4, 5], 'hinten rechts': [4, 5], 'vorne rechts': [4, 5], 'Mitte Mitte': [4, 5], 'vorne Mitte': [3, 4], 'vorne links': [4, 5] };
+    (Array.isArray(x.auto) ? x.auto : []).forEach(f => { const n = Object.keys(neu).find(k => sameText(k, f.name)); if (n && num(f.hoehe) === neu[n][0]) f.hoehe = neu[n][1]; }); x.settings.autoH375 = true; }
   if (!(altSchema >= 9)) {
     // Bäckle bekommt einen Preis (15 €/kg) in der aktuellen und allen kommenden Preislisten, falls dort noch 0 €/kg
     const heute = todayISO(), akt = Array.isArray(x.settings.preislisten) && x.settings.preislisten.length ? preislisteAm(x, heute) : null;
@@ -2929,7 +2965,7 @@ function standPruefen(x) {
 }
 
 if (typeof module !== 'undefined') module.exports = {
-  autoStapel, kisteStellen, platzText, num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
+  direktAbgeholt, autoStapel, kisteStellen, platzText, num, has, r1, r2, r3, roundUp, fmtNum, fmtIn, fmtKg, fmtEur, fmtDate, parseDate, todayISO, sameText,
   art, einheitForm, istOrgan, statSigNeu, teilBleibtEtwas, sonderAnpassen, ganzMehr, nameKey, bezugstermin, erfassungLuecken, statistikGrund, unvollstaendig, topfGemischt, innPickAbgleich, innOkUmschalten, ausbeuteArtikel, qty, sonderOf, specSum, sonderText, ganzArt, ganzStueckKg, ganzWunschFehlt, bugWunsch, bratenTeile, portionenOf, portionOf, vakArtikel, istVak,
   nichtVak, packParse, packGilt, schaetzpreis, bestellText, einzelKg, formFehler, ordersOfTier, nextNr, tier, sgRechnung, yieldArt,
   tierInfo, lagerVorschlag, lagerText, zahlungOffen, offeneZahlungen, statusSetzen, lagerNr, lagerPlatzText, anteilVon, teilZeilen, teilFehlmengen, fehlDetail, fehlKgText, teilVorschlag, bestellungTeilen, mengencheckTier, mengencheck, tierVorschlag, neuVerteilenPlan, neuVerteilenUebernehmen, kistenplaeneAktualisieren, wartelistePassend, wartelistePruefung, tierUmbenennen, kundePflegen, kundenStat, kundenVorschlaege, bestellIndex, ANONYM, kundeLetzte, kundenFrist, inaktiveKunden, kundeAnonymisieren,
