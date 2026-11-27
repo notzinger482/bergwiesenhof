@@ -323,16 +323,16 @@ function docMetzger(ma) {
   // feste Hinweise oben (seit 3.5.2, Wunsch Nutzer 25.11.)
   const bl = [{ type: 'text', bold: true, text: 'Oberschale komplett in Rouladen.' },
     { type: 'text', bold: true, text: 'Bratenstücke parieren, aber nicht küchenfertig schneiden (außer Sonderwünsche unten).' },
-    { type: 'text', bold: true, text: `Reicht das Hackfleisch nicht für die ${fmtNum(ma.hack.vorgabe)} kg: übriges Gulasch${ma.gulasch.bestelltKiste > 0.05 ? ` (über die bestellten ${fmtNum(ma.gulasch.bestelltKiste, 1)} kg hinaus)` : ''} zu Hackfleisch machen.` },
     { type: 'h', text: 'Gesamtmengen' },
-    { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.vorgabe)} kg`, [ma.hack.kistenText ? `(${ma.hack.kistenText})` : '', `davon bestellt ${fmtNum(ma.hack.bestelltKiste, 1)} kg (ohne Sonderwünsche)`].filter(Boolean).join(' – ')], ['Gulasch', ma.gulasch.vorgabe > 0 ? `${fmtNum(ma.gulasch.vorgabe)} kg` : '–', ma.gulasch.vorgabe > 0 ? `(erwartet) – davon bestellt ${fmtNum(ma.gulasch.bestelltKiste, 1)} kg${ma.gulasch.mitSonder ? ' (ohne Sonderwünsche)' : ''}` : '']]
+    // seit 3.7.8 (Wunsch Nutzer): nur noch die bestellte Menge ohne Sonderwünsche – erwartete/theoretische Menge entfällt
+    { type: 'kv', rows: [['Hackfleisch', `${fmtNum(ma.hack.bestelltKiste, 1)} kg`, 'bestellt (ohne Sonderwünsche)'], ['Gulasch', `${fmtNum(ma.gulasch.bestelltKiste, 1)} kg`, 'bestellt (ohne Sonderwünsche)']]
       .concat(ma.waden > 0 ? [['Waden am Stück', `${fmtNum(ma.waden)} Stück`, 'nicht zu Beinscheiben schneiden – Nr. siehe unten']] : [])
       .concat(ma.ochs.ganz > 0 ? [['Ochsenschwanz', `${fmtNum(ma.ochs.ganz)} Stück ganz lassen`, `kommt zu den Beinscheiben in die Kiste – ${ma.ochs.ganzListe.map(x => 'Nr. ' + (x.nrT || x.nr)).join(', ')}`]] : [])
       .concat(ma.ochs.bestellt > ma.ochs.vorhanden ? [['Ochsenschwanz', `ACHTUNG: ${fmtNum(ma.ochs.bestellt)} Stück bestellt`, `aber nur ca. ${fmtNum(ma.ochs.vorhanden)}${t.glieder ? ' bei ' + t.name : ' je Tier'}`]] : []) }];
   if (ma.gulasch.insHack > 0.05) bl.push({ type: 'text', text: `Kein Gulasch bestellt: ca. ${fmtNum(ma.gulasch.insHack, 0)} kg Kamm/Hals ins Hackfleisch.` });
   if (ma.siedInsHack > 0.05) bl.push({ type: 'text', text: `Siedfleisch: ca. ${fmtNum(ma.siedInsHack, 0)} kg ins Hackfleisch (Hack reicht sonst nicht).` });
-  bl.push({ type: 'text', text: (ma.waden > 0 ? 'Übrige Hesse als Beinscheiben. ' : 'Hesse wie immer als Beinscheiben. ') + 'Alle übrigen Stücke bitte wie gewohnt zuschneiden.' },
-    { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit der Bestell-Nr. beschriften' + (ma.mitPlan ? ' und in die angegebene Kiste legen' : '') },
+  // seit 3.7.8 (Wunsch Nutzer): fester Text „Hesse wie immer als Beinscheiben …“ entfällt – Wade (Hesse) ist jetzt als Bratenstück wählbar
+  bl.push(    { type: 'h', text: 'Sonderfälle – separat vorbereiten, bitte mit der Bestell-Nr. beschriften' + (ma.mitPlan ? ' und in die angegebene Kiste legen' : '') },
     // seit 3.7 (Kisten von Hand): Spalte „Kiste“ nur, wenn Sonderfälle schon einer Kiste zugeordnet sind – vorher weiß das keiner
     ma.mitPlan ? { type: 'table', head: ['Nr.', 'Artikel', 'Menge', 'Hinweis', 'Kiste'], widths: [1.2, 3.4, 1.8, 5.2, 1.2], align: ['r', '', 'r', '', 'r'],
       rows: ma.separat.map(s => [s.nrT || s.nr, s.art, s.menge, s.hinweis, s.kiste ? String(s.kiste) : istOrgan(s.art) ? 'Innereien' : '–']), leer: '– keine –' }
@@ -457,14 +457,34 @@ const hofRestText = r => r.restStk !== null && r.restStk !== undefined ? `ca. ${
 function kommiHofladen(tn, h) {
   const L = hofListe(S, tn);
   const offen = L.filter(r => !r.fertig).length;
+  h += hofVorziehKarte(tn);
   h += `<div class="karte" style="padding:0"><div class="zeile" style="margin:14px 16px 4px"><h3 class="platz" style="margin:0">Hofladen – Reste verpacken <span class="klein">${L.length ? (offen ? offen + ' von ' + L.length + ' offen' : 'alles erledigt ✓') : ''}</span></h3><button class="btn" data-act="hofdruck">Drucken</button></div>
     <p class="klein" style="margin:0 16px 8px">Zeile antippen → jedes Päckchen vakuumieren und wiegen; alles kommt gesammelt in den Hofladen. Hack und Innereien stehen auf ihren Zetteln.</p>
     ${L.map((r, i) => `<div class="pick ${r.fertig ? 'erledigt' : ''}" data-act="hofzeile" data-i="${i}"><div class="kiste">${r.kiste}</div><div class="menge">${esc(hofRestText(r))}</div>
       <div><b>${esc(r.art)}</b>${r.teile && r.teile.length ? ` <span class="klein">(${esc(r.teile.join(', '))})</span>` : ''}<div class="klein">${esc(r.regelText)}</div>${r.packs.length ? `<div class="klein">${r.packs.map(x => `${x.teil ? esc(x.teil) + ' ' : ''}${has(x.kg) ? fmtNum(x.kg, 3) + ' kg' : ''}${x.stk ? ' · ' + fmtNum(x.stk) + ' Stk' : ''}${x.kh ? ' → KH ' + x.kh : ''}`).join(' | ')}</div>` : ''}</div>
       <div class="klein r">${r.packs.length ? `<span class="ist">${r.packs.length} Päckchen · ${fmtNum(r.kg, 2)} kg</span><br>` : ''}${esc(r.platz)}</div></div>`).join('') || '<div style="padding:16px" class="klein">Nichts übrig – oder noch kein Kistenplan.</div>'}</div>`;
   inhalt().innerHTML = h;
+  ui.acts.hofvor = async el => {
+    const o = S.bestellungen.find(y => y.nr === +el.dataset.nr), t = tier(S, tn); if (!o || !t) return;
+    const y = terminVon(S, o);
+    if (!(await frage('Früher erfüllen', `Nr. ${esc(nrText(o))} – <b>${esc(o.name)}</b>${o.tel ? ' (' + esc(o.tel) + ')' : ''}<br>von <b>Abholtermin ${y ? fmtDate(y.datum) : '?'}</b> auf <b>${esc(tierAnzeige(S, tn))}</b> (Abholung ${fmtDate(t.abhol)}) holen und jetzt aus dem Rest packen?<br><br>Mit dem Kunden geklärt (Gefriertruhe, Abholung)?`, 'Ja, jetzt erfüllen'))) return;
+    vorziehen(S, o.nr, terminAm(S, t.abhol)); if (o.tier !== tn && !abholGruppe(S, tn).includes(o.tier)) zielSetzen(o, tn);
+    speichern(); meldung(`Nr. ${nrText(o)} ist jetzt bei ${tierAnzeige(S, tn)} – bitte kommissionieren.`); gehe(`#/kommissionierung?tier=${encodeURIComponent(tn)}&nr=${o.nr}`);
+  };
   ui.acts.hofzeile = async el => { const r = L[+el.dataset.i]; if (r && (await hofDialog(tn, r))) render(); };
   ui.acts.hofdruck = () => docDrucken(docHofladen(tn, hofListe(S, tn)));
+}
+// „früher möglich“ aus dem Rest erfüllen (seit 3.7.8, Entscheidung Nutzer 27.11.): Vorschlag, bestätigt wird je Kunde
+function hofVorziehKarte(tn) {
+  const k = hofVorziehKandidaten(S, tn); if (!k.length) return '';
+  const p = k.filter(c => c.passt).length;
+  return `<div class="karte"><h3 style="margin-top:0">Vor dem Hofladen: „früher möglich“ aus dem Rest erfüllen <span class="klein">${p ? p + (p === 1 ? ' passt' : ' passen') + ' ganz' : 'keine passt ganz'}</span></h3>
+    <p class="klein" style="margin:0 0 6px">Bestellungen mit Häkchen „früher möglich“ und Abholtermin in den nächsten 14 Tagen. „passt“ = reicht ganz aus dem, was in den Kisten übrig ist, ohne einer Bestellung dieses Tiers etwas wegzunehmen. Nur nach Rücksprache mit dem Kunden.</p>
+    <div class="tabwrap"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>Telefon</th><th>jetzt</th><th>Bestellung</th><th>hier</th><th></th></tr></thead><tbody>
+    ${k.map(c => `<tr class="${c.passt ? '' : 'grau'}"><td class="r fett">${esc(nrText(c.o))}</td><td class="fett">${esc(c.o.name)}</td><td>${c.o.tel ? `<a href="tel:${esc(c.o.tel)}">${esc(c.o.tel)}</a>` : ''}</td><td>${fmtDate(c.termin.datum)}</td>
+      <td class="klein" style="max-width:320px">${esc(kurzText(c.o))}${c.organe.length ? `<div class="warn">Innereien (${esc(c.organe.join(', '))}) bitte selbst prüfen</div>` : ''}</td>
+      <td>${c.passt ? '<span class="marke gruen">passt</span>' : `<span class="marke rot">passt nicht</span><div class="klein">${esc(c.grund)}</div>`}</td>
+      <td class="r">${c.passt ? `<button class="btn klein" data-act="hofvor" data-nr="${c.o.nr}">Jetzt erfüllen …</button>` : ''}</td></tr>`).join('')}</tbody></table></div></div>`;
 }
 function docHofladen(tn, L) {
   return { title: `Hofladen – Reste verpacken – ${tierAnzeige(S, tn)}`, sub: [abholTxt(tier(S, tn))],
@@ -475,7 +495,7 @@ function docHofladen(tn, L) {
 async function hofDialog(tn, r) {
   if (r.regel.r === 'kiste') { hofFertigSetzen(S, tn, r.key, !r.fertig); speichern(); meldung(r.fertig ? `${r.art}: wieder offen.` : `${r.art}: bleibt in Kiste ${r.kiste} ✓`); return true; }
   // seit 3.7.5 (Wunsch Nutzer): keine Kühlhaus-Kiste mehr wählen – Hofladen-Päckchen werden pauschal gesammelt, nur gewogen
-  const braten = r.art === BRATEN, stkFeld = r.regel.r === 'stk' || mitStueck(S, r.art) || r.art === OCHS;
+  const braten = r.art === BRATEN, teilListe = teilAuswahl(S, r.art), stkFeld = r.regel.r === 'stk' || mitStueck(S, r.art) || r.art === OCHS;
   let fehler = '', aenderung = false, teil = '';
   for (;;) {
     const L = hofListe(S, tn).find(x => x.key === r.key) || r;
@@ -487,7 +507,7 @@ async function hofDialog(tn, r) {
       <div class="zeile oben">
         <label class="f" style="width:190px">Gewicht in Gramm<input class="feld zahl" id="hg" inputmode="numeric" style="font-size:24px" placeholder="z. B. 1250"></label>
         ${stkFeld ? `<label class="f" style="width:120px">Stück${r.regel.r === 'stk' ? '' : ' (optional)'}<input class="feld zahl" id="hs" inputmode="numeric" style="font-size:24px" value="${r.regel.r === 'stk' ? fmtNum(r.regel.n) : r.art === OCHS ? '1' : ''}"></label>` : ''}
-        ${braten ? `<label class="f" style="width:220px">Teilstück (Pflicht)<select class="feld" id="ht">${opt('', 'bitte wählen …', !teil)}${bratenAuswahl(S).map(n => opt(n, n, n === teil)).join('')}</select></label>` : ''}
+        ${teilListe.length ? `<label class="f" style="width:220px">Teilstück${braten ? ' (Pflicht)' : ' (optional)'}<select class="feld" id="ht">${opt('', braten ? 'bitte wählen …' : '–', !teil)}${teilListe.map(n => opt(n, n, n === teil)).join('')}</select></label>` : ''}
       </div>
       <p class="klein" style="margin:8px 0 0">Päckchen kommen gesammelt in den Hofladen – keine Kiste nötig.</p>`,
       [{ k: 'x', t: 'Schließen' }, { k: 'fertig', t: L.fertig ? 'Zeile wieder öffnen' : 'Zeile fertig ✓' }, { k: 'ok', t: 'Päckchen speichern', cls: 'haupt' }]);
@@ -791,7 +811,7 @@ function tabKistenHand(tn, ziel) {
         return `<tr data-id="${k.id}">
         <td style="width:64px"><input class="feld zahl" inputmode="numeric" data-ch="hf" data-f="nr" value="${k.nr}" style="font-size:20px"></td>
         <td style="width:250px"><select class="feld" style="min-width:230px" data-ch="hf" data-f="art">${kistenArtOpt(k.art)}</select></td>
-        <td>${k.art === BRATEN ? `<select class="feld" style="min-width:190px" data-ch="hf" data-f="teil">${opt('', '– Teilstück –', !k.teil)}${bratenAuswahl(S).map(n => opt(n, n, n === k.teil)).join('')}</select>`
+        <td>${teilAuswahl(S, k.art).length ? `<select class="feld" style="min-width:190px" data-ch="hf" data-f="teil">${opt('', '– Teilstück –', !k.teil)}${teilAuswahl(S, k.art).map(n => opt(n, n, n === k.teil)).join('')}</select>`
           : sk ? `<button class="btn" data-act="hsonder" data-id="${k.id}">Sonderfälle wählen (${(k.sonder || []).length})</button>${c.teile ? `<div class="klein teile">${esc(c.teile)}</div>` : ''}` : ''}</td>
         <td style="min-width:170px"><input class="feld" data-ch="hf" data-f="info" value="${esc(k.info || '')}" placeholder="frei …"></td>
         <td style="width:150px">${sk ? '' : `<div class="zeile" style="gap:6px;flex-wrap:nowrap"><input class="feld zahl" inputmode="decimal" data-ch="hf" data-f="menge" value="${has(k.menge) ? fmtIn(k.menge, e === 'kg' ? 2 : 0) : ''}" placeholder="${e === 'kg' ? 'ca. kg' : 'Anzahl'}" style="width:84px;font-size:20px"><span>${e === 'kg' ? 'kg' : e === 'Btl' ? 'Btl' : 'Stk'}</span></div>`}

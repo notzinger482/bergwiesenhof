@@ -96,8 +96,11 @@ function hackPaketText(S, pakete, pakVak) {
 // ---------- Braten: gewachsene Stücke (Einstellungen → Ausbeute & Kisten) ----------
 const bratenTeile = S => Array.isArray(S.settings.bratenTeile) ? S.settings.bratenTeile.filter(x => x && x.name && num(x.stueck) > 0 && num(x.kg) > 0) : [];
 // Auswahl Teilstück (seit 3.7.7, Wunsch Nutzer): zusätzlich „Hals“ – nur zum Beschriften, zählt nicht zur Braten-Ausbeute
-const BRATEN_EXTRA = ['Hals'];
+const BRATEN_EXTRA = ['Hals', 'Wade (Hesse)'];
 const bratenAuswahl = S => { const n = bratenTeile(S).map(x => x.name); return n.concat(BRATEN_EXTRA.filter(e => !n.some(x => sameText(x, e)))); };
+// Teilstücke je Artikel zur Auswahl (Siedfleisch seit 3.7.8, Wunsch Nutzer: Brustkern, Zwerchrippe – nur Beschriftung, ohne Ausbeute)
+const SIED_TEILE = ['Brustkern', 'Zwerchrippe'];
+const teilAuswahl = (S, artName) => artName === BRATEN ? bratenAuswahl(S) : artName === 'Siedfleisch' ? SIED_TEILE : [];
 // kg je Stück nach Tiertyp (Bulle: eigene Werte, sonst Rind-Werte)
 const teilKgRef = (x, typ) => typ === 'Bulle' && num(x.kgBulle) > 0 ? num(x.kgBulle) : num(x.kg);
 // gemessener Wert aus dem Archiv (ab 3 Tieren) geht vor
@@ -286,7 +289,7 @@ function sonderOf(S, o) {
     }
   }
   for (const s of (o.sonder || [])) if (s && s.art) {
-    const teil = s.art === BRATEN && s.teil && bratenAuswahl(S).includes(s.teil) ? s.teil : '';
+    const teil = s.teil && teilAuswahl(S, s.art).includes(s.teil) ? s.teil : '';
     const nG = num(s.ganz) > 0 && ganzArt(S, s.art) && (s.art !== BRATEN || teil) ? Math.round(num(s.ganz)) : 0;
     let menge = has(s.menge) ? num(s.menge) : null, ca = false, soll = null;
     if (nG) {
@@ -1410,6 +1413,44 @@ function vorziehKandidaten(S, x) {
   }
   return out.sort((a, b) => (a.warte - b.warte) || a.vonDatum.localeCompare(b.vonDatum) || rangVon(a.o) - rangVon(b.o));
 }
+// Hofladen-Rest (seit 3.7.8, Wunsch Nutzer 27.11.): Bestellungen mit „früher möglich“, deren Abholtermin in den nächsten 14 Tagen liegt –
+// passt sie GANZ aus dem, was in den Kisten übrig ist, ohne einer Bestellung dieses Tiers etwas wegzunehmen? Nur Vorschlag, vorgezogen wird von Hand.
+function hofVorziehKandidaten(S, tierName, tage = 14) {
+  const t = tier(S, tierName); if (!t || t.archiv || !t.abhol) return [];
+  const gl = abholGruppe(S, t.name), heute = todayISO(), bis = isoOf(new Date(new Date((heute > t.abhol ? heute : t.abhol) + 'T12:00:00').getTime() + tage * 864e5));
+  const kand = S.bestellungen.filter(o => o.name && o.frueher && (o.status || 'offen') === 'offen' && !gl.includes(o.tier)).map(o => ({ o, y: terminVon(S, o) }))
+    .filter(c => c.y && c.y.datum > t.abhol && c.y.datum <= bis && !(tier(S, c.o.tier) && kommissionierBegonnen(S, [c.o.tier])))
+    .sort((a, b) => a.y.datum.localeCompare(b.y.datum) || rangVon(a.o) - rangVon(b.o));
+  if (!kand.length) return [];
+  const fehltVon = nr => { const k = kommissionierung(S, nr); return k ? k.rows.reduce((s, r) => s + num(r.fehlt), 0) : 0; };
+  const eigene = () => S.bestellungen.filter(o => o.name && gl.includes(o.tier) && (o.status || 'offen') !== 'abgeholt');
+  const basis = new Map(eigene().map(o => [o.nr, fehltVon(o.nr)]));
+  const knapp = () => { const z = handZuteilung(S, t.name), m = {}; for (const [k, v] of Object.entries(z.ueber || {})) m[k] = (m[k] || 0) + v; for (const [k, v] of Object.entries(z.fehlt || {})) m['f|' + k] = v; return m; };
+  const knappBasis = knapp();
+  return kand.map(({ o, y }) => {
+    const grund = [];
+    if (sonderMetzger(S, o).length) grund.push('Sonderwunsch beim Metzger');
+    const organe = [...ORGANE, OCHS].filter(n => qty(S, o, n) > 0);
+    let fehlt = [], stoert = false;
+    if (!grund.length) {
+      const alt = { tier: o.tier, termin: o.termin, rang: o.rang };
+      try {
+        zielSetzen(o, t.name); o.rang = nextRang(S);
+        const k = kommissionierung(S, o.nr);
+        fehlt = k ? k.rows.filter(r => r.fehlt > 0.05).map(r => `${r.art} −${fmtNum(r.fehlt, r.einheit === 'Stk' ? 0 : 1)} ${r.einheit === 'Stk' ? 'Stk' : 'kg'}`) : ['nicht berechenbar'];
+        stoert = [...basis].some(([nr, f]) => fehltVon(nr) > f + 0.05);
+        // Kisten von Hand: mehr zugeteilt als in den Kisten steht → reicht nicht aus dem Rest
+        const kn = knapp();
+        for (const [k, v] of Object.entries(kn)) if (v > num(knappBasis[k]) + 0.01) { const n = k.replace(/^f\|/, ''), stk = !k.startsWith('f|') && handStueckweise(S, n); if (!fehlt.some(x => x.startsWith(n + ' '))) fehlt.push(`${n} −${fmtNum(v - num(knappBasis[k]), stk ? 0 : 1)} ${stk ? 'Stk' : 'kg'}`); }
+      } finally {
+        o.tier = alt.tier; if (alt.termin === undefined) delete o.termin; else o.termin = alt.termin; if (alt.rang === undefined) delete o.rang; else o.rang = alt.rang;
+      }
+      if (fehlt.length) grund.push('reicht nicht: ' + fehlt.join(', '));
+      if (stoert) grund.push('nähme einer Bestellung dieses Tiers etwas weg (Genusspakete haben Vorrang)');
+    }
+    return { o, termin: y, passt: !grund.length, grund: grund.join(' · '), organe };
+  });
+}
 function vorziehen(S, nr, x) {
   const o = S.bestellungen.find(y => y.nr === nr); if (!o || !x) return null;
   const gl = terminTiere(S, x);
@@ -2342,7 +2383,7 @@ function handZeileRechnen(S, k, tierName) {
   if (k.art === SONDERKISTE) { k.einh = ''; k.kg = 0; delete k.teil; k.sonder = k.sonder || []; return k; }
   delete k.sonder;
   k.einh = handEinheit(S, k.art);
-  if (k.art !== BRATEN) delete k.teil;
+  if (k.teil && !teilAuswahl(S, k.art).length) delete k.teil;
   // Kistengewicht freiwillig (Wunsch Nutzer 26.11.): gewogen → k.kg = Gewicht, zählt (Hack/SK/FK) für die Ausbeute-Statistik
   const ist = num(k.kgIst) > 0 ? num(k.kgIst) : 0;
   if (k.art === OCHS) { k.kg = r3(handKg(S, k, tierName)); k.gew = ist || null; k.gewogen = !!ist; }
@@ -2390,7 +2431,7 @@ function kisteLeerSetzen(S, tierName, nr, artName, wert, bei) {
 function handZuteilung(S, tierName) {
   const ctx = kistenKontext(S, tierName), t = ctx.t, ords = ctx.ords;
   const rows = ctx.rows.filter(k => k.hand && k.art !== SONDERKISTE);
-  const proNr = {}, proZeile = {}, fehlt = {};
+  const proNr = {}, proZeile = {}, fehlt = {}, ueber = {}; // ueber: mehr zugeteilt als in den Kisten eingetragen (Stk bzw. kg)
   rows.forEach(k => { proZeile[k.id] = { kg: 0, stk: 0 }; });
   const pakGes = ords.reduce((s, o) => s + num(o.pakete), 0);
   for (const a of S.artikel) {
@@ -2432,7 +2473,7 @@ function handZuteilung(S, tierName) {
       else {
         for (const k of kand) { if (rest <= 1e-9) break; const f = frei(k); if (f > 1e-9) nimm(k, Math.min(f, rest)); }
         // mehr bestellt als eingetragen: der Rest kommt aus der letzten Kiste (Schätzung zu knapp) – erst „leer“ schiebt weiter
-        if (rest > 1e-9 && kand.length) nimm(kand[kand.length - 1], rest);
+        if (rest > 1e-9 && kand.length) { ueber[a.name] = (ueber[a.name] || 0) + rest; nimm(kand[kand.length - 1], rest); }
       }
       if (rest > 1e-9) fehlt[a.name] = (fehlt[a.name] || 0) + (stw && b.stk > 0 ? b.kg * rest / b.stk : rest);
       const L = ((proNr[b.o.nr] = proNr[b.o.nr] || {})[a.name] = proNr[b.o.nr][a.name] || []);
@@ -2445,7 +2486,7 @@ function handZuteilung(S, tierName) {
       }
     }
   }
-  return { proNr, proZeile, fehlt };
+  return { proNr, proZeile, fehlt, ueber };
 }
 // Summen je Artikel für die Übersicht „Kisten füllen“: eingetragen vs. gebraucht
 function handSummen(S, tierName) {

@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.7.7';
+const APP_VERSION = '3.7.8';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '', archiv: false }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -579,7 +579,7 @@ function viewBestellung(nr, q, vorlage) {
     // gespeicherte Sonderwünsche: angezeigte Menge übernehmen, sonst ginge sie beim Ändern von Text/Artikel verloren
     if (s.eingabe === undefined) s.eingabe = ($('[data-f=menge]', el.closest('[data-si]')) || {}).value || '';
     let neuZeichnen = false;
-    if (f === 'art') { s.art = el.value; if (!ganzArt(S, s.art)) { if (s.ganz) s.eingabe = ''; s.ganz = 0; } if (s.art !== BRATEN) s.teil = ''; if (s.art !== HACK) s.sorte = ''; neuZeichnen = true; }
+    if (f === 'art') { s.art = el.value; if (!ganzArt(S, s.art)) { if (s.ganz) s.eingabe = ''; s.ganz = 0; } if (!teilAuswahl(S, s.art).includes(s.teil)) s.teil = ''; if (s.art !== HACK) s.sorte = ''; neuZeichnen = true; }
     else if (f === 'ganz') { s.ganz = el.checked ? Math.max(1, Math.round(num(s.ganz))) : 0; s.eingabe = s.ganz ? String(s.ganz) : ''; neuZeichnen = true; }
     else if (f === 'menge') { s.eingabe = el.value; if (s.ganz) s.ganz = Math.max(0, Math.round(num(el.value))); }
     else if (f === 'metzger') { if (el.checked) delete s.metzger; else s.metzger = false; }
@@ -669,8 +669,8 @@ function sonderZeile(s, i) {
     <input class="feld zahl" style="width:92px" inputmode="decimal" data-in="sonder" data-f="menge" value="${esc(sonderAnzeige(s))}" placeholder="${num(s.ganz) > 0 ? 'Anzahl' : 'Menge'}">
     <span class="klein sonder-eh" style="width:26px">${num(s.ganz) > 0 ? 'Stk' : sonderEinheit(a)}</span>
     <button class="btn klein rot" data-act="sonderWeg" data-i="${i}">✕</button></div>
-    ${s.art === BRATEN && bratenTeile(S).length || ganzArt(S, s.art) ? `<div class="zeile" style="flex-wrap:nowrap;margin-bottom:6px;gap:12px;align-items:center">
-    ${s.art === BRATEN ? `<select class="feld" style="flex:1;min-width:0" data-in="sonder" data-f="teil" title="Teilstück für den Metzger">${opt('', 'Teilstück egal', !s.teil)}${bratenAuswahl(S).map(n => opt(n, n, s.teil === n)).join('')}</select>` : ''}
+    ${teilAuswahl(S, s.art).length || ganzArt(S, s.art) ? `<div class="zeile" style="flex-wrap:nowrap;margin-bottom:6px;gap:12px;align-items:center">
+    ${teilAuswahl(S, s.art).length ? `<select class="feld" style="flex:1;min-width:0" data-in="sonder" data-f="teil" title="Teilstück für den Metzger">${opt('', 'Teilstück egal', !s.teil)}${teilAuswahl(S, s.art).map(n => opt(n, n, s.teil === n)).join('')}</select>` : ''}
     ${ganzArt(S, s.art) ? `<label style="white-space:nowrap;flex:none;display:inline-flex;align-items:center;gap:6px;height:46px;padding-right:4px"><input type="checkbox" style="width:26px;height:26px;accent-color:var(--gruen-d)" data-in="sonder" data-f="ganz"${num(s.ganz) > 0 ? ' checked' : ''}> ganz</label>` : ''}</div>
     ${num(s.ganz) > 0 ? `<div class="klein" style="margin:-2px 0 6px;color:#777">${(() => { const g = ganzStueckKg(S, (ui.o || {}).tier, s.art, s.teil); return g ? `ganzes Stück je ca. ${fmtNum(g.kg, 1)} kg (mind. ${fmtNum(g.min, 1)} kg) – rechts die Menge passend eintragen` : 'bitte das Teilstück wählen'; })()}</div>` : ''}` : ''}
     <div class="zeile" style="flex-wrap:nowrap">
@@ -688,7 +688,7 @@ async function bestellungSpeichern(o) {
   const alt0 = o.nr ? S.bestellungen.find(x => x.nr === o.nr) : null;
   if (alt0 && (alt0.status || 'offen') !== 'offen' && (o.status || 'offen') === 'offen' && !(await frage('Status zurücksetzen', `Nr. ${nrText(o)} war <b>${esc(alt0.status)}</b> und wird wieder <b>offen</b>.<br><span class="klein">Lagerplatz${alt0.status === 'abgeholt' ? ', Abholdatum und „Bezahlung offen“' : ''} werden dabei gelöscht.</span>`, 'Auf offen setzen', 'Abbrechen', 'rot'))) return;
   // aufräumen
-  o.sonder = (o.sonder || []).filter(s => s.art).map(s => ({ art: s.art, menge: has(s.menge) ? s.menge : null, wunsch: (s.wunsch || '').trim(), ...(s.art === HACK && (s.sorte === 'fettig' || s.sorte === 'mager') ? { sorte: s.sorte } : {}), ...(s.art === BRATEN && s.teil ? { teil: s.teil } : {}), ...(num(s.ganz) > 0 && ganzArt(S, s.art) ? { ganz: Math.round(num(s.ganz)) } : {}), ...(s.metzger === false ? { metzger: false } : {}) }));
+  o.sonder = (o.sonder || []).filter(s => s.art).map(s => ({ art: s.art, menge: has(s.menge) ? s.menge : null, wunsch: (s.wunsch || '').trim(), ...(s.art === HACK && (s.sorte === 'fettig' || s.sorte === 'mager') ? { sorte: s.sorte } : {}), ...(s.teil && teilAuswahl(S, s.art).length ? { teil: s.teil } : {}), ...(num(s.ganz) > 0 && ganzArt(S, s.art) ? { ganz: Math.round(num(s.ganz)) } : {}), ...(s.metzger === false ? { metzger: false } : {}) }));
   for (const [k, p] of Object.entries(o.pos)) {
     const a = art(S, k);
     if (!a) { delete o.pos[k]; continue; }
