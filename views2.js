@@ -487,7 +487,7 @@ async function hofDialog(tn, r) {
       <div class="zeile oben">
         <label class="f" style="width:190px">Gewicht in Gramm<input class="feld zahl" id="hg" inputmode="numeric" style="font-size:24px" placeholder="z. B. 1250"></label>
         ${stkFeld ? `<label class="f" style="width:120px">Stück${r.regel.r === 'stk' ? '' : ' (optional)'}<input class="feld zahl" id="hs" inputmode="numeric" style="font-size:24px" value="${r.regel.r === 'stk' ? fmtNum(r.regel.n) : r.art === OCHS ? '1' : ''}"></label>` : ''}
-        ${braten ? `<label class="f" style="width:220px">Teilstück (Pflicht)<select class="feld" id="ht">${opt('', 'bitte wählen …', !teil)}${bratenTeile(S).map(x => opt(x.name, x.name, x.name === teil)).join('')}</select></label>` : ''}
+        ${braten ? `<label class="f" style="width:220px">Teilstück (Pflicht)<select class="feld" id="ht">${opt('', 'bitte wählen …', !teil)}${bratenAuswahl(S).map(n => opt(n, n, n === teil)).join('')}</select></label>` : ''}
       </div>
       <p class="klein" style="margin:8px 0 0">Päckchen kommen gesammelt in den Hofladen – keine Kiste nötig.</p>`,
       [{ k: 'x', t: 'Schließen' }, { k: 'fertig', t: L.fertig ? 'Zeile wieder öffnen' : 'Zeile fertig ✓' }, { k: 'ok', t: 'Päckchen speichern', cls: 'haupt' }]);
@@ -791,7 +791,7 @@ function tabKistenHand(tn, ziel) {
         return `<tr data-id="${k.id}">
         <td style="width:64px"><input class="feld zahl" inputmode="numeric" data-ch="hf" data-f="nr" value="${k.nr}" style="font-size:20px"></td>
         <td style="width:250px"><select class="feld" style="min-width:230px" data-ch="hf" data-f="art">${kistenArtOpt(k.art)}</select></td>
-        <td>${k.art === BRATEN ? `<select class="feld" style="min-width:190px" data-ch="hf" data-f="teil">${opt('', '– Teilstück –', !k.teil)}${bratenTeile(S).map(x => opt(x.name, x.name, x.name === k.teil)).join('')}</select>`
+        <td>${k.art === BRATEN ? `<select class="feld" style="min-width:190px" data-ch="hf" data-f="teil">${opt('', '– Teilstück –', !k.teil)}${bratenAuswahl(S).map(n => opt(n, n, n === k.teil)).join('')}</select>`
           : sk ? `<button class="btn" data-act="hsonder" data-id="${k.id}">Sonderfälle wählen (${(k.sonder || []).length})</button>${c.teile ? `<div class="klein teile">${esc(c.teile)}</div>` : ''}` : ''}</td>
         <td style="min-width:170px"><input class="feld" data-ch="hf" data-f="info" value="${esc(k.info || '')}" placeholder="frei …"></td>
         <td style="width:150px">${sk ? '' : `<div class="zeile" style="gap:6px;flex-wrap:nowrap"><input class="feld zahl" inputmode="decimal" data-ch="hf" data-f="menge" value="${has(k.menge) ? fmtIn(k.menge, e === 'kg' ? 2 : 0) : ''}" placeholder="${e === 'kg' ? 'ca. kg' : 'Anzahl'}" style="width:84px;font-size:20px"><span>${e === 'kg' ? 'kg' : e === 'Btl' ? 'Btl' : 'Stk'}</span></div>`}

@@ -1,7 +1,7 @@
 // Bestellsystem Bergwiesenhof – Oberfläche (Teil 1: Grundgerüst, Start, Bestellung, Listen)
 'use strict';
 
-const APP_VERSION = '3.7.6';
+const APP_VERSION = '3.7.7';
 let S = null;                 // Datenstand
 const ui = { acts: {}, ins: {}, formDirty: false, filter: { q: '', tier: '', status: '', archiv: false }, kfilter: '', tierWahl: '', ticks: {}, letzteNr: null };
 const $ = (s, el = document) => el.querySelector(s);
@@ -670,7 +670,7 @@ function sonderZeile(s, i) {
     <span class="klein sonder-eh" style="width:26px">${num(s.ganz) > 0 ? 'Stk' : sonderEinheit(a)}</span>
     <button class="btn klein rot" data-act="sonderWeg" data-i="${i}">✕</button></div>
     ${s.art === BRATEN && bratenTeile(S).length || ganzArt(S, s.art) ? `<div class="zeile" style="flex-wrap:nowrap;margin-bottom:6px;gap:12px;align-items:center">
-    ${s.art === BRATEN ? `<select class="feld" style="flex:1;min-width:0" data-in="sonder" data-f="teil" title="Teilstück für den Metzger">${opt('', 'Teilstück egal', !s.teil)}${bratenTeile(S).map(x => opt(x.name, x.name, s.teil === x.name)).join('')}</select>` : ''}
+    ${s.art === BRATEN ? `<select class="feld" style="flex:1;min-width:0" data-in="sonder" data-f="teil" title="Teilstück für den Metzger">${opt('', 'Teilstück egal', !s.teil)}${bratenAuswahl(S).map(n => opt(n, n, s.teil === n)).join('')}</select>` : ''}
     ${ganzArt(S, s.art) ? `<label style="white-space:nowrap;flex:none;display:inline-flex;align-items:center;gap:6px;height:46px;padding-right:4px"><input type="checkbox" style="width:26px;height:26px;accent-color:var(--gruen-d)" data-in="sonder" data-f="ganz"${num(s.ganz) > 0 ? ' checked' : ''}> ganz</label>` : ''}</div>
     ${num(s.ganz) > 0 ? `<div class="klein" style="margin:-2px 0 6px;color:#777">${(() => { const g = ganzStueckKg(S, (ui.o || {}).tier, s.art, s.teil); return g ? `ganzes Stück je ca. ${fmtNum(g.kg, 1)} kg (mind. ${fmtNum(g.min, 1)} kg) – rechts die Menge passend eintragen` : 'bitte das Teilstück wählen'; })()}</div>` : ''}` : ''}
     <div class="zeile" style="flex-wrap:nowrap">

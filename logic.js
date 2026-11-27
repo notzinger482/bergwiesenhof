@@ -95,6 +95,9 @@ function hackPaketText(S, pakete, pakVak) {
 }
 // ---------- Braten: gewachsene Stücke (Einstellungen → Ausbeute & Kisten) ----------
 const bratenTeile = S => Array.isArray(S.settings.bratenTeile) ? S.settings.bratenTeile.filter(x => x && x.name && num(x.stueck) > 0 && num(x.kg) > 0) : [];
+// Auswahl Teilstück (seit 3.7.7, Wunsch Nutzer): zusätzlich „Hals“ – nur zum Beschriften, zählt nicht zur Braten-Ausbeute
+const BRATEN_EXTRA = ['Hals'];
+const bratenAuswahl = S => { const n = bratenTeile(S).map(x => x.name); return n.concat(BRATEN_EXTRA.filter(e => !n.some(x => sameText(x, e)))); };
 // kg je Stück nach Tiertyp (Bulle: eigene Werte, sonst Rind-Werte)
 const teilKgRef = (x, typ) => typ === 'Bulle' && num(x.kgBulle) > 0 ? num(x.kgBulle) : num(x.kg);
 // gemessener Wert aus dem Archiv (ab 3 Tieren) geht vor
@@ -283,7 +286,7 @@ function sonderOf(S, o) {
     }
   }
   for (const s of (o.sonder || [])) if (s && s.art) {
-    const teil = s.art === BRATEN && s.teil && bratenTeile(S).some(x => x.name === s.teil) ? s.teil : '';
+    const teil = s.art === BRATEN && s.teil && bratenAuswahl(S).includes(s.teil) ? s.teil : '';
     const nG = num(s.ganz) > 0 && ganzArt(S, s.art) && (s.art !== BRATEN || teil) ? Math.round(num(s.ganz)) : 0;
     let menge = has(s.menge) ? num(s.menge) : null, ca = false, soll = null;
     if (nG) {
