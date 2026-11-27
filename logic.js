@@ -1638,6 +1638,26 @@ function mengenpruefung(S, tierName) {
   return { tier: t, info: tierInfo(S, t), rows, bilanz: bil, summen: sum };
 }
 
+// Mengenprüfung im Detail (seit 3.7.6, Wunsch Nutzer): alle Bestellungen zu einem Teilstück – wie bestellt, kg einzeln/aus Paketen, Fehlmenge
+function mengeArtikelDetail(S, tierName, artName) {
+  const t = topfTier(S, tierName); if (!t) return null;
+  const ords = ordersOfTopf(S, t), bil = fleischBilanz(S, t, ords), a = art(S, artName), pk = paketKgArt(S, artName);
+  const rows = [];
+  for (const o of ords) {
+    const q = qty(S, o, artName), einzel = q + sortenAdj(S, o, artName) + ganzMehr(S, o, artName), ausPak = num(o.pakete) * pk;
+    const sonder = sonderMetzger(S, o).filter(x => x.art === artName);
+    if (!(einzel > 0.0005) && !(ausPak > 0.0005) && !sonder.length) continue;
+    const po = q > 0 ? portionOf(S, o, artName) : null;
+    let wie = '';
+    if (q > 0) wie = po && po.stk > 0 ? `${fmtNum(po.stk)} Stk${po.pack ? ' (' + po.text + ')' : ''}` : `${fmtNum(q, 3)} ${a && a.einheit === 'Stk' ? 'Stk' : 'kg'}${po ? ' (' + po.text + ')' : ''}`;
+    if (num(o.pakete) > 0 && pk > 0) wie += (wie ? ' + ' : '') + `${fmtNum(o.pakete)} Genusspaket${num(o.pakete) === 1 ? '' : 'e'}`;
+    const fehlt = num((bil.fehlt[o.nr] || {})[artName]);
+    rows.push({ nr: o.nr, nrT: nrText(o), name: o.name, tier: o.tier, status: o.status || 'offen', wie, einzel, ausPak, gesamt: einzel + ausPak,
+      sonder: sonder.map(x => x.wunsch || '').filter(Boolean).join('; '), fehlt, ueberbelegt: !!o.ueberbelegt });
+  }
+  return { tier: t, art: artName, rows, summe: rows.reduce((s, r) => s + r.gesamt, 0) };
+}
+
 // ---------- Metzgerauftrag ----------
 function metzgerauftrag(S, tierName, hackKisteKg) {
   const t = topfTier(S, tierName);

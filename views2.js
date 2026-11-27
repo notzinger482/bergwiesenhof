@@ -57,7 +57,7 @@ function viewTermine() {
   titel('Abholtermine');
   const heute = todayISO(), alt = isoOf(new Date(Date.now() - 14 * 864e5));
   const liste = termine(S).filter(x => x.datum >= alt || ordersOfTermin(S, x).some(o => (o.status || 'offen') === 'offen'));
-  const zus = (x, f) => x[f] ? `<span class="marke gruen">${esc(zusageText(x, f))}</span>` : '<span class="marke gelb">offen</span>';
+  const zus = (x, f) => x[f] ? '<span class="marke gruen">✓</span>' : '<span class="marke gelb">offen</span>';
   const zeile = x => {
     if (terminAbgeschlossen(S, x)) {
       const at = terminArchivTiere(S, x), ob = terminArchivBestellungen(S, x);
@@ -291,6 +291,23 @@ function stkCa(r) {
   const frei = r.frei >= 0 ? n(r.frei) : -Math.ceil(-r.frei * 1000 / g - 1e-9);
   return `${n(r.ausbeuteStd)} / ${frei < 0 ? '−' + (-frei) : frei}${eh}`;
 }
+// Mengenprüfung (seit 3.7.6, Wunsch Nutzer): Teilstück antippen → alle Bestellungen dazu (gerade bei Überbelegung)
+function mengeZeilenKlick(ziel, tn, mp) {
+  const tab = ziel.querySelector('table.doc-tab'); if (!tab || !mp) return;
+  tab.querySelectorAll('tbody tr').forEach((tr, i) => { const r = mp.rows[i]; if (!r) return; tr.classList.add('klickbar'); tr.title = 'Antippen: alle Bestellungen mit ' + r.art; tr.addEventListener('click', () => mengeArtikelDialog(tn, r)); });
+}
+async function mengeArtikelDialog(tn, r) {
+  const d = mengeArtikelDetail(S, tn, r.art); if (!d) return;
+  const zeilen = d.rows.slice().sort((a, b) => (b.fehlt > 0) - (a.fehlt > 0) || b.gesamt - a.gesamt || a.nr - b.nr);
+  const html = `<p>Ausbeute ca. <b>${fmtNum(r.ausbeuteStd, 1)} kg</b> · bestellt <b>${fmtNum(r.gesamt, 1)} kg</b> (einzeln ${fmtNum(r.einzel, 1)}, in Paketen ${fmtNum(r.ausPak, 1)}) · ${r.frei < 0 ? `<span class="warn">fehlt ${fmtNum(-r.frei, 1)} kg</span>` : 'frei ' + fmtNum(r.frei, 1) + ' kg'}</p>
+    ${zeilen.length ? `<div class="tabwrap" style="max-height:60vh;overflow:auto"><table class="tab"><thead><tr><th class="r">Nr.</th><th>Name</th><th>wie bestellt</th><th class="r">einzeln kg</th><th class="r">aus Paketen kg</th><th class="r">gesamt kg</th><th>Hinweis</th></tr></thead><tbody>
+    ${zeilen.map(x => `<tr class="${x.fehlt > 0 ? 'rot' : ''}"><td class="r"><a href="javascript:void 0" data-k="nr:${x.nr}">${esc(x.nrT)}</a></td><td>${esc(x.name)}${d.tier.glieder ? ` <span class="klein">(${esc(x.tier)})</span>` : ''}</td><td>${esc(x.wie)}</td><td class="r">${x.einzel > 0.0005 ? fmtNum(x.einzel, 2) : ''}</td><td class="r">${x.ausPak > 0.0005 ? fmtNum(x.ausPak, 2) : ''}</td><td class="r"><b>${fmtNum(x.gesamt, 2)}</b></td>
+      <td class="klein">${[x.fehlt > 0 ? `<b class="warn">fehlt ${fehlKgText(x.fehlt)}</b>` : '', x.ueberbelegt ? 'bewusst überbelegt' : '', x.sonder ? 'Sonderwunsch: ' + esc(x.sonder) : '', x.status !== 'offen' ? esc(x.status) : ''].filter(Boolean).join(' · ')}</td></tr>`).join('')}
+    </tbody></table></div>` : '<p class="klein">Keine Bestellung mit diesem Teilstück.</p>'}
+    <p class="klein">Reihenfolge: Bestellungen mit Fehlmenge zuerst, dann nach Menge. Nr. antippen öffnet die Bestellung.</p>`;
+  const k = await dialog(`${r.art} – ${zeilen.length} Bestellung${zeilen.length === 1 ? '' : 'en'}`, html, [{ k: 'x', t: 'Schließen', cls: 'haupt' }]);
+  if (k && k.startsWith('nr:')) gehe('#/bestellung/' + k.slice(3));
+}
 function docMenge(mp) {
   const t = mp.tier, i = mp.info;
   return { title: `Mengenprüfung – ${t.name}`, sub: [`${t.typ} · ${fmtNum(i.sg)} kg SG · ${abholTxt(t)}`, `Pakete bestellt ${fmtNum(i.pakete)} / frei ${fmtNum(i.frei)} · ${i.anzahl} Bestellungen · reicht nicht: ${i.reichtNicht}`],
@@ -515,7 +532,7 @@ function viewSchlachttag(tab, q) {
     ui.acts.teilen = async () => { const r = await docTeilen(doc, doc.title); if (r === 'gespeichert') meldung('Bild gespeichert (Teilen wird hier nicht unterstützt).'); };
     ui.acts.drucken = () => docDrucken(doc);
   };
-  if (tab === 'menge') { const xK = tier(S, tn) && tier(S, tn).abhol ? terminAm(S, tier(S, tn).abhol) : null; zeige(docMenge(mengenpruefung(S, tn)), '', kandidatenKarte(xK)); kandidatenAktionen(xK); }
+  if (tab === 'menge') { const xK = tier(S, tn) && tier(S, tn).abhol ? terminAm(S, tier(S, tn).abhol) : null; const mp = mengenpruefung(S, tn); zeige(docMenge(mp), '', kandidatenKarte(xK)); kandidatenAktionen(xK); mengeZeilenKlick(ziel, tn, mp); }
   else if (tab === 'metzger') tabMetzger(tn, ziel, zeige);
   else if (tab === 'kisten' || tab === 'packplan') tabKisten(tn, ziel);
   else if (tab === 'hack') { const hz = hackZettel(S, tn); zeige(docHack(hz)); abhakenAn(ziel, { hack: hz.rows.map(r => r.nr).concat(hz.hof.text ? ['hof'] : []) }); }
