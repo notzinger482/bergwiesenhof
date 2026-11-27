@@ -283,6 +283,7 @@ const DEFAULTS = {
   "kommToleranz": 35,
   "kommTol35": true,
   "autoH375": true,
+  "druckBeimPacken": true,
   "lagerKuehlhaus": 30,
   "kisteMax": 20,
   "kisteAusnahme": 25,

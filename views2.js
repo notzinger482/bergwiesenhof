@@ -1104,6 +1104,8 @@ function viewKommissionierung(q) {
     if (!(await lagerDialog(o))) return;
     const naechste = liste.slice(idx + 1).find(istOffen) || liste.slice(0, idx).find(istOffen) || liste[idx + 1];
     meldung(`Nr. ${nrText(o)} gepackt → ${lagerText(o)}.`);
+    // seit 3.7.9 (Wunsch Nutzer): Zettel der Bestellung gleich drucken (A4, Druckfenster des Tablets – ganz ohne Fenster geht im Browser nicht)
+    if (S.settings.druckBeimPacken !== false) docDrucken(docPick(kommissionierung(S, o.nr)));
     if (naechste) gehe('#/kommissionierung?nr=' + naechste.nr); else if (!ohneKisten) gehe('#/kommissionierung?nr=hof'); else render();
   };
   ui.acts.teilen = async () => { const d = docPick(ko); const r = await docTeilen(d, d.title); if (r === 'gespeichert') meldung('Bild gespeichert.'); };
@@ -1401,7 +1403,7 @@ function tabAusbeute(z) {
       <td class="klein r" style="width:190px">${kref[a.name] ? `gewogen Ø <b>${fmtNum(kref[a.name].g, 0)} g</b> (${fmtNum(kref[a.name].stk)} Stk)${a.name !== OCHS ? ` <button class="btn klein" data-act="egref" data-i="${i}" title="Referenz aus dem Kommissionieren als Einzelgewicht übernehmen">übernehmen</button>` : ''}` : ''}</td></tr>`; }).join('')}</tbody></table></div>
     <p class="klein" style="margin:6px 0 0">„gewogen Ø“ = Mittelwert aus dem Kommissionieren (Ist-Gewicht ÷ Stückzahl, Bestellungen und Hofladen-Päckchen).</p></div>
    <div class="karte"><h3 style="margin-top:0">Kommissionieren &amp; Hofladen verpacken</h3><div class="zeile oben">
-    ${feld('kommToleranz', 'Toleranz Ist zu Soll ± (%) – darüber Vermerk nötig')}${feld('lagerKuehlhaus', 'Kühlhaus: Anzahl Kisten (Hofladen)')}</div>
+    ${feld('kommToleranz', 'Toleranz Ist zu Soll ± (%) – darüber Vermerk nötig')}<label class="zeile" style="gap:10px;align-items:center;margin-top:22px"><input type="checkbox" style="width:26px;height:26px;accent-color:var(--gruen-d)" data-ch="stja" data-f="druckBeimPacken"${st.druckBeimPacken !== false ? ' checked' : ''}> <span><b>Beim „Gepackt ✓ und weiter“ den Zettel drucken</b><br><span class="klein">öffnet den Druck der Bestellung (A4) – im Druckfenster nur noch „Drucken“ tippen</span></span></label></div>
     <p class="klein">So werden die Reste für den Hofladen verpackt (je Päckchen, vakuumiert; jedes Päckchen wird gewogen):</p>
     <div class="tabwrap" style="max-width:760px"><table class="tab"><tbody>${hofArten.map(n => { const g = hofRegel(S, n); return `<tr data-art="${esc(n)}"><td class="fett">${esc(n)}</td>
       <td style="width:190px"><select class="feld" data-ch="hofregel" data-f="r">${[['stk', 'je … Stück'], ['kg', 'je … kg'], ['ganz', 'ganz lassen'], ['halb', 'ganze Stücke halbieren'], ['kiste', 'bleibt in der Kiste']].map(([v, t]) => opt(v, t, g.r === v)).join('')}</select></td>
@@ -1418,6 +1420,7 @@ function tabAusbeute(z) {
     ${feld('leberKg', 'Leber ca. (kg)')}${feld('nierenStk', 'Nieren ca. (Stk)')}${feld('herzStk', 'Herz ca. (Stk)')}${feld('zungeStk', 'Zunge ca. (Stk)')}${feld('baeckleStk', 'Bäckle ca. (Stk)')}${feld('leberPortionG', 'Leber-Rest vakuumiert à (g)')}</div></div>
    <div class="karte"><h3 style="margin-top:0">Ochsenschwanz</h3><div class="zeile oben">${feld('ochsStk', 'Ochsenschwanz je Tier (Stk)')}<p class="klein" style="max-width:420px;margin:22px 0 0">Kein Innereien-Artikel: kommt immer zu den Beinscheiben/Waden in die Kiste und wird gewogen. Mit Häkchen „am Stück“ bestellt → bleibt ganz (Zeile im Metzgerauftrag), sonst schneidet der Metzger ihn wie gewohnt. Verkauf immer als ganzer Schwanz an eine Bestellung, Preis nach kg; nicht bestellte gehen beim Abschluss an den Hofladen.</p></div></div>`;
   ui.acts.st = el => { S.settings[el.dataset.f] = num(el.value); speichern(); render(); };
+  ui.acts.stja = el => { S.settings[el.dataset.f] = el.checked; speichern(); meldung('Gespeichert.'); };
   ui.acts.egref = el => { const a = S.artikel[+el.dataset.i]; const r = kref[a.name]; if (!r) return; a.stueckG = Math.round(r.g); speichern(); meldung(`${a.name}: Einzelgewicht ${fmtNum(a.stueckG)} g übernommen.`); render(); };
   ui.acts.hofregel = el => {
     const n = el.closest('tr').dataset.art, f = el.dataset.f; S.settings.hofPack = S.settings.hofPack || {};
